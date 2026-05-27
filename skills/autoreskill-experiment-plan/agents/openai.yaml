@@ -1,0 +1,3 @@
+display_name: Experiment Plan
+short_description: Creates innovation and prelaunch experiment packets.
+default_prompt: Convert a PaperNexus-backed idea into a bounded experiment plan.

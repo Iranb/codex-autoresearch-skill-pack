@@ -1,0 +1,3 @@
+display_name: Research Controller
+short_description: Runs PaperNexus candidate graph, selection, and design review.
+default_prompt: Use PaperNexus research_controller when available, otherwise fall back cleanly.

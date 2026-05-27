@@ -1,0 +1,3 @@
+display_name: Implement Experiment
+short_description: Builds comparable baseline/proposed experiment code.
+default_prompt: Implement the reviewed experiment bundle and dry-run it.

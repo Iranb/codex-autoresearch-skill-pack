@@ -1,0 +1,3 @@
+display_name: AutoResearch Memory
+short_description: Stores project memory, decisions, and evidence ids.
+default_prompt: Maintain .autoreskill memory and evidence cart for child-agent handoffs.

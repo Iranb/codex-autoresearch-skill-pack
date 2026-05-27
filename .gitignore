@@ -1,0 +1,45 @@
+.DS_Store
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Secrets and local credentials
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa
+id_ed25519
+known_hosts
+
+# AutoResearch runtime state and generated outputs
+.autoreskill/
+.openclaw-research/
+PROJECT_MANIFEST.json
+workflow-*.json
+workflow-*.jsonl
+REMOTE_RUN.json
+EXPERIMENT_LEDGER.json
+*.log
+
+# Paper and experiment build products
+*.aux
+*.bbl
+*.blg
+*.fdb_latexmk
+*.fls
+*.out
+*.synctex.gz
+*.pdf
+outputs/
+runs/
+checkpoints/
+wandb/
+mlruns/
+
+# Temporary scan outputs
+secret-scan*.txt
+secret-scan*.json

@@ -1,0 +1,3 @@
+display_name: PaperNexus Innovation
+short_description: Retrieves PaperNexus evidence for novelty, baselines, and risks.
+default_prompt: Build graph-grounded innovation packets with PaperNexus evidence.

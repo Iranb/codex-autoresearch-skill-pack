@@ -1,0 +1,3 @@
+display_name: Paper Write
+short_description: Drafts manuscript sections from validated evidence.
+default_prompt: Write an evidence-bound manuscript and NMI package materials.

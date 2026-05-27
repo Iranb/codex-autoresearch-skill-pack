@@ -1,0 +1,3 @@
+display_name: AutoResearch Guard
+short_description: Drives /goal state, stage gates, handoffs, and recovery.
+default_prompt: Use /goal to initialize, resume, or advance a portable AutoResearch workflow with bounded autopilot.

@@ -1,0 +1,3 @@
+display_name: Review Gate
+short_description: Runs isolated review, citation checks, and package readiness.
+default_prompt: Review the manuscript and close or downgrade blocking issues.

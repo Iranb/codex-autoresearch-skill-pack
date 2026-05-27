@@ -1,0 +1,3 @@
+display_name: Literature Review
+short_description: Produces SOTA matrix, gaps, and citation queue.
+default_prompt: Turn PaperNexus evidence into SOTA, gaps, and citation anchors.

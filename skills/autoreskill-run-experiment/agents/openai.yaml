@@ -1,0 +1,3 @@
+display_name: Run Experiment
+short_description: Launches, monitors, and reconciles bounded experiments.
+default_prompt: Run the dry-run-passed experiment within policy and record proof.

@@ -1,0 +1,3 @@
+display_name: AutoResearch Autopilot
+short_description: Converts blockers into repairs, async waits, downgrades, or stops.
+default_prompt: Keep the /goal workflow moving under a bounded full-auto policy.

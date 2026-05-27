@@ -1,0 +1,3 @@
+display_name: Analyze Results
+short_description: Builds claim-evidence matrix, verdicts, and reports.
+default_prompt: Analyze experiment outputs and produce evidence-bound claims.
