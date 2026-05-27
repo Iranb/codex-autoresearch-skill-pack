@@ -184,9 +184,9 @@ def execution_spec(stage: str, state: dict[str, Any], contract: dict[str, Any]) 
             "outputs": [".autoreskill/papernexus/research_material_pack.json"],
         },
         "ideation": {
-            "skill": "autoreskill-papernexus-innovation",
+            "skill": "autoreskill-ideation-panel",
             "role": "Researcher",
-            "goal": "Generate and validate PaperNexus-backed candidate ideas with negative evidence and falsifiers.",
+            "goal": "Use PaperNexus-backed evidence to generate and validate candidate ideas, including the 12-15 item experiment optimization idea pool, with negative evidence and falsifiers.",
             "mcp_calls": [
                 {"tool": "agent_materials", "args": {"operation": "negative_evidence_pack", "corpus": corpus}},
                 {"tool": "idea_catalyst", "args": {"mode": "hybrid", "outputMode": "packet_bundle", "corpus": corpus}},
@@ -194,8 +194,12 @@ def execution_spec(stage: str, state: dict[str, Any], contract: dict[str, Any]) 
             "capture": [
                 "python ~/.codex/skills/autoreskill-papernexus-innovation/scripts/papernexus_artifact_capture.py --project <project-root> --kind negative_evidence_pack --input <mcp-result.json> --stage ideation --source papernexus-remote.agent_materials --tag ideation",
                 "python ~/.codex/skills/autoreskill-papernexus-innovation/scripts/papernexus_artifact_capture.py --project <project-root> --kind graph_ideation_packet --input <mcp-result.json> --stage ideation --source papernexus-remote.idea_catalyst --tag ideation",
+                "python ~/.codex/skills/autoreskill-experiment-plan/scripts/idea_pool_lint.py --project <project-root> --pool ideation/EXPERIMENT_IDEA_POOL.json",
             ],
-            "outputs": [".autoreskill/ideation/idea-catalyst/IDEA_CATALYST_CONTRACT.json"],
+            "outputs": [
+                ".autoreskill/ideation/idea-catalyst/IDEA_CATALYST_CONTRACT.json",
+                ".autoreskill/ideation/EXPERIMENT_IDEA_POOL.json",
+            ],
         },
         "literature_review": {
             "skill": "autoreskill-literature-review",
@@ -215,21 +219,27 @@ def execution_spec(stage: str, state: dict[str, Any], contract: dict[str, Any]) 
         "idea_gate": {
             "skill": "autoreskill-ideation-panel",
             "role": "Reviewer",
-            "goal": "Run Professor/Postdoc/PhDStudent/Critic gate and select advance/park/kill tracks.",
+            "goal": "Run Professor/Postdoc/PhDStudent/Critic gate, select one idea from the ideation-stage experiment idea pool, and select advance/park/kill tracks.",
             "mcp_calls": [],
-            "capture": [],
+            "capture": [
+                "python ~/.codex/skills/autoreskill-experiment-plan/scripts/idea_pool_lint.py --project <project-root> --pool ideation/EXPERIMENT_IDEA_POOL.json --require-selected"
+            ],
             "outputs": [
                 ".autoreskill/ideation/TOURNAMENT_SCOREBOARD.json",
                 ".autoreskill/ideation/TOP3_DIRECTION_SUMMARY.md",
                 ".autoreskill/reviewer/IDEA_GATE_REVIEW.json",
+                ".autoreskill/ideation/EXPERIMENT_IDEA_POOL.json",
             ],
         },
         "experiment_plan": {
             "skill": "autoreskill-experiment-plan",
             "role": "Orchestrator",
-            "goal": "Materialize an INNOVATION_PACKET and reviewed experiment plan from the selected idea.",
+            "goal": "Materialize an INNOVATION_PACKET and reviewed experiment plan from the selected ideation-stage optimization idea.",
             "mcp_calls": [],
-            "capture": ["python ~/.codex/skills/autoreskill-experiment-plan/scripts/prelaunch_lint.py --project <project-root>"],
+            "capture": [
+                "python ~/.codex/skills/autoreskill-experiment-plan/scripts/prelaunch_lint.py --project <project-root>",
+                "python ~/.codex/skills/autoreskill-experiment-plan/scripts/innovation_lint.py --project <project-root>",
+            ],
             "outputs": [
                 ".autoreskill/orchestrator/INNOVATION_PACKET.json",
                 ".autoreskill/planner/EXPERIMENT_REVIEW_PACKET.json",
@@ -335,17 +345,7 @@ def write_job_packet(
         "missing": spec["missing"],
         "mcp_calls": spec["mcp_calls"],
         "capture_commands": spec["capture"],
-        "allowed_writes": [
-            ".autoreskill/papernexus/",
-            ".autoreskill/literature/",
-            ".autoreskill/ideation/",
-            ".autoreskill/orchestrator/",
-            ".autoreskill/planner/",
-            ".autoreskill/coder/",
-            ".autoreskill/analyzer/",
-            ".autoreskill/reviewer/",
-            ".autoreskill/paper/",
-        ],
+        "allowed_writes": stage_write_scopes(stage),
         "constraints": [
             "Use PaperNexus live graph work only through papernexus-remote MCP.",
             "Do not use local PaperNexus CLI, raw HTTP, local graph files, local MCP, or SSH graph commands as substitutes.",
@@ -375,6 +375,39 @@ def write_job_packet(
     return path
 
 
+def stage_write_scopes(stage: str) -> list[str]:
+    common = [
+        ".autoreskill/evidence_cart.jsonl",
+        ".autoreskill/artifacts_index.json",
+    ]
+    scopes = {
+        "init": [
+            ".autoreskill/goal_state.json",
+            ".autoreskill/autopilot_policy.json",
+            ".autoreskill/capabilities.json",
+            ".autoreskill/memory.md",
+            ".autoreskill/decision_log.jsonl",
+            ".autoreskill/repair_queue.jsonl",
+            ".autoreskill/async_jobs.jsonl",
+        ],
+        "topic_search": [".autoreskill/literature/", ".autoreskill/papernexus/"],
+        "graph_build": [".autoreskill/graph/", ".autoreskill/papernexus/"],
+        "frontier_mapping": [".autoreskill/papernexus/", ".autoreskill/ideation/"],
+        "literature_review": [".autoreskill/literature/"],
+        "ideation": [".autoreskill/ideation/", ".autoreskill/papernexus/"],
+        "idea_gate": [".autoreskill/ideation/", ".autoreskill/reviewer/"],
+        "experiment_plan": [".autoreskill/orchestrator/", ".autoreskill/planner/"],
+        "code": [".autoreskill/coder/"],
+        "experiment": [".autoreskill/coder/"],
+        "analysis": [".autoreskill/analyzer/"],
+        "review_pressure": [".autoreskill/reviewer/"],
+        "writing": [".autoreskill/paper/"],
+        "submission_ready": [".autoreskill/paper/", ".autoreskill/submission_ready.json"],
+    }
+    stage_scopes = scopes.get(stage, [f".autoreskill/{stage}/"])
+    return [*stage_scopes, *common]
+
+
 def handoff_for_stage(base: Path, state: dict[str, Any], contract: dict[str, Any]) -> Path:
     stage = str(state.get("stage", "init"))
     owner = str(state.get("owner") or OWNERS.get(stage, "Researcher"))
@@ -393,7 +426,7 @@ def handoff_for_stage(base: Path, state: dict[str, Any], contract: dict[str, Any
             ".autoreskill/evidence_cart.jsonl",
         ],
         "missing": contract.get("missing", []),
-        "allowed_writes": [f".autoreskill/{stage}/", ".autoreskill/papernexus/", ".autoreskill/literature/"],
+        "allowed_writes": stage_write_scopes(stage),
         "constraints": [
             "Use PaperNexus live graph work only through papernexus-remote MCP.",
             "Do not invent citations, evidence, or experiment results.",

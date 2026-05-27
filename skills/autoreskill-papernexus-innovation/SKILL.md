@@ -18,7 +18,7 @@ Use this skill before any ideation or experiment planning. Innovation must be ev
 
 ## Required Materials
 
-Before an idea can enter `experiment_plan`, collect:
+Before an idea can enter `idea_gate` or `experiment_plan`, collect:
 
 - target prior
 - near-source method
@@ -31,6 +31,8 @@ Before an idea can enter `experiment_plan`, collect:
 - falsifier pilot
 
 Write materials under `.autoreskill/papernexus/` and evidence ids to `.autoreskill/evidence_cart.jsonl`.
+
+This skill supplies source-backed evidence and PaperNexus material packs. It must not substitute a small set of high-level directions for the experiment idea pool. The 12-15 optimization ideas are produced during ideation by `autoreskill-ideation-panel` as `.autoreskill/ideation/EXPERIMENT_IDEA_POOL.json`, using these PaperNexus materials as inputs.
 
 ## Deterministic Helpers
 

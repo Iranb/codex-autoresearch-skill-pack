@@ -26,6 +26,7 @@ SCRIPT = {
     "dispatch": HERE / "goal_job_dispatch.py",
     "update-job": HERE / "goal_job_update.py",
     "reconcile": HERE / "goal_job_reconcile.py",
+    "subagent-result": HERE / "goal_subagent_result.py",
 }
 
 

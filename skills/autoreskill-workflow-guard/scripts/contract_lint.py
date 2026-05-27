@@ -111,22 +111,87 @@ def lint(project: str, stage: str) -> dict[str, Any]:
         return result(stage, not missing, missing, "literature_review_contract")
 
     if stage == "ideation":
+        skill_root = Path(__file__).resolve().parents[2]
         contract = read_json(base / "ideation/idea-catalyst/IDEA_CATALYST_CONTRACT.json")
-        ok = bool(contract and contract.get("status") == "ready")
-        return result(stage, ok, [] if ok else ["ideation/idea-catalyst/IDEA_CATALYST_CONTRACT.json status=ready"], "ideation_contract")
+        pool_lint = run_json(
+            [
+                sys.executable,
+                str(skill_root / "autoreskill-experiment-plan/scripts/idea_pool_lint.py"),
+                "--project",
+                str(Path(project).expanduser().resolve()),
+                "--pool",
+                "ideation/EXPERIMENT_IDEA_POOL.json",
+            ]
+        )
+        missing = []
+        warnings = []
+        if not (contract and contract.get("status") == "ready"):
+            missing.append("ideation/idea-catalyst/IDEA_CATALYST_CONTRACT.json status=ready")
+        if not pool_lint.get("complete"):
+            items = pool_lint.get("missing") if isinstance(pool_lint.get("missing"), list) else []
+            missing.extend(f"idea_pool_lint: {item}" for item in items)
+            if pool_lint.get("returncode", 1) != 0 and not items:
+                missing.append("idea_pool_lint failed without structured missing output")
+        items = pool_lint.get("warnings") if isinstance(pool_lint.get("warnings"), list) else []
+        warnings.extend(f"idea_pool_lint: {item}" for item in items)
+        return result(stage, not missing, missing, "ideation_contract", warnings, {"idea_pool_lint": pool_lint})
 
     if stage == "idea_gate":
-        ok = has_any(base, ["ideation/TOURNAMENT_SCOREBOARD.json", "ideation/TOP3_DIRECTION_SUMMARY.md", "reviewer/IDEA_GATE_REVIEW.json"])
-        return result(stage, ok, [] if ok else ["idea gate review or tournament scoreboard"], "idea_gate_contract")
+        skill_root = Path(__file__).resolve().parents[2]
+        pool_lint = run_json(
+            [
+                sys.executable,
+                str(skill_root / "autoreskill-experiment-plan/scripts/idea_pool_lint.py"),
+                "--project",
+                str(Path(project).expanduser().resolve()),
+                "--pool",
+                "ideation/EXPERIMENT_IDEA_POOL.json",
+                "--require-selected",
+            ]
+        )
+        missing = []
+        warnings = []
+        if not has_any(base, ["ideation/TOURNAMENT_SCOREBOARD.json", "ideation/TOP3_DIRECTION_SUMMARY.md", "reviewer/IDEA_GATE_REVIEW.json"]):
+            missing.append("idea gate review or tournament scoreboard")
+        if not pool_lint.get("complete"):
+            items = pool_lint.get("missing") if isinstance(pool_lint.get("missing"), list) else []
+            missing.extend(f"idea_pool_lint: {item}" for item in items)
+            if pool_lint.get("returncode", 1) != 0 and not items:
+                missing.append("idea_pool_lint failed without structured missing output")
+        items = pool_lint.get("warnings") if isinstance(pool_lint.get("warnings"), list) else []
+        warnings.extend(f"idea_pool_lint: {item}" for item in items)
+        return result(stage, not missing, missing, "idea_gate_contract", warnings, {"idea_pool_lint": pool_lint})
 
     if stage == "experiment_plan":
-        script = Path(__file__).resolve().parents[2] / "autoreskill-experiment-plan/scripts/innovation_lint.py"
-        out = run_json([sys.executable, str(script), "--project", str(Path(project).expanduser().resolve())])
-        missing = out.get("missing") if isinstance(out.get("missing"), list) else []
-        warnings = out.get("warnings") if isinstance(out.get("warnings"), list) else []
-        if out.get("returncode", 1) != 0 and not missing:
-            missing = ["innovation_lint.py failed without structured missing output"]
-        return result(stage, bool(out.get("complete")), missing, "experiment_plan_contract", warnings, {"innovation_lint": out})
+        skill_root = Path(__file__).resolve().parents[2]
+        scripts = {
+            "prelaunch_lint": [
+                sys.executable,
+                str(skill_root / "autoreskill-experiment-plan/scripts/prelaunch_lint.py"),
+                "--project",
+                str(Path(project).expanduser().resolve()),
+            ],
+            "innovation_lint": [
+                sys.executable,
+                str(skill_root / "autoreskill-experiment-plan/scripts/innovation_lint.py"),
+                "--project",
+                str(Path(project).expanduser().resolve()),
+            ],
+        }
+        details = {name: run_json(cmd) for name, cmd in scripts.items()}
+        missing: list[str] = []
+        warnings: list[str] = []
+        complete = True
+        for name, out in details.items():
+            if not out.get("complete"):
+                complete = False
+                items = out.get("missing") if isinstance(out.get("missing"), list) else []
+                missing.extend(f"{name}: {item}" for item in items)
+                if out.get("returncode", 1) != 0 and not items:
+                    missing.append(f"{name} failed without structured missing output")
+            items = out.get("warnings") if isinstance(out.get("warnings"), list) else []
+            warnings.extend(f"{name}: {item}" for item in items)
+        return result(stage, complete, missing, "experiment_plan_contract", warnings, details)
 
     if stage == "code":
         missing = []

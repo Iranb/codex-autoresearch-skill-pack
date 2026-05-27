@@ -37,7 +37,7 @@ OWNERS = {
     "idea_gate": "Reviewer",
     "experiment_plan": "Orchestrator",
     "code": "Coder",
-    "experiment": "Researcher",
+    "experiment": "Coder",
     "analysis": "Analyzer",
     "review_pressure": "Reviewer",
     "writing": "Academic Writer",
