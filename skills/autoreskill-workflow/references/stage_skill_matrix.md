@@ -4,7 +4,7 @@ Use this table to route a `.autoreskill` stage to the child skill that should sa
 
 | Stage | Owner | Child skill | Primary writes | Completion check |
 | --- | --- | --- | --- | --- |
-| `init` | WorkflowGuard | `autoreskill-workflow-guard` | `.autoreskill/goal_state.json`, policy, queues, memory | `contract_lint.py --stage init` |
+| `init` | WorkflowGuard | `autoreskill-workflow` | `.autoreskill/goal_state.json`, policy, queues, memory | `contract_lint.py --stage init` |
 | `topic_search` | Researcher | `autoreskill-papernexus-innovation` | `.autoreskill/literature/`, `.autoreskill/papernexus/`, `.autoreskill/evidence_cart.jsonl` | topic search contract |
 | `graph_build` | Researcher | `autoreskill-papernexus-innovation` | `.autoreskill/graph/`, `.autoreskill/papernexus/`, `.autoreskill/evidence_cart.jsonl` | `GRAPH_BUILD_DECISION.json` has `decision=complete` and `source_backed_graph_claim=true` |
 | `frontier_mapping` | Researcher | `autoreskill-papernexus-innovation` | `.autoreskill/papernexus/`, `.autoreskill/ideation/`, `.autoreskill/evidence_cart.jsonl` | frontier material pack or challenge insight tree exists |

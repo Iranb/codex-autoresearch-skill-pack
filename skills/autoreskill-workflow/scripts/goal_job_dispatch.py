@@ -159,13 +159,13 @@ Run capture commands only after the corresponding MCP or role-pass result exists
 After successful execution:
 
 ```bash
-python ~/.codex/skills/autoreskill-workflow-guard/scripts/goal_job_update.py --project "{Path(project).expanduser().resolve()}" --kind {packet.get('job_kind') or 'repair'} --job-id {packet.get('job_id')} --status completed --artifact <artifact-path>
+python ~/.codex/skills/autoreskill-workflow/scripts/goal_job_update.py --project "{Path(project).expanduser().resolve()}" --kind {packet.get('job_kind') or 'repair'} --job-id {packet.get('job_id')} --status completed --artifact <artifact-path>
 ```
 
 If execution fails:
 
 ```bash
-python ~/.codex/skills/autoreskill-workflow-guard/scripts/goal_job_update.py --project "{Path(project).expanduser().resolve()}" --kind {packet.get('job_kind') or 'repair'} --job-id {packet.get('job_id')} --status failed --error "<exact blocker>"
+python ~/.codex/skills/autoreskill-workflow/scripts/goal_job_update.py --project "{Path(project).expanduser().resolve()}" --kind {packet.get('job_kind') or 'repair'} --job-id {packet.get('job_id')} --status failed --error "<exact blocker>"
 ```
 """
 

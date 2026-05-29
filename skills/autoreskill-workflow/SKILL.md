@@ -1,9 +1,9 @@
 ---
-name: autoreskill-workflow-guard
+name: autoreskill-workflow
 description: Main $autoreskill and /goal workflow conductor for the portable AutoResearch + PaperNexus skill pack. Use when the user invokes $autoreskill, autoreskill, /goal, asks Codex to initialize, resume, advance, debug, or fully drive a .autoreskill research workflow, dispatch role/job packets, check stage completion, recover stalled workflow state, or run full_auto_bounded multi-step research without the OpenClaw runtime.
 ---
 
-# AutoResearch Workflow Guard
+# AutoResearch Workflow
 
 This is the conductor for the portable AutoResearch + PaperNexus workflow. It must run without `openclaw-research`, `.openclaw-research/`, `PROJECT_MANIFEST.json`, or `research_workflow` tools.
 
@@ -38,7 +38,7 @@ Do not skip status, reconcile, tick, or update-job when executing a role pass. T
 
 ## Commands
 
-Use the scripts as deterministic helpers. Resolve `<skill-root>` to this skill directory, usually `~/.codex/skills/autoreskill-workflow-guard`.
+Use the scripts as deterministic helpers. Resolve `<skill-root>` to this skill directory, usually `~/.codex/skills/autoreskill-workflow`.
 
 ```bash
 python <skill-root>/scripts/goal_state.py init --project <project-root> --goal "<research problem>" --corpus PN-ICML-Ideation-Shared-240-v1 --venue <target-venue>
