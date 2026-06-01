@@ -21,7 +21,7 @@ Also use this skill after ideation whenever a later stage exposes a concrete evi
 - During ideation, always run broad `literature_discovery` for three lanes: `target_domain`, `near_neighbor`, and `far_neighbor`. The first search pass can be metadata-only, but it must use deep/recall-oriented planning and expansion defaults rather than quick metadata defaults. `pre_idea_discovery_config_lint.py` must pass before idea generation. Idea generation is blocked until high-signal eligible papers have been imported, supplemented, or split-read through PaperNexus, or until an explicit blocker/degraded approval is recorded.
 - The three-lane breadth requirement is venue-agnostic. Do not apply it only to TPAMI, top journals, or manually named venues. Every paper-oriented research workflow must consider the current field, near-neighbor fields, and far-neighbor transfer fields before idea generation.
 - For top-tier method novelty, target-domain evidence is the current-field prior and evaluation anchor; it should usually attack, constrain, or falsify an idea rather than serve as the main method source. Prefer near-neighbor, far-neighbor, external-domain transfer, cross-lane recombination, or committed proposal-graph transfer as the primary method mechanism. Treat target-domain-only method variants as baselines or ablations unless a current-field absence audit is recorded.
-- Do not mechanically import raw discovery results. Use `PAPER_SELECTION_SCORECARD.json` to reject duplicates, weak relevance, unresolved sources, survey noise, and generic benchmark papers; select roughly 60-80% of the high-signal eligible set, not raw results.
+- Do not mechanically import raw discovery results. Use `PAPER_SELECTION_SCORECARD.json` to reject duplicates, weak relevance, unresolved sources, survey noise, and generic benchmark papers; select roughly 60-80% of the high-signal eligible set, not raw results. Then convert selected usable papers into `GRAPH_IMPORT_PLAN.json` before requesting PaperNexus import/supplement/material views or split-reading evidence.
 
 ## Pre-Idea Evidence Expansion Policy
 
@@ -104,7 +104,7 @@ For each ideation candidate, attach lightweight evidence notes when available:
 - `missing_materials`
 - `followup_evidence_plan`
 
-At ideation time, produce `papernexus/LITERATURE_DISCOVERY_TRIAGE.json` and `papernexus/PAPER_SELECTION_SCORECARD.json` from discovery packets. The scorecard must identify which discovered papers should be imported, supplemented, split-read, watched, or rejected before idea generation for novelty risk, baseline candidates, negative evidence, dataset/benchmark anchors, method lineage, limitations/future work, and transfer bridges.
+At ideation time, produce `papernexus/LITERATURE_DISCOVERY_TRIAGE.json`, `papernexus/PAPER_SELECTION_SCORECARD.json`, and `papernexus/GRAPH_IMPORT_PLAN.json` from discovery packets. The scorecard must identify which discovered papers should be imported, supplemented, split-read, watched, or rejected before idea generation for novelty risk, baseline candidates, negative evidence, dataset/benchmark anchors, method lineage, limitations/future work, and transfer bridges. The graph import plan is the handoff into PaperNexus import/material work; raw discovery candidates must not be used directly as graph evidence.
 
 Before a selected idea can enter `experiment_plan`, collect:
 

@@ -26,6 +26,24 @@ def script_cmd(skill: str, script: str, args: str = "") -> str:
     return cmd
 
 
+def has_literature_search(calls: list[Any]) -> bool:
+    for call in calls:
+        if not isinstance(call, dict) or call.get("tool") != "literature_discovery":
+            continue
+        args = call.get("args")
+        if isinstance(args, dict) and args.get("operation") == "search":
+            return True
+    return False
+
+
+def append_unique(items: list[str], additions: list[str]) -> list[str]:
+    out = list(items)
+    for item in additions:
+        if item not in out:
+            out.append(item)
+    return out
+
+
 def now() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -311,6 +329,11 @@ def execution_spec(stage: str, state: dict[str, Any], contract: dict[str, Any]) 
                 ),
                 script_cmd(
                     "autoreskill-papernexus-innovation",
+                    "graph_import_plan_lint.py",
+                    "--project <project-root>",
+                ),
+                script_cmd(
+                    "autoreskill-papernexus-innovation",
                     "split_reading_evidence_pack_lint.py",
                     "--project <project-root>",
                 ),
@@ -334,6 +357,8 @@ def execution_spec(stage: str, state: dict[str, Any], contract: dict[str, Any]) 
                 ".autoreskill/literature/FAR_NEIGHBOR_DISCOVERY_PACKET.json",
                 ".autoreskill/papernexus/LITERATURE_DISCOVERY_TRIAGE.json",
                 ".autoreskill/papernexus/PAPER_SELECTION_SCORECARD.json",
+                ".autoreskill/papernexus/GRAPH_IMPORT_PLAN.json",
+                ".autoreskill/papernexus/GRAPH_IMPORT_STATUS.json",
                 ".autoreskill/papernexus/SPLIT_READING_EVIDENCE_PACK.json",
                 ".autoreskill/ideation/INNOVATION_SLOT_MAP.json",
                 ".autoreskill/ideation/PRE_IDEA_EVIDENCE_GATE.json",
@@ -517,6 +542,64 @@ def write_job_packet(
 ) -> Path:
     stage = str(job.get("stage") or state.get("stage", "init"))
     spec = execution_spec(stage, state, contract)
+    mcp_calls = spec["mcp_calls"]
+    capture_commands = list(spec["capture"])
+    outputs = list(spec["outputs"])
+    literature_search = has_literature_search(mcp_calls)
+    if literature_search:
+        if not any("--kind literature_discovery_packet" in command for command in capture_commands):
+            capture_commands.append(
+                script_cmd(
+                    "autoreskill-papernexus-innovation",
+                    "papernexus_artifact_capture.py",
+                    f"--project <project-root> --kind literature_discovery_packet --input <mcp-result.json> --stage {stage} --source papernexus-remote.literature_discovery --evidence-note \"{stage} literature discovery evidence\" --tag {stage} --tag literature_discovery",
+                )
+            )
+        if not any("discovery_metadata_triage.py" in command for command in capture_commands):
+            capture_commands.append(
+                script_cmd(
+                    "autoreskill-papernexus-innovation",
+                    "discovery_metadata_triage.py",
+                    f"--project <project-root> --input literature/LITERATURE_DISCOVERY_PACKET.json --stage {stage}",
+                )
+            )
+        outputs = append_unique(
+            outputs,
+            [
+                ".autoreskill/literature/LITERATURE_DISCOVERY_PACKET.json",
+                ".autoreskill/papernexus/LITERATURE_DISCOVERY_TRIAGE.json",
+                ".autoreskill/papernexus/PAPER_SELECTION_SCORECARD.json",
+                ".autoreskill/papernexus/GRAPH_IMPORT_PLAN.json",
+                ".autoreskill/papernexus/GRAPH_IMPORT_STATUS.json",
+                ".autoreskill/papernexus/SPLIT_READING_EVIDENCE_PACK.json",
+            ],
+        )
+    constraints = [
+        "Use PaperNexus live graph work only through papernexus-remote MCP.",
+        "Do not use local PaperNexus CLI, raw HTTP, local graph files, local MCP, or SSH graph commands as substitutes.",
+        "Do not invent citations, evidence, or experiment results.",
+        "After producing artifacts, rerun the relevant linter before marking this job complete.",
+    ]
+    acceptance_criteria = [
+        "Required outputs exist under .autoreskill/",
+        "contract_lint.py or the stage linter reports complete",
+        "decision_log.jsonl records the produced artifact or explicit blocker",
+    ]
+    if literature_search:
+        constraints.extend(
+            [
+                "Treat literature_discovery search results as recall only, not graph-grounded evidence.",
+                "After every useful discovery result, screen candidates into papernexus/PAPER_SELECTION_SCORECARD.json and reject duplicates, weak relevance, unresolved sources, survey noise, and generic benchmark-only papers.",
+                "Build papernexus/GRAPH_IMPORT_PLAN.json from selected usable papers, then request PaperNexus import/supplement/material-view or split-reading evidence before using those papers for novelty, baseline, mechanism, limitation, or citation claims.",
+            ]
+        )
+        acceptance_criteria.extend(
+            [
+                "Raw discovery candidates are screened before any graph/material evidence claim",
+                "Selected usable papers have explicit graph_import, split_read_only, watchlist, or rejection decisions",
+                "Graph/material import or split-reading blockers are recorded instead of silently treating raw search rows as evidence",
+            ]
+        )
     path = base / "job_packets" / f"{job['job_id']}.json"
     packet = {
         "schema_version": 1,
@@ -533,21 +616,12 @@ def write_job_packet(
         "blocker": blocker,
         "inputs": spec["inputs"],
         "missing": spec["missing"],
-        "mcp_calls": spec["mcp_calls"],
-        "capture_commands": spec["capture"],
+        "mcp_calls": mcp_calls,
+        "capture_commands": capture_commands,
         "allowed_writes": stage_write_scopes(stage),
-        "constraints": [
-            "Use PaperNexus live graph work only through papernexus-remote MCP.",
-            "Do not use local PaperNexus CLI, raw HTTP, local graph files, local MCP, or SSH graph commands as substitutes.",
-            "Do not invent citations, evidence, or experiment results.",
-            "After producing artifacts, rerun the relevant linter before marking this job complete.",
-        ],
-        "outputs": spec["outputs"],
-        "acceptance_criteria": [
-            "Required outputs exist under .autoreskill/",
-            "contract_lint.py or the stage linter reports complete",
-            "decision_log.jsonl records the produced artifact or explicit blocker",
-        ],
+        "constraints": constraints,
+        "outputs": outputs,
+        "acceptance_criteria": acceptance_criteria,
     }
     write_json(path, packet)
     append_jsonl(

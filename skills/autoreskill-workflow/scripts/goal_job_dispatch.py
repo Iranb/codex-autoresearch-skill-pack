@@ -134,6 +134,16 @@ def bullet(items: list[Any]) -> str:
     return "\n".join(f"- `{item}`" if isinstance(item, str) else f"- `{json.dumps(item, ensure_ascii=False)}`" for item in items)
 
 
+def has_literature_search(calls: list[Any]) -> bool:
+    for call in calls:
+        if not isinstance(call, dict) or call.get("tool") != "literature_discovery":
+            continue
+        args = call.get("args")
+        if isinstance(args, dict) and args.get("operation") == "search":
+            return True
+    return False
+
+
 def render_prompt(project: str, packet: dict[str, Any], mode: str) -> str:
     mcp_calls = packet.get("mcp_calls") or []
     capture_commands = packet.get("capture_commands") or []
@@ -141,6 +151,21 @@ def render_prompt(project: str, packet: dict[str, Any], mode: str) -> str:
     outputs = packet.get("outputs") or []
     acceptance = packet.get("acceptance_criteria") or []
     inputs = packet.get("inputs") or []
+    discovery_closure = ""
+    if has_literature_search(mcp_calls):
+        discovery_closure = """
+## Post-Discovery Screening And Graph Reading
+
+For every useful `literature_discovery(operation="search")` result:
+
+1. Capture the raw discovery result.
+2. Run candidate triage and write `papernexus/PAPER_SELECTION_SCORECARD.json`.
+3. Reject duplicates, weak relevance, unresolved sources, survey noise, and generic benchmark-only papers.
+4. Build `papernexus/GRAPH_IMPORT_PLAN.json` from selected usable papers.
+5. Use the plan for PaperNexus import/supplement/material-view or split-reading work, then capture `papernexus/GRAPH_IMPORT_STATUS.json` and/or `papernexus/SPLIT_READING_EVIDENCE_PACK.json`.
+
+Do not use raw discovery rows directly as novelty, baseline, method, limitation, or citation evidence.
+"""
 
     return f"""# AutoResearch Job Packet
 
@@ -168,6 +193,7 @@ Skill to use: `{packet.get('skill')}`
 {bullet(mcp_calls)}
 
 If a PaperNexus MCP call fails at config, transport, auth, or session-tool-mount level, do not use local PaperNexus CLI, raw HTTP, local graph files, local MCP, or SSH graph commands as substitutes. Record the failure with `papernexus_probe_record.py` when relevant and update this job as `failed` or `retry`.
+{discovery_closure}
 
 ## Capture Commands
 

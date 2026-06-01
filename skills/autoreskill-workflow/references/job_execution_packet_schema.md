@@ -67,6 +67,16 @@ Required fields:
 
 `goal_job_dispatch.py` refuses to render any job packet containing `literature_discovery(operation="search")` unless the search uses the broad configuration above. This applies to topic search, ideation lanes, and later targeted discovery repair packets; the topic may be narrow, but the discovery configuration must remain recall-oriented. Use `operation=resolve`, `import`, `ingest`, or `import_and_process` only after screening selected papers.
 
+Every packet containing `literature_discovery(operation="search")` must also close the post-discovery evidence loop in the serialized prompt:
+
+1. Capture the search result as a discovery artifact.
+2. Run candidate triage/screening and write `papernexus/PAPER_SELECTION_SCORECARD.json`.
+3. Build `papernexus/GRAPH_IMPORT_PLAN.json` from selected usable papers.
+4. Use the plan to request PaperNexus import/supplement/material-view or split-reading work.
+5. Capture `papernexus/GRAPH_IMPORT_STATUS.json` and/or `papernexus/SPLIT_READING_EVIDENCE_PACK.json` before using the papers as novelty, method, baseline, limitation, or citation evidence.
+
+Raw discovery results are search evidence only. They are not graph-grounded evidence.
+
 After executing a packet, update the queue:
 
 Render a prompt for a serialized role pass or sub-agent:

@@ -113,13 +113,31 @@ def lint(project: str, stage: str) -> dict[str, Any]:
         return result(stage, not missing, missing, "init_contract")
 
     if stage == "topic_search":
-        ok = has_any(base, ["literature/LITERATURE_DISCOVERY_PACKET.json", "literature/LITERATURE_DISCOVERY_RUN.json"])
-        return result(stage, ok, [] if ok else ["literature discovery evidence"], "topic_search_contract")
+        missing = []
+        if not has_any(base, ["literature/LITERATURE_DISCOVERY_PACKET.json", "literature/LITERATURE_DISCOVERY_RUN.json"]):
+            missing.append("literature discovery evidence")
+        for rel in [
+            "papernexus/LITERATURE_DISCOVERY_TRIAGE.json",
+            "papernexus/PAPER_SELECTION_SCORECARD.json",
+            "papernexus/GRAPH_IMPORT_PLAN.json",
+        ]:
+            if not nonempty(base / rel):
+                missing.append(rel)
+        return result(stage, not missing, missing, "topic_search_contract")
 
     if stage == "graph_build":
         decision = read_json(base / "graph/GRAPH_BUILD_DECISION.json")
-        ok = bool(decision and decision.get("decision") == "complete" and decision.get("source_backed_graph_claim") is True)
-        return result(stage, ok, [] if ok else ["graph/GRAPH_BUILD_DECISION.json decision=complete source_backed_graph_claim=true"], "graph_build_contract")
+        graph_plan = read_json(base / "papernexus/GRAPH_IMPORT_PLAN.json")
+        missing = []
+        if not bool(decision and decision.get("decision") == "complete" and decision.get("source_backed_graph_claim") is True):
+            missing.append("graph/GRAPH_BUILD_DECISION.json decision=complete source_backed_graph_claim=true")
+        if not isinstance(graph_plan, dict):
+            missing.append("papernexus/GRAPH_IMPORT_PLAN.json")
+        elif graph_plan.get("selected_papers") and not (
+            nonempty(base / "papernexus/GRAPH_IMPORT_STATUS.json") or nonempty(base / "papernexus/SPLIT_READING_EVIDENCE_PACK.json")
+        ):
+            missing.append("papernexus/GRAPH_IMPORT_STATUS.json or papernexus/SPLIT_READING_EVIDENCE_PACK.json for selected usable papers")
+        return result(stage, not missing, missing, "graph_build_contract")
 
     if stage == "frontier_mapping":
         ok = has_any(base, ["papernexus/research_material_pack.json", "papernexus/source_discovery_plan.json", "ideation/CHALLENGE_INSIGHT_TREE.md"])
@@ -178,6 +196,46 @@ def lint(project: str, stage: str) -> dict[str, Any]:
                 str(Path(project).expanduser().resolve()),
             ]
         )
+        discovery_config_lint = run_json(
+            [
+                sys.executable,
+                str(skill_root / "autoreskill-papernexus-innovation/scripts/pre_idea_discovery_config_lint.py"),
+                "--project",
+                str(Path(project).expanduser().resolve()),
+            ]
+        )
+        paper_selection_lint = run_json(
+            [
+                sys.executable,
+                str(skill_root / "autoreskill-papernexus-innovation/scripts/paper_selection_scorecard_lint.py"),
+                "--project",
+                str(Path(project).expanduser().resolve()),
+            ]
+        )
+        breadth_lint = run_json(
+            [
+                sys.executable,
+                str(skill_root / "autoreskill-papernexus-innovation/scripts/pre_idea_breadth_lint.py"),
+                "--project",
+                str(Path(project).expanduser().resolve()),
+            ]
+        )
+        graph_import_lint = run_json(
+            [
+                sys.executable,
+                str(skill_root / "autoreskill-papernexus-innovation/scripts/graph_import_plan_lint.py"),
+                "--project",
+                str(Path(project).expanduser().resolve()),
+            ]
+        )
+        split_reading_lint = run_json(
+            [
+                sys.executable,
+                str(skill_root / "autoreskill-papernexus-innovation/scripts/split_reading_evidence_pack_lint.py"),
+                "--project",
+                str(Path(project).expanduser().resolve()),
+            ]
+        )
         missing = []
         warnings = []
         if approved_degraded:
@@ -192,6 +250,21 @@ def lint(project: str, stage: str) -> dict[str, Any]:
             missing.append("papernexus/LITERATURE_DISCOVERY_TRIAGE.json discovery_attempted=true")
         elif discovery_triage.get("policy", {}).get("import_resolved") is not False or discovery_triage.get("policy", {}).get("process_imports") is not False:
             missing.append("first-pass ideation literature discovery must be metadata-only and non-importing")
+        if not approved_degraded:
+            for name, out in {
+                "pre_idea_discovery_config_lint": discovery_config_lint,
+                "paper_selection_scorecard_lint": paper_selection_lint,
+                "pre_idea_breadth_lint": breadth_lint,
+                "graph_import_plan_lint": graph_import_lint,
+                "split_reading_evidence_pack_lint": split_reading_lint,
+            }.items():
+                if not out.get("complete"):
+                    items = out.get("missing") if isinstance(out.get("missing"), list) else []
+                    missing.extend(f"{name}: {item}" for item in items)
+                    if out.get("returncode", 1) != 0 and not items:
+                        missing.append(f"{name} failed without structured missing output")
+                items = out.get("warnings") if isinstance(out.get("warnings"), list) else []
+                warnings.extend(f"{name}: {item}" for item in items)
         if not pre_idea_gate_lint.get("complete"):
             items = pre_idea_gate_lint.get("missing") if isinstance(pre_idea_gate_lint.get("missing"), list) else []
             missing.extend(f"pre_idea_evidence_gate_lint: {item}" for item in items)
@@ -225,7 +298,26 @@ def lint(project: str, stage: str) -> dict[str, Any]:
                 missing.append("idea_scorecard_lint failed without structured missing output")
         items = scorecard_lint.get("warnings") if isinstance(scorecard_lint.get("warnings"), list) else []
         warnings.extend(f"idea_scorecard_lint: {item}" for item in items)
-        return result(stage, not missing, missing, "ideation_contract", warnings, {"pre_idea_evidence_gate_lint": pre_idea_gate_lint, "proposal_graph_session_lint": proposal_graph_lint, "idea_pool_lint": pool_lint, "idea_scorecard_lint": scorecard_lint, "discovery_triage": discovery_triage or {}, "proposal_graph_session_available": proposal_graph_available})
+        return result(
+            stage,
+            not missing,
+            missing,
+            "ideation_contract",
+            warnings,
+            {
+                "pre_idea_evidence_gate_lint": pre_idea_gate_lint,
+                "pre_idea_discovery_config_lint": discovery_config_lint,
+                "paper_selection_scorecard_lint": paper_selection_lint,
+                "pre_idea_breadth_lint": breadth_lint,
+                "graph_import_plan_lint": graph_import_lint,
+                "split_reading_evidence_pack_lint": split_reading_lint,
+                "proposal_graph_session_lint": proposal_graph_lint,
+                "idea_pool_lint": pool_lint,
+                "idea_scorecard_lint": scorecard_lint,
+                "discovery_triage": discovery_triage or {},
+                "proposal_graph_session_available": proposal_graph_available,
+            },
+        )
 
     if stage == "idea_gate":
         skill_root = Path(__file__).resolve().parents[2]
