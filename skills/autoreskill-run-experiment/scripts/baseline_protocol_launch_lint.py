@@ -1,0 +1,268 @@
+#!/usr/bin/env python3
+"""Preflight guard for baseline-aligned AutoResearch experiment launches.
+
+This linter separates environment/data probes from launchable experiment runs.
+It intentionally rejects ambiguous frozen-feature pilots and repeated
+off-protocol sweeps before GPU time is spent.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+from pathlib import Path
+from typing import Any
+
+
+ALIGNED_STATUSES = {"baseline_aligned", "pre_registered_feature_protocol"}
+OFF_PROTOCOL_STATUSES = {"off_protocol", "off_protocol_probe", "diagnostic_only"}
+SMALL_MODEL_MARKERS = [
+    "resnet18",
+    "torchvision.models",
+    "torchvision resnet",
+    "sklearn",
+    "small_model",
+    "tiny_model",
+    "feature_pilot",
+    "domainnet_feature_pilot",
+    "3 images per class",
+    "three images per class",
+]
+FEATURE_WORDS = ["frozen feature", "frozen-feature", "feature pilot", "frozen backbone", "frozen-backbone"]
+REQUIRED_FEATURE_PROTOCOL = [
+    "protocol_id",
+    "baseline_code_id",
+    "feature_extractor",
+    "extraction_entrypoint",
+    "dataset",
+    "data_split",
+    "metric_parser",
+    "evidence_scope",
+]
+
+
+def ar(project: str) -> Path:
+    return Path(project).expanduser().resolve() / ".autoreskill"
+
+
+def read_json(path: Path, default: Any = None) -> Any:
+    if not path.exists():
+        return default
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return default
+
+
+def present(value: Any) -> bool:
+    if value is None:
+        return False
+    if isinstance(value, str):
+        return bool(value.strip())
+    if isinstance(value, (list, tuple, set, dict)):
+        return bool(value)
+    return True
+
+
+def text_blob(value: Any) -> str:
+    try:
+        return json.dumps(value, ensure_ascii=False, sort_keys=True).lower()
+    except TypeError:
+        return str(value).lower()
+
+
+def mentions_any(value: Any, markers: list[str]) -> list[str]:
+    blob = text_blob(value)
+    return [marker for marker in markers if marker in blob]
+
+
+def nested_get(mapping: Any, *keys: str) -> Any:
+    current = mapping
+    for key in keys:
+        if not isinstance(current, dict):
+            return None
+        current = current.get(key)
+    return current
+
+
+def validate_feature_protocol(protocol: Any, baseline_code: dict[str, Any], missing: list[str], warnings: list[str]) -> None:
+    if not isinstance(protocol, dict):
+        missing.append("EXPERIMENT_REVIEW_PACKET.pre_registered_feature_protocol required for frozen-feature/backbone pilots")
+        return
+    for key in REQUIRED_FEATURE_PROTOCOL:
+        if not present(protocol.get(key)):
+            missing.append(f"EXPERIMENT_REVIEW_PACKET.pre_registered_feature_protocol.{key}")
+    baseline_code_id = str(baseline_code.get("code_id") or "").strip()
+    if baseline_code_id and str(protocol.get("baseline_code_id") or "").strip() != baseline_code_id:
+        missing.append("pre_registered_feature_protocol.baseline_code_id must match locked baseline_code.code_id")
+    evidence_scope = str(protocol.get("evidence_scope") or "").strip().lower()
+    extractor_markers = mentions_any(protocol.get("feature_extractor"), SMALL_MODEL_MARKERS)
+    if extractor_markers and evidence_scope != "diagnostic_only":
+        missing.append(
+            "pre_registered_feature_protocol uses small/convenience extractor markers "
+            f"{extractor_markers}; mark diagnostic_only or use locked baseline feature path"
+        )
+    if evidence_scope == "diagnostic_only":
+        warnings.append("pre_registered_feature_protocol is diagnostic_only; it cannot support candidate/promotion evidence")
+
+
+def existing_off_protocol(base: Path) -> list[str]:
+    hits: list[str] = []
+    ledger = read_json(base / "coder/EXPERIMENT_LEDGER.json", {})
+    for idx, entry in enumerate((ledger or {}).get("entries") or []):
+        blob = text_blob(entry)
+        if "off_protocol" in blob or "off-protocol" in blob or mentions_any(entry, SMALL_MODEL_MARKERS):
+            hits.append(f"coder/EXPERIMENT_LEDGER.json entries[{idx}]")
+    for remote_path in sorted(base.glob("coder/experiments/**/REMOTE_RUN.json")):
+        remote = read_json(remote_path, {})
+        blob = text_blob(remote)
+        if "off_protocol" in blob or "off-protocol" in blob or mentions_any(remote, SMALL_MODEL_MARKERS):
+            try:
+                hits.append(str(remote_path.relative_to(base)))
+            except ValueError:
+                hits.append(str(remote_path))
+    return hits
+
+
+def dataset_subset_drift(base: Path) -> list[str]:
+    hits: list[str] = []
+    for remote_path in sorted(base.glob("coder/experiments/**/REMOTE_RUN.json")):
+        remote = read_json(remote_path, {})
+        blob = text_blob(remote)
+        if "missing from" in blob and ("quickdraw" in blob or "infograph" in blob):
+            try:
+                hits.append(str(remote_path.relative_to(base)))
+            except ValueError:
+                hits.append(str(remote_path))
+    return hits
+
+
+def validate_candidate(
+    candidate: dict[str, Any],
+    review: dict[str, Any],
+    baseline_code: dict[str, Any],
+    feature_protocol: Any,
+    missing: list[str],
+    warnings: list[str],
+) -> bool:
+    status = str(candidate.get("protocol_status") or candidate.get("status") or "").strip().lower()
+    diagnostic = candidate.get("diagnostic_only") is True
+    if not status:
+        missing.append("candidate_run.protocol_status must be baseline_aligned, pre_registered_feature_protocol, or diagnostic_only")
+    elif status in OFF_PROTOCOL_STATUSES:
+        if not diagnostic or candidate.get("user_approved") is not True:
+            missing.append("off-protocol candidate_run requires diagnostic_only=true and user_approved=true")
+        if candidate.get("target_sweep") is True or present(candidate.get("targets")):
+            missing.append("off-protocol candidate_run cannot launch target sweeps")
+        warnings.append("off-protocol candidate_run is diagnostic only and cannot be promoted")
+        return False
+    elif status not in ALIGNED_STATUSES:
+        missing.append("candidate_run.protocol_status must be baseline_aligned or pre_registered_feature_protocol")
+
+    locked_code_id = str(baseline_code.get("code_id") or "").strip()
+    candidate_code_id = str(candidate.get("baseline_code_id") or nested_get(candidate, "baseline_code", "code_id") or "").strip()
+    if locked_code_id and candidate_code_id and candidate_code_id != locked_code_id:
+        missing.append("candidate_run baseline_code_id drifts from locked baseline")
+    if locked_code_id and not candidate_code_id:
+        missing.append("candidate_run.baseline_code_id")
+
+    for key, candidate_key in [
+        ("dataset", "dataset"),
+        ("data_split", "data_split"),
+        ("primary_metric", "primary_metric"),
+    ]:
+        expected = review.get(key)
+        actual = candidate.get(candidate_key)
+        if present(expected) and present(actual) and actual != expected:
+            missing.append(f"candidate_run.{candidate_key} drifts from EXPERIMENT_REVIEW_PACKET.{key}")
+
+    if status == "pre_registered_feature_protocol":
+        if not isinstance(feature_protocol, dict):
+            missing.append("candidate_run uses pre_registered_feature_protocol but review packet lacks it")
+        elif str(candidate.get("feature_protocol_id") or "").strip() != str(feature_protocol.get("protocol_id") or "").strip():
+            missing.append("candidate_run.feature_protocol_id must match pre_registered_feature_protocol.protocol_id")
+
+    markers = mentions_any(candidate, SMALL_MODEL_MARKERS)
+    if markers and status != "pre_registered_feature_protocol":
+        missing.append(f"candidate_run contains off-protocol/small-model markers: {markers}")
+    if markers and isinstance(feature_protocol, dict):
+        fp_markers = mentions_any(feature_protocol, SMALL_MODEL_MARKERS)
+        if not fp_markers:
+            missing.append(f"candidate_run small-model markers are not declared in pre_registered_feature_protocol: {markers}")
+
+    command = str(candidate.get("command") or candidate.get("train_command") or candidate.get("eval_command") or "")
+    train_entry = str(baseline_code.get("train_entrypoint") or "").strip()
+    eval_entry = str(baseline_code.get("eval_entrypoint") or "").strip()
+    adapter = candidate.get("baseline_adapter_of") == locked_code_id
+    if status == "baseline_aligned" and command and train_entry and eval_entry:
+        if train_entry not in command and eval_entry not in command and not adapter:
+            missing.append("baseline_aligned candidate_run command must call locked train/eval entrypoint or declare baseline_adapter_of")
+    return status in ALIGNED_STATUSES
+
+
+def lint(project: str, candidate_run: str | None) -> dict[str, Any]:
+    base = ar(project)
+    review = read_json(base / "planner/EXPERIMENT_REVIEW_PACKET.json", {}) or {}
+    innovation = read_json(base / "orchestrator/INNOVATION_PACKET.json", {}) or {}
+    manifests = [read_json(path, {}) or {} for path in sorted(base.glob("coder/experiments/**/EXPERIMENT_MANIFEST.json"))]
+    missing: list[str] = []
+    warnings: list[str] = []
+
+    baseline_code = review.get("baseline_code") if isinstance(review.get("baseline_code"), dict) else {}
+    if baseline_code.get("locked") is not True:
+        missing.append("EXPERIMENT_REVIEW_PACKET.baseline_code.locked must be true")
+    for key in ["code_id", "resolved_path", "train_entrypoint", "eval_entrypoint"]:
+        if not present(baseline_code.get(key)):
+            missing.append(f"EXPERIMENT_REVIEW_PACKET.baseline_code.{key}")
+
+    feature_protocol = review.get("pre_registered_feature_protocol")
+    plan_mentions_features = mentions_any({"review": review, "innovation": innovation, "manifests": manifests}, FEATURE_WORDS)
+    if plan_mentions_features:
+        validate_feature_protocol(feature_protocol, baseline_code, missing, warnings)
+
+    candidate_aligned = False
+    if candidate_run:
+        candidate_path = Path(candidate_run).expanduser()
+        candidate = read_json(candidate_path, None)
+        if not isinstance(candidate, dict):
+            missing.append(f"candidate_run invalid JSON: {candidate_run}")
+        else:
+            candidate_aligned = validate_candidate(candidate, review, baseline_code, feature_protocol, missing, warnings)
+
+    off_protocol_hits = existing_off_protocol(base)
+    if off_protocol_hits and not candidate_aligned:
+        missing.append(
+            "existing off-protocol probe requires a corrective baseline_aligned or pre_registered_feature_protocol candidate-run spec before more launches: "
+            + "; ".join(off_protocol_hits[:6])
+        )
+        if len(off_protocol_hits) > 6:
+            warnings.append(f"{len(off_protocol_hits) - 6} additional off-protocol hits omitted")
+
+    subset_hits = dataset_subset_drift(base)
+    if subset_hits and not candidate_aligned:
+        missing.append(
+            "existing DomainNet subset drift/missing domains require plan revision or full data materialization before target sweeps: "
+            + "; ".join(subset_hits[:4])
+        )
+
+    return {
+        "complete": not missing,
+        "status": "complete" if not missing else "incomplete",
+        "missing": missing,
+        "warnings": warnings,
+        "candidate_run": candidate_run,
+    }
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--project", required=True)
+    parser.add_argument("--candidate-run")
+    args = parser.parse_args()
+    out = lint(args.project, args.candidate_run)
+    print(json.dumps(out, indent=2, ensure_ascii=False))
+    raise SystemExit(0 if out["complete"] else 1)
+
+
+if __name__ == "__main__":
+    main()

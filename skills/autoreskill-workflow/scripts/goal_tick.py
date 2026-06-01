@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import shlex
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -12,6 +13,17 @@ from typing import Any
 
 from contract_lint import lint
 from goal_state import NEXT_ACTIONS, OWNERS, STAGES, ar, load_state, next_stage, save_state
+
+
+SKILLS_ROOT = Path(__file__).resolve().parents[2]
+
+
+def script_cmd(skill: str, script: str, args: str = "") -> str:
+    script_path = SKILLS_ROOT / skill / "scripts" / script
+    cmd = f"python {shlex.quote(str(script_path))}"
+    if args:
+        cmd = f"{cmd} {args}"
+    return cmd
 
 
 def now() -> datetime:
@@ -131,6 +143,59 @@ def queue_job(base: Path, kind: str, stage: str, action: str, reason: str, polic
 
 def execution_spec(stage: str, state: dict[str, Any], contract: dict[str, Any]) -> dict[str, Any]:
     corpus = (state.get("paperNexus") or {}).get("corpus")
+    goal_topic = state.get("goal") or state.get("objective") or ""
+    broad_metadata_discovery = {
+        "depth": "deep",
+        "searchMode": "deep",
+        "planningMode": "llm_augmented",
+        "llmQueryPlanner": True,
+        "citationExpansion": True,
+        "openAlexRelatedExpansion": True,
+        "maxCandidates": 10000,
+        "maxQueries": 48,
+        "maxQueriesPerProvider": 8,
+        "maxResultsPerQuery": 150,
+        "maxLlmQueries": 16,
+        "maxCitationSeeds": 24,
+        "maxCitationsPerSeed": 50,
+        "maxRelatedPerSeed": 50,
+        "maxEntityQueries": 48,
+        "maxExtractedEntities": 160,
+        "maxSeedEntities": 100,
+        "maxSeedPapers": 50,
+        "maxSeedQueries": 40,
+        "papersCoolMaxQueries": 48,
+        "pasaMaxQueries": 20,
+        "providerConcurrency": 4,
+        "retryCount": 5,
+        "timeoutMs": 300000,
+        "searchBudgetMs": 300000,
+        "preferMarkdown": True,
+        "generateArxivMarkdownSources": True,
+        "allowDownloads": False,
+        "importResolved": False,
+        "processImports": False,
+        "returnPartial": True,
+        "persist": True,
+    }
+    lane_topics = {
+        "target_domain": (
+            f"{goal_topic}\n\n"
+            "Search lane: target_domain. Focus on closest priors, SOTA methods, baselines, "
+            "datasets, metrics, protocols, limitations, future work, and negative evidence."
+        ),
+        "near_neighbor": (
+            f"{goal_topic}\n\n"
+            "Search lane: near_neighbor. Focus on adjacent tasks with similar evaluation pressure "
+            "but different mechanisms, assumptions, optimization routes, or continual/open-world settings."
+        ),
+        "far_neighbor": (
+            f"{goal_topic}\n\n"
+            "Search lane: far_neighbor. Focus on transferable mechanisms from domain-agnostic challenges "
+            "such as identity preservation, non-stationarity, streaming discovery, memory, novelty calibration, "
+            "and duplicate prevention."
+        ),
+    }
     common = {
         "inputs": [
             ".autoreskill/goal_state.json",
@@ -143,13 +208,17 @@ def execution_spec(stage: str, state: dict[str, Any], contract: dict[str, Any]) 
         "topic_search": {
             "skill": "autoreskill-papernexus-innovation",
             "role": "Researcher",
-            "goal": "Run bounded PaperNexus literature discovery for the research goal and capture discovery evidence.",
+            "goal": "Run broad PaperNexus literature discovery for the research goal and capture discovery evidence.",
             "mcp_calls": [
                 {"tool": "literature_discovery", "args": {"operation": "plan", "corpus": corpus}},
-                {"tool": "literature_discovery", "args": {"operation": "search", "corpus": corpus}},
+                {"tool": "literature_discovery", "args": {"operation": "search", "corpus": corpus, "topic": goal_topic, **broad_metadata_discovery}},
             ],
             "capture": [
-                "python ~/.codex/skills/autoreskill-papernexus-innovation/scripts/papernexus_artifact_capture.py --project <project-root> --kind literature_discovery_packet --input <mcp-result.json> --stage topic_search --source papernexus-remote.literature_discovery --evidence-note \"topic search evidence\" --tag topic_search"
+                script_cmd(
+                    "autoreskill-papernexus-innovation",
+                    "papernexus_artifact_capture.py",
+                    "--project <project-root> --kind literature_discovery_packet --input <mcp-result.json> --stage topic_search --source papernexus-remote.literature_discovery --evidence-note \"topic search broad discovery evidence\" --tag topic_search",
+                )
             ],
             "outputs": [".autoreskill/literature/LITERATURE_DISCOVERY_PACKET.json"],
         },
@@ -163,9 +232,21 @@ def execution_spec(stage: str, state: dict[str, Any], contract: dict[str, Any]) 
                 {"tool": "agent_materials", "args": {"operation": "research_material_pack", "corpus": corpus}},
             ],
             "capture": [
-                "python ~/.codex/skills/autoreskill-papernexus-innovation/scripts/papernexus_probe_record.py --project <project-root> --callable true --corpus <corpus> --corpora-json <list-corpora-result.json>",
-                "python ~/.codex/skills/autoreskill-papernexus-innovation/scripts/papernexus_artifact_capture.py --project <project-root> --kind source_discovery_plan --input <mcp-result.json> --stage graph_build --source papernexus-remote.agent_materials --tag graph",
-                "python ~/.codex/skills/autoreskill-papernexus-innovation/scripts/papernexus_artifact_capture.py --project <project-root> --kind graph_build_decision --input <decision.json> --stage graph_build --source WorkflowGuard --status complete",
+                script_cmd(
+                    "autoreskill-papernexus-innovation",
+                    "papernexus_probe_record.py",
+                    "--project <project-root> --callable true --corpus <corpus> --corpora-json <list-corpora-result.json>",
+                ),
+                script_cmd(
+                    "autoreskill-papernexus-innovation",
+                    "papernexus_artifact_capture.py",
+                    "--project <project-root> --kind source_discovery_plan --input <mcp-result.json> --stage graph_build --source papernexus-remote.agent_materials --tag graph",
+                ),
+                script_cmd(
+                    "autoreskill-papernexus-innovation",
+                    "papernexus_artifact_capture.py",
+                    "--project <project-root> --kind graph_build_decision --input <decision.json> --stage graph_build --source WorkflowGuard --status complete",
+                ),
             ],
             "outputs": [".autoreskill/graph/GRAPH_BUILD_DECISION.json"],
         },
@@ -179,26 +260,85 @@ def execution_spec(stage: str, state: dict[str, Any], contract: dict[str, Any]) 
                 {"tool": "research_lookup", "args": {"operation": "interdisciplinary_potential", "corpus": corpus}},
             ],
             "capture": [
-                "python ~/.codex/skills/autoreskill-papernexus-innovation/scripts/papernexus_artifact_capture.py --project <project-root> --kind research_material_pack --input <mcp-result.json> --stage frontier_mapping --source papernexus-remote.agent_materials --evidence-note \"frontier material evidence\" --tag frontier"
+                script_cmd(
+                    "autoreskill-papernexus-innovation",
+                    "papernexus_artifact_capture.py",
+                    "--project <project-root> --kind research_material_pack --input <mcp-result.json> --stage frontier_mapping --source papernexus-remote.agent_materials --evidence-note \"frontier material evidence\" --tag frontier",
+                )
             ],
             "outputs": [".autoreskill/papernexus/research_material_pack.json"],
         },
         "ideation": {
             "skill": "autoreskill-ideation-panel",
             "role": "Researcher",
-            "goal": "Use PaperNexus-backed evidence to generate and validate candidate ideas, including the 12-15 item experiment optimization idea pool, with negative evidence and falsifiers.",
+            "goal": "Generate a broad 12-15 item academic-paper-oriented experiment idea pool only after the pre-idea evidence gate passes. Trigger target-domain, near-neighbor, and far-neighbor discovery through papernexus-remote; actively screen raw discovery; satisfy the venue-agnostic breadth lint, not just one attempt per lane; import/supplement or split-read roughly 60-80% of the high-signal eligible set; build INNOVATION_SLOT_MAP.json; write PRE_IDEA_EVIDENCE_GATE.json status=passed; then generate ideas tied to innovation_slot_refs and score every idea against target/near/far evidence before idea_gate selection.",
             "mcp_calls": [
-                {"tool": "agent_materials", "args": {"operation": "negative_evidence_pack", "corpus": corpus}},
-                {"tool": "idea_catalyst", "args": {"mode": "hybrid", "outputMode": "packet_bundle", "corpus": corpus}},
+                {"tool": "literature_discovery", "args": {"operation": "search", "corpus": corpus, "topic": lane_topics["target_domain"], **broad_metadata_discovery}},
+                {"tool": "literature_discovery", "args": {"operation": "search", "corpus": corpus, "topic": lane_topics["near_neighbor"], **broad_metadata_discovery}},
+                {"tool": "literature_discovery", "args": {"operation": "search", "corpus": corpus, "topic": lane_topics["far_neighbor"], **broad_metadata_discovery}},
             ],
             "capture": [
-                "python ~/.codex/skills/autoreskill-papernexus-innovation/scripts/papernexus_artifact_capture.py --project <project-root> --kind negative_evidence_pack --input <mcp-result.json> --stage ideation --source papernexus-remote.agent_materials --tag ideation",
-                "python ~/.codex/skills/autoreskill-papernexus-innovation/scripts/papernexus_artifact_capture.py --project <project-root> --kind graph_ideation_packet --input <mcp-result.json> --stage ideation --source papernexus-remote.idea_catalyst --tag ideation",
-                "python ~/.codex/skills/autoreskill-experiment-plan/scripts/idea_pool_lint.py --project <project-root> --pool ideation/EXPERIMENT_IDEA_POOL.json",
+                script_cmd(
+                    "autoreskill-papernexus-innovation",
+                    "pre_idea_discovery_plan.py",
+                    "--project <project-root> --topic \"<topic>\" --target-domain \"<target-domain>\"",
+                ),
+                script_cmd(
+                    "autoreskill-papernexus-innovation",
+                    "papernexus_artifact_capture.py",
+                    "--project <project-root> --kind literature_discovery_packet --input <mcp-result.json> --stage ideation --source papernexus-remote.literature_discovery --evidence-note \"Ideation broad metadata-only literature discovery\" --tag ideation --tag literature_discovery",
+                ),
+                script_cmd(
+                    "autoreskill-papernexus-innovation",
+                    "discovery_metadata_triage.py",
+                    "--project <project-root> --input literature/LITERATURE_DISCOVERY_PACKET.json --stage ideation",
+                ),
+                script_cmd(
+                    "autoreskill-papernexus-innovation",
+                    "pre_idea_discovery_config_lint.py",
+                    "--project <project-root>",
+                ),
+                script_cmd(
+                    "autoreskill-papernexus-innovation",
+                    "paper_selection_scorecard_lint.py",
+                    "--project <project-root>",
+                ),
+                script_cmd(
+                    "autoreskill-papernexus-innovation",
+                    "pre_idea_breadth_lint.py",
+                    "--project <project-root>",
+                ),
+                script_cmd(
+                    "autoreskill-papernexus-innovation",
+                    "split_reading_evidence_pack_lint.py",
+                    "--project <project-root>",
+                ),
+                script_cmd(
+                    "autoreskill-ideation-panel",
+                    "pre_idea_evidence_gate_lint.py",
+                    "--project <project-root> --write-gate",
+                ),
+                script_cmd(
+                    "autoreskill-experiment-plan",
+                    "idea_pool_lint.py",
+                    "--project <project-root> --pool ideation/EXPERIMENT_IDEA_POOL.json",
+                ),
+                script_cmd("autoreskill-ideation-panel", "idea_scorecard_lint.py", "--project <project-root>"),
             ],
             "outputs": [
-                ".autoreskill/ideation/idea-catalyst/IDEA_CATALYST_CONTRACT.json",
+                ".autoreskill/literature/PRE_IDEA_DISCOVERY_PLAN.json",
+                ".autoreskill/literature/LITERATURE_DISCOVERY_PACKET.json",
+                ".autoreskill/literature/TARGET_DOMAIN_DISCOVERY_PACKET.json",
+                ".autoreskill/literature/NEAR_NEIGHBOR_DISCOVERY_PACKET.json",
+                ".autoreskill/literature/FAR_NEIGHBOR_DISCOVERY_PACKET.json",
+                ".autoreskill/papernexus/LITERATURE_DISCOVERY_TRIAGE.json",
+                ".autoreskill/papernexus/PAPER_SELECTION_SCORECARD.json",
+                ".autoreskill/papernexus/SPLIT_READING_EVIDENCE_PACK.json",
+                ".autoreskill/ideation/INNOVATION_SLOT_MAP.json",
+                ".autoreskill/ideation/PRE_IDEA_EVIDENCE_GATE.json",
                 ".autoreskill/ideation/EXPERIMENT_IDEA_POOL.json",
+                ".autoreskill/ideation/IDEA_NOVELTY_VENUE_SCORECARD.json",
+                ".autoreskill/ideation/IDEA_NOVELTY_VENUE_SCORECARD.md",
             ],
         },
         "literature_review": {
@@ -219,16 +359,22 @@ def execution_spec(stage: str, state: dict[str, Any], contract: dict[str, Any]) 
         "idea_gate": {
             "skill": "autoreskill-ideation-panel",
             "role": "Reviewer",
-            "goal": "Run Professor/Postdoc/PhDStudent/Critic gate, select one idea from the ideation-stage experiment idea pool, and select advance/park/kill tracks.",
+            "goal": "Run Professor/Postdoc/PhDStudent/Critic gate after the post-idea novelty and venue scorecard exists, select one idea from the ideation-stage experiment idea pool, and select advance/park/kill tracks.",
             "mcp_calls": [],
             "capture": [
-                "python ~/.codex/skills/autoreskill-experiment-plan/scripts/idea_pool_lint.py --project <project-root> --pool ideation/EXPERIMENT_IDEA_POOL.json --require-selected"
+                script_cmd("autoreskill-ideation-panel", "idea_scorecard_lint.py", "--project <project-root>"),
+                script_cmd(
+                    "autoreskill-experiment-plan",
+                    "idea_pool_lint.py",
+                    "--project <project-root> --pool ideation/EXPERIMENT_IDEA_POOL.json --require-selected",
+                ),
             ],
             "outputs": [
                 ".autoreskill/ideation/TOURNAMENT_SCOREBOARD.json",
                 ".autoreskill/ideation/TOP3_DIRECTION_SUMMARY.md",
                 ".autoreskill/reviewer/IDEA_GATE_REVIEW.json",
                 ".autoreskill/ideation/EXPERIMENT_IDEA_POOL.json",
+                ".autoreskill/ideation/IDEA_NOVELTY_VENUE_SCORECARD.json",
             ],
         },
         "experiment_plan": {
@@ -237,8 +383,8 @@ def execution_spec(stage: str, state: dict[str, Any], contract: dict[str, Any]) 
             "goal": "Materialize an INNOVATION_PACKET and reviewed experiment plan from the selected ideation-stage optimization idea.",
             "mcp_calls": [],
             "capture": [
-                "python ~/.codex/skills/autoreskill-experiment-plan/scripts/prelaunch_lint.py --project <project-root>",
-                "python ~/.codex/skills/autoreskill-experiment-plan/scripts/innovation_lint.py --project <project-root>",
+                script_cmd("autoreskill-experiment-plan", "prelaunch_lint.py", "--project <project-root>"),
+                script_cmd("autoreskill-experiment-plan", "innovation_lint.py", "--project <project-root>"),
             ],
             "outputs": [
                 ".autoreskill/orchestrator/INNOVATION_PACKET.json",
@@ -248,17 +394,35 @@ def execution_spec(stage: str, state: dict[str, Any], contract: dict[str, Any]) 
         "code": {
             "skill": "autoreskill-implement-experiment",
             "role": "Coder",
-            "goal": "Implement the reviewed baseline/proposed experiment bundle and produce dry-run proof.",
+            "goal": "Audit the locked baseline code and dataset, stage/upload the bundle through the selected SSH/local-GPU or AutoDL backend, implement comparable baseline/proposed real experiment entrypoints, and produce real-data or real-feature smoke proof.",
             "mcp_calls": [],
-            "capture": [],
-            "outputs": [".autoreskill/coder/EXPERIMENT_INDEX.md", ".autoreskill/coder/experiments/"],
+            "capture": [
+                script_cmd("autoreskill-implement-experiment", "baseline_clone_lint.py", "--project <project-root>"),
+                script_cmd("autoreskill-implement-experiment", "experiment_drift_lint.py", "--project <project-root>"),
+                script_cmd(
+                    "autoreskill-implement-experiment",
+                    "experiment_real_readiness_lint.py",
+                    "--project <project-root>",
+                ),
+            ],
+            "outputs": [
+                ".autoreskill/coder/EXPERIMENT_INDEX.md",
+                ".autoreskill/coder/experiments/**/EXPERIMENT_MANIFEST.json",
+                ".autoreskill/coder/experiments/**/BASELINE_DATA_AUDIT.json",
+                ".autoreskill/coder/experiments/**/REMOTE_UPLOAD.json",
+                ".autoreskill/coder/experiments/**/REMOTE_RUN.json",
+                ".autoreskill/coder/experiments/**/logs/real_*",
+            ],
         },
         "experiment": {
             "skill": "autoreskill-run-experiment",
             "role": "Coder",
-            "goal": "Launch or reconcile experiment runs without changing metric, dataset, or baseline protocol.",
+            "goal": "Launch or reconcile candidate, ablation, and confirmation runs only after baseline-protocol preflight passes. Do not substitute a small model or unregistered feature pilot for the locked baseline; off-protocol probes must stop after one diagnostic run and stay not_promoted.",
             "mcp_calls": [],
-            "capture": [],
+            "capture": [
+                script_cmd("autoreskill-implement-experiment", "baseline_clone_lint.py", "--project <project-root>"),
+                script_cmd("autoreskill-run-experiment", "baseline_protocol_launch_lint.py", "--project <project-root>"),
+            ],
             "outputs": [".autoreskill/coder/EXPERIMENT_LEDGER.json", ".autoreskill/coder/EXPERIMENT_INDEX.md"],
         },
         "analysis": {
@@ -266,7 +430,7 @@ def execution_spec(stage: str, state: dict[str, Any], contract: dict[str, Any]) 
             "role": "Analyzer",
             "goal": "Convert experiment proof into claim-evidence matrix, verdicts, unsupported claims, and narrative report.",
             "mcp_calls": [],
-            "capture": ["python ~/.codex/skills/autoreskill-analyze-results/scripts/analysis_lint.py --project <project-root>"],
+            "capture": [script_cmd("autoreskill-analyze-results", "analysis_lint.py", "--project <project-root>")],
             "outputs": [
                 ".autoreskill/analyzer/CLAIM_EVIDENCE_MATRIX.md",
                 ".autoreskill/analyzer/TRACK_VERDICTS.md",
@@ -277,7 +441,7 @@ def execution_spec(stage: str, state: dict[str, Any], contract: dict[str, Any]) 
             "role": "Reviewer",
             "goal": "Run isolated review and close or downgrade blocking findings.",
             "mcp_calls": [],
-            "capture": ["python ~/.codex/skills/autoreskill-review-gate/scripts/review_lint.py --project <project-root>"],
+            "capture": [script_cmd("autoreskill-review-gate", "review_lint.py", "--project <project-root>")],
             "outputs": [".autoreskill/reviewer/REVIEW_FINDINGS.json"],
         },
         "writing": {
@@ -293,7 +457,7 @@ def execution_spec(stage: str, state: dict[str, Any], contract: dict[str, Any]) 
             "role": "WorkflowGuard",
             "goal": "Verify final submission package, citation integrity, front matter, and target-venue readiness.",
             "mcp_calls": [],
-            "capture": ["python ~/.codex/skills/autoreskill-review-gate/scripts/review_lint.py --project <project-root>"],
+            "capture": [script_cmd("autoreskill-review-gate", "review_lint.py", "--project <project-root>")],
             "outputs": [
                 ".autoreskill/paper/main.tex",
                 ".autoreskill/paper/main.pdf",
