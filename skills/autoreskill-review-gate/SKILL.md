@@ -14,6 +14,7 @@ Modes:
 - Reviewer: strict but fair review.
 - Cross-Reviewer: isolated external critique, sees only explicit packet.
 - Citation gate: check all citations are real and used correctly.
+- When novelty, related-work, missing-baseline, protocol-norm, significance, or citation findings are open, route repair through targeted PaperNexus literature discovery/material evidence before accepting the claim or waiving the issue.
 - Submission readiness: verify final package.
 
 If high/medium issues remain, autopilot should create repair packets. After three failed repair rounds, downgrade/delete claims or switch route.
@@ -21,7 +22,7 @@ If high/medium issues remain, autopilot should create repair packets. After thre
 `reviewer/REVIEW_FINDINGS.json` is the machine-readable authority for review pressure. If review comments come from `academic-paper-reviewer`, first convert them with:
 
 ```bash
-python ~/.codex/skills/academic-paper-reviewer/scripts/review_findings_adapter.py --project <project-root> --input <review-output.md>
+python <skill-root>/../academic-paper-reviewer/scripts/review_findings_adapter.py --project <project-root> --input <review-output.md>
 ```
 
 ## Validation

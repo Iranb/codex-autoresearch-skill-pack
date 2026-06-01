@@ -10,6 +10,43 @@ from pathlib import Path
 from typing import Any
 
 
+REQUIRED_SEARCH_EQUALS = {
+    "depth": "deep",
+    "searchMode": "deep",
+    "planningMode": "llm_augmented",
+    "llmQueryPlanner": True,
+    "citationExpansion": True,
+    "openAlexRelatedExpansion": True,
+    "allowDownloads": False,
+    "importResolved": False,
+    "processImports": False,
+    "returnPartial": True,
+    "persist": True,
+}
+
+REQUIRED_SEARCH_MIN_VALUES = {
+    "maxCandidates": 10000,
+    "maxQueries": 48,
+    "maxQueriesPerProvider": 8,
+    "maxResultsPerQuery": 150,
+    "maxLlmQueries": 16,
+    "maxCitationSeeds": 24,
+    "maxCitationsPerSeed": 50,
+    "maxRelatedPerSeed": 50,
+    "maxEntityQueries": 48,
+    "maxExtractedEntities": 160,
+    "maxSeedEntities": 100,
+    "maxSeedPapers": 50,
+    "maxSeedQueries": 40,
+    "papersCoolMaxQueries": 48,
+    "pasaMaxQueries": 20,
+    "providerConcurrency": 4,
+    "retryCount": 5,
+    "timeoutMs": 300000,
+    "searchBudgetMs": 300000,
+}
+
+
 def now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -159,15 +196,40 @@ Run capture commands only after the corresponding MCP or role-pass result exists
 After successful execution:
 
 ```bash
-python ~/.codex/skills/autoreskill-workflow/scripts/goal_job_update.py --project "{Path(project).expanduser().resolve()}" --kind {packet.get('job_kind') or 'repair'} --job-id {packet.get('job_id')} --status completed --artifact <artifact-path>
+python <workflow-skill-root>/scripts/goal_job_update.py --project "{Path(project).expanduser().resolve()}" --kind {packet.get('job_kind') or 'repair'} --job-id {packet.get('job_id')} --status completed --artifact <artifact-path>
 ```
 
 If execution fails:
 
 ```bash
-python ~/.codex/skills/autoreskill-workflow/scripts/goal_job_update.py --project "{Path(project).expanduser().resolve()}" --kind {packet.get('job_kind') or 'repair'} --job-id {packet.get('job_id')} --status failed --error "<exact blocker>"
+python <workflow-skill-root>/scripts/goal_job_update.py --project "{Path(project).expanduser().resolve()}" --kind {packet.get('job_kind') or 'repair'} --job-id {packet.get('job_id')} --status failed --error "<exact blocker>"
 ```
 """
+
+
+def literature_discovery_search_violations(packet: dict[str, Any]) -> list[str]:
+    violations: list[str] = []
+    calls = packet.get("mcp_calls") or []
+    if not isinstance(calls, list):
+        return violations
+    for index, call in enumerate(calls):
+        if not isinstance(call, dict) or call.get("tool") != "literature_discovery":
+            continue
+        args = call.get("args")
+        if not isinstance(args, dict) or args.get("operation") != "search":
+            continue
+        label = f"mcp_calls[{index}].args"
+        for key, expected in REQUIRED_SEARCH_EQUALS.items():
+            actual = args.get(key)
+            if actual != expected:
+                violations.append(f"{label}.{key} must be {expected!r}, found {actual!r}")
+        for key, minimum in REQUIRED_SEARCH_MIN_VALUES.items():
+            actual = args.get(key)
+            if not isinstance(actual, (int, float)) or actual < minimum:
+                violations.append(f"{label}.{key} must be >= {minimum}, found {actual!r}")
+        if "lane" in args:
+            violations.append(f"{label}.lane must not be passed to the MCP; encode lane focus in topic")
+    return violations
 
 
 def main() -> None:
@@ -181,6 +243,12 @@ def main() -> None:
     base = ar(args.project)
     packet_path = base / "job_packets" / f"{args.job_id}.json"
     packet = read_json(packet_path)
+    search_violations = literature_discovery_search_violations(packet)
+    if search_violations:
+        raise SystemExit(
+            "refusing to dispatch narrow literature_discovery search job packet:\n"
+            + "\n".join(f"- {item}" for item in search_violations)
+        )
     prompt_path = base / "job_packets" / f"{args.job_id}.prompt.md"
     prompt_path.write_text(render_prompt(args.project, packet, args.mode), encoding="utf-8")
     subagent_request = None

@@ -10,7 +10,7 @@
   "novelty_basis": "",
   "idea_pool_path": "ideation/EXPERIMENT_IDEA_POOL.json",
   "selected_idea_id": "IDEA-001",
-  "idea_generation_scope": "experiment idea generation; no literature refresh",
+  "idea_generation_scope": "experiment idea generation; targeted literature/material closure required when selected-idea evidence debt exists",
   "innovation_search_contract": {
     "selected_idea_id": "IDEA-001",
     "track_id": "track_001",

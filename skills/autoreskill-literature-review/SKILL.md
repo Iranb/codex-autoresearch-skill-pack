@@ -16,6 +16,8 @@ Use after topic search and graph build. Consume PaperNexus discovery/material pa
 
 Every claim should cite an evidence id or a paper id. Keep unresolved citations in the queue.
 
+If the existing discovery packets do not cover SOTA, closest priors, baseline candidates, datasets, metrics, protocols, limitations, negative evidence, or target-venue related-work expectations, trigger targeted PaperNexus literature discovery before finalizing the review. Do not treat a first-pass topic search as sufficient coverage when the SOTA matrix or citation queue exposes gaps.
+
 ## Deterministic Helpers
 
 ```bash

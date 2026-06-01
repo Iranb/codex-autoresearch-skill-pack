@@ -1,0 +1,28 @@
+# Literature Discovery Triggers
+
+PaperNexus literature discovery is a recurring evidence repair action across the workflow. Do not treat the first `topic_search` packet or the first `literature_review` draft as final coverage.
+
+Use live `papernexus-remote` discovery/material calls when any of these evidence gaps appear:
+
+| Stage | Trigger discovery when | Preferred output |
+| --- | --- | --- |
+| `topic_search` | no broad discovery packet, topic is underspecified, corpus scope is unclear, or keywords are too narrow | `literature/LITERATURE_DISCOVERY_PACKET.json` plus evidence cart entries |
+| `graph_build` | graph decision is not source-backed, corpus/source coverage is unclear, or PaperNexus capability/corpus state is stale | `papernexus/source_discovery_plan.json`, `graph/GRAPH_BUILD_DECISION.json` |
+| `frontier_mapping` | gap, limitation, failure mode, transfer source, negative evidence, or experiment/cost norm is missing | `papernexus/research_material_pack.json`, challenge/transfer materials |
+| `literature_review` | SOTA matrix, gap synthesis, citation queue, baseline/dataset/metric anchors, or target-venue related-work coverage is incomplete | `literature/SOTA_MATRIX.md`, `literature/GAP_SYNTHESIS.md`, `literature/CITATION_QUEUE.json` |
+| `ideation` | any target-domain, near-neighbor, or far-neighbor lane misses breadth, role coverage, source resolvability, split-reading evidence, or transferable mechanism quality | lane discovery packets, triage, paper selection scorecard, split-reading pack |
+| `idea_gate` | selected/top ideas have unresolved closest-prior comparison, overlap risk, missing negative evidence, weak transfer bridge, or unsupported novelty score | selected-idea follow-up evidence and updated scorecard |
+| `experiment_plan` | selected idea is below `plan_ready`, evidence import gate is blocked/async, baseline/protocol/metric norms are not source-backed, or target-domain absence evidence is required | evidence import/material refs in `INNOVATION_PACKET.json` and `EXPERIMENT_REVIEW_PACKET.json` |
+| `code` | normally do not search; return to `experiment_plan` only if implementation reveals the locked baseline/protocol/dataset choice was unsupported by literature evidence | planning repair packet, not ad hoc code-stage search |
+| `experiment` | normally do not search while a run is active; after terminal negative/regressed results, trigger discovery only if mechanism failure needs literature-backed diagnosis or a new structural idea | negative-evidence or failure-mode evidence routed to ideation/planning |
+| `analysis` | claims are unsupported, result contradicts the expected mechanism, ablation exposes a hidden confound, or limitations need source-backed framing | claim-evidence repair notes and negative/contradictory evidence |
+| `review_pressure` | reviewer findings mention novelty, related work, missing baselines, missing citations, threat models, protocol norms, or unsupported significance | targeted discovery/citation closure plus updated findings |
+| `writing` | related work has placeholders, claims lack citation ids, closest-prior contrast is weak, or citation queue is unresolved | citation queue updates, related-work evidence, `refs.bib` entries |
+| `submission_ready` | citation lint, bibliography, venue claims, or front-matter evidence checks fail | final citation/corpus verification before readiness |
+
+Default search policy:
+
+- Start broad and metadata-only for ideation lanes; import/supplement/split-read only after candidate triage.
+- Prefer targeted follow-up discovery after idea selection, analysis, review, and writing; do not rerun broad discovery when the missing evidence is a specific closest prior, baseline, citation, or negative-evidence question.
+- Keep target-domain discovery as the problem/baseline/protocol/overlap-risk anchor. Use near-neighbor and far-neighbor discovery to supply primary method mechanisms and transfer bridges.
+- Record each search attempt, failed attempt, import/material queue, and degraded boundary. A missing PaperNexus result is a blocker or explicit claim limit, not permission to invent citations or novelty claims.

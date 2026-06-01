@@ -15,6 +15,7 @@ This is the conductor for the portable AutoResearch + PaperNexus workflow. It mu
 - Read `.autoreskill/autopilot_policy.json` before deciding whether to repair, degrade, wait, rollback, or hard-stop.
 - Keep every child role isolated through job packets under `.autoreskill/job_packets/` and, when useful, handoff packets under `.autoreskill/handoffs/`.
 - PaperNexus live graph work must use the configured `papernexus-remote` MCP. Do not use local PaperNexus CLI, raw HTTP, local graph files, local MCP, or SSH graph commands as substitutes.
+- Literature discovery is a cross-stage evidence operation, not only `topic_search` or `literature_review`. Trigger PaperNexus discovery whenever novelty, closest-prior, baseline/protocol, negative evidence, transfer-source, cost-norm, citation, or reviewer-risk evidence is missing or stale.
 - Pre-idea literature breadth is venue-agnostic. Every paper-oriented ideation pass must consider current-field, near-neighbor, and far-neighbor literature with screened candidate counts, not merely one persisted search attempt per lane.
 - For top-tier conference/journal method construction, treat the current field as the problem, baseline, protocol, and reviewer-risk anchor; the primary method mechanism should come from near-neighbor, far-neighbor, or cross-lane transfer evidence. A target-domain-only method variant is a baseline/ablation candidate, not the main innovation, unless a source-backed novelty audit proves the mechanism is absent from the current field.
 - Experiment improvement is innovation-gated: candidate-supported runs are pilot evidence only; WorkflowGuard should keep the workflow in `experiment` until a promoted ablation/confirmation-backed track best exists or policy records an explicit downgrade/hard stop.
@@ -41,7 +42,7 @@ Do not skip status, reconcile, tick, or update-job when executing a role pass. T
 
 ## Commands
 
-Use the scripts as deterministic helpers. Resolve `<skill-root>` to this skill directory, usually `<skills-root>/autoreskill-workflow`.
+Use the scripts as deterministic helpers. Resolve `<skill-root>` to this skill directory, usually `<CODEX_HOME>/skills/autoreskill-workflow`.
 
 ```bash
 python <skill-root>/scripts/goal_state.py init --project <project-root> --goal "<research problem>" --corpus PN-ICML-Ideation-Shared-240-v1 --venue <target-venue>
@@ -87,6 +88,7 @@ The direct authorities are:
 - prelaunch gate: `.autoreskill/planner/EXPERIMENT_REVIEW_PACKET.json`
 
 Read `references/stage_skill_matrix.md` when deciding which child skill owns a stage, allowed write scope, or linter.
+Read `references/literature_discovery_triggers.md` when deciding whether an incomplete stage should queue another PaperNexus discovery/material repair instead of proceeding with weak evidence.
 
 ## Tick Protocol
 
@@ -120,6 +122,7 @@ Read these references only as needed:
 
 - `references/stage_contracts.md`: stage authorities and completion contracts.
 - `references/stage_skill_matrix.md`: child skill routing and allowed write scopes.
+- `references/literature_discovery_triggers.md`: stage-by-stage triggers for PaperNexus literature discovery, source discovery, and citation closure.
 - `references/goal_state_schema.md`: control-plane fields.
 - `references/job_execution_packet_schema.md`: dispatch/update protocol.
 - `references/handoff_packet_schema.md`: role handoff packet shape.

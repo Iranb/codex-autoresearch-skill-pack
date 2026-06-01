@@ -23,6 +23,13 @@ Rules:
 - Compare baseline and proposed side by side.
 - Prefer multi-seed. If budget prevents it, downgrade claim strength.
 - Do not report only best result.
+- Use `coder/EXPERIMENT_LEDGER.json` as the run trajectory authority. Report promoted, not_promoted, failed, and rollback decisions.
+- Treat `best_run` and `track_best_runs` promoted entries as the only sources for improvement claims unless a later confirmation run supersedes them.
+- Treat `candidate_supported` as pilot evidence only. It may justify ablation/confirmation scheduling, but it must not be phrased as a stable improvement.
+- Report each innovation track with selected idea, mechanism, mechanism type, promotion stage, ablation/confirmation links, verdict, and next action.
+- Downgrade or remove claims when improvement comes from a fixture, single seed, missing matched baseline, protected-path hash change, protocol drift, or unreconciled run.
+- Negative and regressed runs are useful evidence for pruning candidates, not support for stronger manuscript claims.
+- If results contradict the proposed mechanism or need source-backed limitation/negative-evidence framing, trigger targeted PaperNexus literature discovery and record the evidence boundary before writing.
 - Unsupported claims must be removed or softened before writing.
 - Figures/tables must be reproducible from scripts or data.
 

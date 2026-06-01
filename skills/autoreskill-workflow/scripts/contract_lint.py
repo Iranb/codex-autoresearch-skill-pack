@@ -128,7 +128,7 @@ def lint(project: str, stage: str) -> dict[str, Any]:
     if stage == "literature_review":
         missing = [
             rel
-            for rel in ["literature/SOTA_MATRIX.md", "literature/GAP_SYNTHESIS.md"]
+            for rel in ["literature/SOTA_MATRIX.md", "literature/GAP_SYNTHESIS.md", "literature/CITATION_QUEUE.json"]
             if not nonempty(base / rel)
         ]
         return result(stage, not missing, missing, "literature_review_contract")
@@ -455,9 +455,18 @@ def lint(project: str, stage: str) -> dict[str, Any]:
         return result(stage, ok, [] if ok else ["paper/main.tex"], "writing_contract")
 
     if stage == "submission_ready":
+        skill_root = Path(__file__).resolve().parents[2]
         package = read_json(base / "submission_ready.json")
         status = str((package or {}).get("status", "")).lower()
-        ok = nonempty(base / "paper/main.tex") and (base / "paper/main.pdf").exists() and status in READY
+        citation_lint = run_json(
+            [
+                sys.executable,
+                str(skill_root / "autoreskill-review-gate/scripts/citation_lint.py"),
+                "--project",
+                str(Path(project).expanduser().resolve()),
+            ]
+        )
+        ok = nonempty(base / "paper/main.tex") and (base / "paper/main.pdf").exists() and status in READY and citation_lint.get("complete") is True
         missing = []
         if not nonempty(base / "paper/main.tex"):
             missing.append("paper/main.tex")
@@ -465,7 +474,12 @@ def lint(project: str, stage: str) -> dict[str, Any]:
             missing.append("paper/main.pdf")
         if status not in READY:
             missing.append("submission_ready.json status ready")
-        return result(stage, ok, missing, "submission_ready_contract")
+        if not citation_lint.get("complete"):
+            items = citation_lint.get("missing") if isinstance(citation_lint.get("missing"), list) else []
+            missing.extend(f"citation_lint: {item}" for item in items)
+            if citation_lint.get("returncode", 1) != 0 and not items:
+                missing.append("citation_lint failed without structured missing output")
+        return result(stage, ok, missing, "submission_ready_contract", details={"citation_lint": citation_lint})
 
     return result(stage, False, [f"unknown stage {stage}"], "unknown_contract")
 

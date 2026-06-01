@@ -14,6 +14,7 @@ Rules:
 - Strong claims must link to experiment or citation evidence.
 - Unsupported claims are softened, moved to limitations, or deleted.
 - Do not invent citations, results, datasets, or baselines.
+- If a paragraph needs a citation, closest-prior contrast, related-work bridge, limitation source, or target-venue framing that is missing from the citation queue, trigger targeted literature discovery instead of writing around the gap.
 - Venue mode should prepare a venue profile, target-venue summary, required checklist/admin gaps, and venue-specific materials for top conferences or journals. NMI is one supported profile, not the only target.
 
 ## Deterministic Helpers

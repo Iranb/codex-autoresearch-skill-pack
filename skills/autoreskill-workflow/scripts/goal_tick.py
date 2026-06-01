@@ -253,8 +253,9 @@ def execution_spec(stage: str, state: dict[str, Any], contract: dict[str, Any]) 
         "frontier_mapping": {
             "skill": "autoreskill-papernexus-innovation",
             "role": "Researcher",
-            "goal": "Build frontier, gap, source-transfer, and experiment norm materials from PaperNexus.",
+            "goal": "Build frontier, gap, source-transfer, negative-evidence, and experiment norm materials from PaperNexus; trigger follow-up literature discovery when material packs leave missing gap/limitation/transfer roles.",
             "mcp_calls": [
+                {"tool": "literature_discovery", "args": {"operation": "search", "corpus": corpus, "topic": f"{goal_topic}\n\nSearch purpose: frontier mapping, limitations, failure modes, negative evidence, transfer sources, and experiment norms.", **broad_metadata_discovery}},
                 {"tool": "agent_materials", "args": {"operation": "research_material_pack", "corpus": corpus}},
                 {"tool": "agent_materials", "args": {"operation": "experiment_cost_materials", "corpus": corpus}},
                 {"tool": "research_lookup", "args": {"operation": "interdisciplinary_potential", "corpus": corpus}},
@@ -344,8 +345,9 @@ def execution_spec(stage: str, state: dict[str, Any], contract: dict[str, Any]) 
         "literature_review": {
             "skill": "autoreskill-literature-review",
             "role": "Researcher",
-            "goal": "Convert discovery and PaperNexus evidence into SOTA matrix, gap synthesis, and citation queue.",
+            "goal": "Convert discovery and PaperNexus evidence into SOTA matrix, gap synthesis, and citation queue. If SOTA, baseline, dataset, metric, venue, or citation coverage is thin, trigger targeted PaperNexus literature discovery before declaring the review complete.",
             "mcp_calls": [
+                {"tool": "literature_discovery", "args": {"operation": "search", "corpus": corpus, "topic": f"{goal_topic}\n\nSearch purpose: SOTA matrix, related work, baseline/dataset/metric anchors, target-venue context, and citation queue closure.", **broad_metadata_discovery}},
                 {"tool": "research_briefing", "args": {"operation": "research_brief", "corpus": corpus}},
                 {"tool": "research_briefing", "args": {"operation": "evidence_chain", "corpus": corpus}},
             ],
@@ -359,8 +361,11 @@ def execution_spec(stage: str, state: dict[str, Any], contract: dict[str, Any]) 
         "idea_gate": {
             "skill": "autoreskill-ideation-panel",
             "role": "Reviewer",
-            "goal": "Run Professor/Postdoc/PhDStudent/Critic gate after the post-idea novelty and venue scorecard exists, select one idea from the ideation-stage experiment idea pool, and select advance/park/kill tracks.",
-            "mcp_calls": [],
+            "goal": "Run Professor/Postdoc/PhDStudent/Critic gate after the post-idea novelty and venue scorecard exists, select one idea from the ideation-stage experiment idea pool, and select advance/park/kill tracks. Trigger targeted PaperNexus discovery if top ideas still lack closest-prior comparison, overlap-risk closure, negative evidence, or a credible near/far-neighbor transfer bridge.",
+            "mcp_calls": [
+                {"tool": "literature_discovery", "args": {"operation": "search", "corpus": corpus, "topic": f"{goal_topic}\n\nSearch purpose: selected/top idea novelty gate, closest priors, overlap risk, negative evidence, and transfer-bridge validation.", **broad_metadata_discovery}},
+                {"tool": "agent_materials", "args": {"operation": "research_material_pack", "corpus": corpus}},
+            ],
             "capture": [
                 script_cmd("autoreskill-ideation-panel", "idea_scorecard_lint.py", "--project <project-root>"),
                 script_cmd(
@@ -380,8 +385,12 @@ def execution_spec(stage: str, state: dict[str, Any], contract: dict[str, Any]) 
         "experiment_plan": {
             "skill": "autoreskill-experiment-plan",
             "role": "Orchestrator",
-            "goal": "Materialize an INNOVATION_PACKET and reviewed experiment plan from the selected ideation-stage optimization idea.",
-            "mcp_calls": [],
+            "goal": "Materialize an INNOVATION_PACKET and reviewed experiment plan from the selected ideation-stage optimization idea. Before launch, trigger targeted PaperNexus discovery/material closure for selected-idea novelty, current-field overlap risk, baseline/protocol/metric norms, negative evidence, and target-domain absence evidence when required.",
+            "mcp_calls": [
+                {"tool": "literature_discovery", "args": {"operation": "search", "corpus": corpus, "topic": f"{goal_topic}\n\nSearch purpose: selected idea experiment-plan closure, novelty risk, baseline/protocol/metric norms, negative evidence, and current-field absence evidence if the method is target-domain-only.", **broad_metadata_discovery}},
+                {"tool": "agent_materials", "args": {"operation": "research_material_pack", "corpus": corpus}},
+                {"tool": "agent_materials", "args": {"operation": "closest_prior_materials", "corpus": corpus}},
+            ],
             "capture": [
                 script_cmd("autoreskill-experiment-plan", "prelaunch_lint.py", "--project <project-root>"),
                 script_cmd("autoreskill-experiment-plan", "innovation_lint.py", "--project <project-root>"),
@@ -428,8 +437,11 @@ def execution_spec(stage: str, state: dict[str, Any], contract: dict[str, Any]) 
         "analysis": {
             "skill": "autoreskill-analyze-results",
             "role": "Analyzer",
-            "goal": "Convert experiment proof into claim-evidence matrix, verdicts, unsupported claims, and narrative report.",
-            "mcp_calls": [],
+            "goal": "Convert experiment proof into claim-evidence matrix, verdicts, unsupported claims, and narrative report. Trigger targeted PaperNexus discovery when results contradict the expected mechanism, expose a hidden confound, or need source-backed negative evidence or limitation framing.",
+            "mcp_calls": [
+                {"tool": "literature_discovery", "args": {"operation": "search", "corpus": corpus, "topic": f"{goal_topic}\n\nSearch purpose: post-result claim repair, contradictory evidence, negative results, limitations, failure modes, and mechanism diagnosis.", **broad_metadata_discovery}},
+                {"tool": "agent_materials", "args": {"operation": "research_material_pack", "corpus": corpus}},
+            ],
             "capture": [script_cmd("autoreskill-analyze-results", "analysis_lint.py", "--project <project-root>")],
             "outputs": [
                 ".autoreskill/analyzer/CLAIM_EVIDENCE_MATRIX.md",
@@ -439,25 +451,39 @@ def execution_spec(stage: str, state: dict[str, Any], contract: dict[str, Any]) 
         "review_pressure": {
             "skill": "autoreskill-review-gate",
             "role": "Reviewer",
-            "goal": "Run isolated review and close or downgrade blocking findings.",
-            "mcp_calls": [],
-            "capture": [script_cmd("autoreskill-review-gate", "review_lint.py", "--project <project-root>")],
+            "goal": "Run isolated review and close or downgrade blocking findings. Trigger targeted PaperNexus discovery for reviewer objections about novelty, related work, missing baselines, missing citations, protocol norms, threat models, or unsupported significance.",
+            "mcp_calls": [
+                {"tool": "literature_discovery", "args": {"operation": "search", "corpus": corpus, "topic": f"{goal_topic}\n\nSearch purpose: reviewer-pressure repair for novelty, related work, missing baselines/citations, protocol norms, threat models, and significance claims.", **broad_metadata_discovery}},
+                {"tool": "research_briefing", "args": {"operation": "evidence_chain", "corpus": corpus}},
+            ],
+            "capture": [
+                script_cmd("autoreskill-review-gate", "review_lint.py", "--project <project-root>"),
+                script_cmd("autoreskill-review-gate", "citation_lint.py", "--project <project-root>"),
+            ],
             "outputs": [".autoreskill/reviewer/REVIEW_FINDINGS.json"],
         },
         "writing": {
             "skill": "autoreskill-paper-write",
             "role": "Academic Writer",
-            "goal": "Write evidence-bound manuscript material from approved claims, literature, and review guidance.",
-            "mcp_calls": [],
+            "goal": "Write evidence-bound manuscript material from approved claims, literature, and review guidance. Trigger targeted literature discovery when related-work contrast, must-cite papers, citation ids, or claim support are missing.",
+            "mcp_calls": [
+                {"tool": "literature_discovery", "args": {"operation": "search", "corpus": corpus, "topic": f"{goal_topic}\n\nSearch purpose: manuscript related-work and citation closure, closest-prior contrast, must-cite papers, and claim support.", **broad_metadata_discovery}},
+                {"tool": "research_briefing", "args": {"operation": "research_brief", "corpus": corpus}},
+            ],
             "capture": [],
             "outputs": [".autoreskill/paper/main.tex", ".autoreskill/paper/write_package.json"],
         },
         "submission_ready": {
             "skill": "autoreskill-review-gate",
             "role": "WorkflowGuard",
-            "goal": "Verify final submission package, citation integrity, front matter, and target-venue readiness.",
-            "mcp_calls": [],
-            "capture": [script_cmd("autoreskill-review-gate", "review_lint.py", "--project <project-root>")],
+            "goal": "Verify final submission package, citation integrity, front matter, and target-venue readiness. Trigger final targeted discovery only for citation/source blockers that prevent readiness.",
+            "mcp_calls": [
+                {"tool": "literature_discovery", "args": {"operation": "search", "corpus": corpus, "topic": f"{goal_topic}\n\nSearch purpose: final citation/source verification and unresolved bibliography blockers before submission.", **broad_metadata_discovery}},
+            ],
+            "capture": [
+                script_cmd("autoreskill-review-gate", "review_lint.py", "--project <project-root>"),
+                script_cmd("autoreskill-review-gate", "citation_lint.py", "--project <project-root>"),
+            ],
             "outputs": [
                 ".autoreskill/paper/main.tex",
                 ".autoreskill/paper/main.pdf",
@@ -556,17 +582,17 @@ def stage_write_scopes(stage: str) -> list[str]:
         ],
         "topic_search": [".autoreskill/literature/", ".autoreskill/papernexus/"],
         "graph_build": [".autoreskill/graph/", ".autoreskill/papernexus/"],
-        "frontier_mapping": [".autoreskill/papernexus/", ".autoreskill/ideation/"],
-        "literature_review": [".autoreskill/literature/"],
-        "ideation": [".autoreskill/ideation/", ".autoreskill/papernexus/"],
-        "idea_gate": [".autoreskill/ideation/", ".autoreskill/reviewer/"],
-        "experiment_plan": [".autoreskill/orchestrator/", ".autoreskill/planner/"],
+        "frontier_mapping": [".autoreskill/papernexus/", ".autoreskill/literature/", ".autoreskill/ideation/"],
+        "literature_review": [".autoreskill/literature/", ".autoreskill/papernexus/"],
+        "ideation": [".autoreskill/ideation/", ".autoreskill/papernexus/", ".autoreskill/literature/"],
+        "idea_gate": [".autoreskill/ideation/", ".autoreskill/reviewer/", ".autoreskill/literature/", ".autoreskill/papernexus/"],
+        "experiment_plan": [".autoreskill/orchestrator/", ".autoreskill/planner/", ".autoreskill/literature/", ".autoreskill/papernexus/"],
         "code": [".autoreskill/coder/"],
         "experiment": [".autoreskill/coder/"],
-        "analysis": [".autoreskill/analyzer/"],
-        "review_pressure": [".autoreskill/reviewer/"],
-        "writing": [".autoreskill/paper/"],
-        "submission_ready": [".autoreskill/paper/", ".autoreskill/submission_ready.json"],
+        "analysis": [".autoreskill/analyzer/", ".autoreskill/literature/", ".autoreskill/papernexus/"],
+        "review_pressure": [".autoreskill/reviewer/", ".autoreskill/literature/", ".autoreskill/papernexus/"],
+        "writing": [".autoreskill/paper/", ".autoreskill/literature/", ".autoreskill/papernexus/"],
+        "submission_ready": [".autoreskill/paper/", ".autoreskill/literature/", ".autoreskill/papernexus/", ".autoreskill/submission_ready.json"],
     }
     stage_scopes = scopes.get(stage, [f".autoreskill/{stage}/"])
     return [*stage_scopes, *common]

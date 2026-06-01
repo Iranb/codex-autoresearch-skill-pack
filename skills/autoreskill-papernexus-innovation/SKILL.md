@@ -9,6 +9,8 @@ metadata:
 
 Use this skill before experiment planning and whenever live PaperNexus evidence is needed. During ideation, PaperNexus owns the pre-idea evidence expansion gate and now provides the preferred idea-generation substrate through `agent_materials(operation="proposal_graph_session")`: target-domain, near-neighbor, and far-neighbor discovery must be attempted, actively screened, converted into split-reading evidence, and then used to run a committed proposal graph session before the ideation panel writes the 12-15 idea pool when the remote MCP exposes that operation.
 
+Also use this skill after ideation whenever a later stage exposes a concrete evidence gap: selected-idea closest-prior closure, baseline/protocol norms, target-domain absence evidence, negative/contradictory evidence, reviewer novelty/citation objections, or manuscript related-work citation gaps. Later-stage discovery should be targeted and source-backed rather than a broad rerun unless the earlier discovery was demonstrably too narrow.
+
 ## Hard Policy
 
 - Use `papernexus-remote` MCP for live graph work.
