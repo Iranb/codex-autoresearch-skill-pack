@@ -24,6 +24,7 @@ Required authority fields:
 - consumed innovation slot ids that explain which challenge/insight/transfer evidence drove the selected idea
 - proposal graph session path, manifest path, committed subgraph id, proposal artifact paths, and controller trace paths when the selected idea cites `proposal_session_ref`
 - innovation search contract: idea-bound mechanism, mechanism type, track id, expected effect, falsifier, ablation/confirmation requirements, and initial promotion stage
+- primary method source role, neighbor transfer mechanism, target-domain anchor, and target-domain method overlap risk for the selected idea
 - supporting idea fragment ids
 - baseline
 - baseline code decision: exact codebase/artifact/revision/path, train/eval entrypoints, and rationale
@@ -45,9 +46,12 @@ Required authority fields:
 Every launchable plan must bind the experiment to one explicit innovation mechanism, not just a metric target. Both packets must contain `innovation_search_contract` with:
 
 - `selected_idea_id`, `track_id`, `innovation_mechanism`, and `mechanism_type` (`ALGO`, `CODE`, or `PARAM`)
+- `primary_method_source_role`, `neighbor_transfer_mechanism`, `target_domain_anchor`, and `target_domain_method_overlap_risk`
 - `one_variable_change`, `expected_effect`, `falsifier`
 - `ablation_required=true`, `confirmation_required=true`
 - `promotion_stage="candidate"` for the first run
+
+For top-tier method claims, `primary_method_source_role` should be `near_neighbor`, `far_neighbor`, `cross_lane_recombination`, `proposal_graph_transfer`, or `external_domain_transfer`. A target-domain-only mechanism is launchable as a baseline/ablation or low-claim diagnostic, but it should not be the main method claim unless `current_field_absence_evidence` and closest-prior closure show the mechanism has not appeared in the current field.
 
 `EXPERIMENT_REVIEW_PACKET.json` must also include `promotion_gate`. A single positive run is only candidate evidence; it cannot become a promoted manuscript improvement until a linked ablation or confirmation run supports the same mechanism under the locked protocol. If budget prevents that, downgrade the claim to pilot evidence instead of promoting it.
 
@@ -86,6 +90,7 @@ Run these steps before continuing the remaining experiment-plan workflow:
 - Evidence import/material gate first; after that gate is passed, not required, or explicitly marked launch-blocked for dry-run-only work, lock baseline code before baseline protocol.
 - Consume the selected optimization idea from `autoreskill-ideation-panel` at `ideation/EXPERIMENT_IDEA_POOL.json`. Do not generate the pool in experiment planning.
 - Consume the selected idea's `pre_idea_evidence_gate_path`, `innovation_slot_map_path`, and `innovation_slot_refs` into both `INNOVATION_PACKET.json` and `EXPERIMENT_REVIEW_PACKET.json`.
+- Preserve the selected idea's `primary_method_source_role`, `neighbor_transfer_mechanism`, `target_domain_anchor`, and `target_domain_method_overlap_risk`. Do not rewrite a near/far-neighbor transfer idea into a target-domain-only tweak during planning.
 - Consume the selected idea's proposal graph provenance into both packets when present: `proposal_graph_session_path`, `proposal_graph_session_manifest_path`, `proposal_committed_subgraph_id`, `proposal_artifact_paths`, `proposal_controller_trace_paths`, and `proposal_evidence_export_path`.
 - If the pool is missing, malformed, or has no selected idea, return to `ideation` or `idea_gate`; do not patch around it by inventing a planning-stage pool.
 - If selected-idea evidence debt exists, PaperNexus import/material work is a hard gate, not a default downgrade path. Use `papernexus-remote` first; downgrade or launch-precondition constraints are allowed only after an MCP attempt, async queue handoff, feature-detection failure, import failure, full-text/license/budget block, or exhausted bounded retry is recorded in `evidence_import_gate`.

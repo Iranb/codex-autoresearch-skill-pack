@@ -15,6 +15,9 @@ This is the conductor for the portable AutoResearch + PaperNexus workflow. It mu
 - Read `.autoreskill/autopilot_policy.json` before deciding whether to repair, degrade, wait, rollback, or hard-stop.
 - Keep every child role isolated through job packets under `.autoreskill/job_packets/` and, when useful, handoff packets under `.autoreskill/handoffs/`.
 - PaperNexus live graph work must use the configured `papernexus-remote` MCP. Do not use local PaperNexus CLI, raw HTTP, local graph files, local MCP, or SSH graph commands as substitutes.
+- Pre-idea literature breadth is venue-agnostic. Every paper-oriented ideation pass must consider current-field, near-neighbor, and far-neighbor literature with screened candidate counts, not merely one persisted search attempt per lane.
+- For top-tier conference/journal method construction, treat the current field as the problem, baseline, protocol, and reviewer-risk anchor; the primary method mechanism should come from near-neighbor, far-neighbor, or cross-lane transfer evidence. A target-domain-only method variant is a baseline/ablation candidate, not the main innovation, unless a source-backed novelty audit proves the mechanism is absent from the current field.
+- Experiment improvement is innovation-gated: candidate-supported runs are pilot evidence only; WorkflowGuard should keep the workflow in `experiment` until a promoted ablation/confirmation-backed track best exists or policy records an explicit downgrade/hard stop.
 - In `full_auto_bounded`, every tick must produce at least one concrete artifact, repair job, async poll, stage transition, downgrade, rollback, track switch, negative-result route, or hard-stop report.
 - The parent Codex agent executes ready job packets itself through the named child skill. Do not hand the packet back to the user as manual work unless credentials, budget, or a human gate blocks execution.
 
@@ -38,7 +41,7 @@ Do not skip status, reconcile, tick, or update-job when executing a role pass. T
 
 ## Commands
 
-Use the scripts as deterministic helpers. Resolve `<skill-root>` to this skill directory, usually `~/.codex/skills/autoreskill-workflow`.
+Use the scripts as deterministic helpers. Resolve `<skill-root>` to this skill directory, usually `<skills-root>/autoreskill-workflow`.
 
 ```bash
 python <skill-root>/scripts/goal_state.py init --project <project-root> --goal "<research problem>" --corpus PN-ICML-Ideation-Shared-240-v1 --venue <target-venue>
@@ -78,10 +81,9 @@ init -> topic_search -> graph_build -> frontier_mapping -> literature_review -> 
 The direct authorities are:
 
 - `graph_build`: `.autoreskill/graph/GRAPH_BUILD_DECISION.json`
-- `ideation`: `.autoreskill/ideation/idea-catalyst/IDEA_CATALYST_CONTRACT.json`
-- `ideation` experiment idea pool: `.autoreskill/ideation/EXPERIMENT_IDEA_POOL.json`
-- `idea_gate` selected experiment idea: `.autoreskill/ideation/EXPERIMENT_IDEA_POOL.json`
-- `experiment_plan`: `.autoreskill/orchestrator/INNOVATION_PACKET.json`
+- `ideation`: `.autoreskill/ideation/PRE_IDEA_EVIDENCE_GATE.json` + `.autoreskill/ideation/INNOVATION_SLOT_MAP.json` + `.autoreskill/ideation/EXPERIMENT_IDEA_POOL.json`; idea generation must follow target-domain, near-neighbor, and far-neighbor broad PaperNexus discovery with `pre_idea_discovery_config_lint.py` passing, active screening breadth, PaperNexus split-reading evidence, and a committed `papernexus/proposal_graph_session.json` when `proposal_graph_session` is available. The target-domain lane anchors the task, closest priors, baselines, datasets, metrics, protocols, and overlap risks; near/far-neighbor lanes should supply the primary method mechanisms, transfer bridges, or cross-lane recombinations for the main paper idea. The only exceptions are unavailable/unrecorded proposal graph support, diagnosis-only proposal sessions with explicit fallback boundary, or an explicit approved degraded gate with claim limits.
+- `idea_gate` selected experiment idea: `.autoreskill/ideation/PRE_IDEA_EVIDENCE_GATE.json` + `.autoreskill/ideation/IDEA_NOVELTY_VENUE_SCORECARD.json` + `.autoreskill/ideation/EXPERIMENT_IDEA_POOL.json`; approved degraded gates may pass only as speculative idea selection with evidence debt routed to `experiment_plan`.
+- `experiment_plan`: `.autoreskill/orchestrator/INNOVATION_PACKET.json`; when the selected idea cites a proposal graph session, the packet must retain the proposal manifest path, committed subgraph id, controller trace paths, and proposal evidence export path. The reviewed plan must preserve the neighbor/cross-lane primary method source and separately close target-domain overlap risk before launch.
 - prelaunch gate: `.autoreskill/planner/EXPERIMENT_REVIEW_PACKET.json`
 
 Read `references/stage_skill_matrix.md` when deciding which child skill owns a stage, allowed write scope, or linter.

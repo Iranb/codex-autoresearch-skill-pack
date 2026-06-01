@@ -58,6 +58,15 @@ BACKENDS = {"local_gpu", "autodl_gpu"}
 EVIDENCE_GATE_STATUSES = {"passed", "not_required", "async_wait", "blocked"}
 MECHANISM_TYPES = {"ALGO", "CODE", "PARAM"}
 PROMOTION_STAGES = {"candidate", "ablation", "confirmation"}
+VALID_METHOD_SOURCE_ROLES = {
+    "near_neighbor",
+    "far_neighbor",
+    "cross_lane_recombination",
+    "proposal_graph_transfer",
+    "external_domain_transfer",
+    "target_domain_absence_proven",
+}
+TARGET_DOMAIN_ONLY_ROLES = {"target_domain", "current_field", "target_domain_only"}
 CLONE_SOURCE_TYPES = {
     "git_clone",
     "github_clone",
@@ -110,6 +119,10 @@ def placeholder(value: Any) -> bool:
         or "required before launch" in text
         or text.startswith("replace_with")
     )
+
+
+def normalized_role(value: Any) -> str:
+    return str(value or "").strip().lower().replace("-", "_").replace(" ", "_")
 
 
 def require_nested(mapping: Any, prefix: str, keys: list[str], missing: list[str]) -> None:
@@ -196,7 +209,20 @@ def validate_innovation_contract(packet: dict[str, Any], missing: list[str]) -> 
     require_nested(
         contract,
         "EXPERIMENT_REVIEW_PACKET.innovation_search_contract",
-        ["selected_idea_id", "track_id", "innovation_mechanism", "mechanism_type", "one_variable_change", "expected_effect", "falsifier", "promotion_stage"],
+        [
+            "selected_idea_id",
+            "track_id",
+            "innovation_mechanism",
+            "mechanism_type",
+            "primary_method_source_role",
+            "neighbor_transfer_mechanism",
+            "target_domain_anchor",
+            "target_domain_method_overlap_risk",
+            "one_variable_change",
+            "expected_effect",
+            "falsifier",
+            "promotion_stage",
+        ],
         missing,
     )
     if not isinstance(contract, dict):
@@ -205,6 +231,12 @@ def validate_innovation_contract(packet: dict[str, Any], missing: list[str]) -> 
         missing.append("EXPERIMENT_REVIEW_PACKET.innovation_search_contract.mechanism_type must be ALGO, CODE, or PARAM")
     if str(contract.get("promotion_stage") or "").strip().lower() not in PROMOTION_STAGES:
         missing.append("EXPERIMENT_REVIEW_PACKET.innovation_search_contract.promotion_stage must be candidate, ablation, or confirmation")
+    source_role = normalized_role(contract.get("primary_method_source_role") or packet.get("primary_method_source_role"))
+    if source_role in TARGET_DOMAIN_ONLY_ROLES:
+        if not present(contract.get("current_field_absence_evidence") or packet.get("current_field_absence_evidence")):
+            missing.append("EXPERIMENT_REVIEW_PACKET.innovation_search_contract.current_field_absence_evidence required for target-domain-only main method")
+    elif source_role and source_role not in VALID_METHOD_SOURCE_ROLES:
+        missing.append("EXPERIMENT_REVIEW_PACKET.innovation_search_contract.primary_method_source_role must be near/far-neighbor transfer, cross-lane recombination, proposal-graph transfer, external-domain transfer, or target_domain_absence_proven")
     if contract.get("ablation_required") is not True:
         missing.append("EXPERIMENT_REVIEW_PACKET.innovation_search_contract.ablation_required must be true")
     if contract.get("confirmation_required") is not True:

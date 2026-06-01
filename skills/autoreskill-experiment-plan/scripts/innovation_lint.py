@@ -18,11 +18,37 @@ if str(PAPERNEXUS_SCRIPTS) not in sys.path:
 from idea_support_lint import lint_idea_support, resolve_artifact_path  # noqa: E402
 
 
-REQUIRED = ["selected_idea_fragment_id", "baseline", "primary_metric", "fixed_budget"]
+REQUIRED = [
+    "selected_idea_fragment_id",
+    "innovation_search_contract",
+    "baseline",
+    "baseline_code",
+    "evidence_import_gate",
+    "pre_idea_evidence_gate_path",
+    "innovation_slot_map_path",
+    "consumed_innovation_slot_ids",
+    "compute_backend",
+    "path_mapping",
+    "primary_metric",
+    "fixed_budget",
+]
 ONE_VARIABLE_KEYS = ["one_variable_change", "oneVariableChange", "method_delta", "methodDelta", "intervention", "variable_change"]
 FALSIFIER_KEYS = ["falsifier", "falsifiers", "failure_condition", "failure_conditions", "failureCondition", "stop_condition"]
 DATASET_KEYS = ["dataset_or_benchmark", "datasetOrBenchmark", "dataset", "datasets", "benchmark", "benchmarks"]
 READY = {"ready", "complete", "completed", "pass", "passed", "approved", "verified"}
+BACKENDS = {"local_gpu", "autodl_gpu"}
+EVIDENCE_GATE_STATUSES = {"passed", "not_required", "async_wait", "blocked"}
+MECHANISM_TYPES = {"ALGO", "CODE", "PARAM"}
+PROMOTION_STAGES = {"candidate", "ablation", "confirmation"}
+VALID_METHOD_SOURCE_ROLES = {
+    "near_neighbor",
+    "far_neighbor",
+    "cross_lane_recombination",
+    "proposal_graph_transfer",
+    "external_domain_transfer",
+    "target_domain_absence_proven",
+}
+TARGET_DOMAIN_ONLY_ROLES = {"target_domain", "current_field", "target_domain_only"}
 
 
 def ar(project: str) -> Path:
@@ -53,6 +79,138 @@ def first_present(mapping: dict[str, Any], keys: list[str]) -> Any:
         if present(mapping.get(key)):
             return mapping[key]
     return None
+
+
+def placeholder(value: Any) -> bool:
+    if not isinstance(value, str):
+        return False
+    text = value.strip().lower()
+    return "required before launch" in text or text.startswith("replace_with")
+
+
+def require_nested(mapping: Any, prefix: str, keys: list[str], missing: list[str]) -> None:
+    if not isinstance(mapping, dict):
+        missing.append(prefix)
+        return
+    for key in keys:
+        value = mapping.get(key)
+        if not present(value) or placeholder(value):
+            missing.append(f"{prefix}.{key}")
+
+
+def normalized_role(value: Any) -> str:
+    return str(value or "").strip().lower().replace("-", "_").replace(" ", "_")
+
+
+def validate_baseline_backend_paths(packet: dict[str, Any], missing: list[str]) -> None:
+    baseline_code = packet.get("baseline_code")
+    require_nested(
+        baseline_code,
+        "INNOVATION_PACKET.baseline_code",
+        ["code_id", "source_type", "source_ref", "resolved_path", "train_entrypoint", "eval_entrypoint", "selection_rationale"],
+        missing,
+    )
+    if isinstance(baseline_code, dict):
+        if baseline_code.get("locked") is not True:
+            missing.append("INNOVATION_PACKET.baseline_code.locked must be true")
+        source_type = str(baseline_code.get("source_type") or "").lower()
+        if source_type in {"", "search", "web_search", "unbounded_search", "unspecified"}:
+            missing.append("INNOVATION_PACKET.baseline_code.source_type must identify a locked code source")
+
+    backend = packet.get("compute_backend")
+    require_nested(
+        backend,
+        "INNOVATION_PACKET.compute_backend",
+        ["backend", "decision_rationale", "gpu_evidence", "paid_resource_policy"],
+        missing,
+    )
+    backend_name = str((backend or {}).get("backend") or "").strip() if isinstance(backend, dict) else ""
+    if backend_name not in BACKENDS:
+        missing.append("INNOVATION_PACKET.compute_backend.backend must be local_gpu or autodl_gpu")
+    if backend_name == "autodl_gpu" and isinstance(backend, dict) and not present(backend.get("autodl_plan_ref")):
+        missing.append("INNOVATION_PACKET.compute_backend.autodl_plan_ref")
+
+    mapping = packet.get("path_mapping")
+    require_nested(
+        mapping,
+        "INNOVATION_PACKET.path_mapping",
+        ["selected_backend", "logical_dataset_id", "code_root", "data_root", "output_dir", "checkpoint_dir", "persistent_output_dir"],
+        missing,
+    )
+    if isinstance(mapping, dict):
+        selected = str(mapping.get("selected_backend") or "").strip()
+        if selected not in BACKENDS:
+            missing.append("INNOVATION_PACKET.path_mapping.selected_backend must be local_gpu or autodl_gpu")
+        if backend_name in BACKENDS and selected and selected != backend_name:
+            missing.append("INNOVATION_PACKET.path_mapping.selected_backend must match compute_backend.backend")
+        require_nested(mapping.get("env"), "INNOVATION_PACKET.path_mapping.env", ["DATA_ROOT", "OUTPUT_DIR", "CKPT_DIR"], missing)
+
+
+def validate_innovation_contract(packet: dict[str, Any], missing: list[str]) -> None:
+    contract = packet.get("innovation_search_contract")
+    require_nested(
+        contract,
+        "INNOVATION_PACKET.innovation_search_contract",
+        [
+            "selected_idea_id",
+            "track_id",
+            "innovation_mechanism",
+            "mechanism_type",
+            "primary_method_source_role",
+            "neighbor_transfer_mechanism",
+            "target_domain_anchor",
+            "target_domain_method_overlap_risk",
+            "one_variable_change",
+            "expected_effect",
+            "falsifier",
+            "promotion_stage",
+        ],
+        missing,
+    )
+    if not isinstance(contract, dict):
+        return
+    if str(contract.get("mechanism_type") or "").strip().upper() not in MECHANISM_TYPES:
+        missing.append("INNOVATION_PACKET.innovation_search_contract.mechanism_type must be ALGO, CODE, or PARAM")
+    if str(contract.get("promotion_stage") or "").strip().lower() not in PROMOTION_STAGES:
+        missing.append("INNOVATION_PACKET.innovation_search_contract.promotion_stage must be candidate, ablation, or confirmation")
+    source_role = normalized_role(contract.get("primary_method_source_role") or packet.get("primary_method_source_role"))
+    if source_role in TARGET_DOMAIN_ONLY_ROLES:
+        if not present(contract.get("current_field_absence_evidence") or packet.get("current_field_absence_evidence")):
+            missing.append("INNOVATION_PACKET.innovation_search_contract.current_field_absence_evidence required for target-domain-only main method")
+    elif source_role and source_role not in VALID_METHOD_SOURCE_ROLES:
+        missing.append("INNOVATION_PACKET.innovation_search_contract.primary_method_source_role must be near/far-neighbor transfer, cross-lane recombination, proposal-graph transfer, external-domain transfer, or target_domain_absence_proven")
+    if contract.get("ablation_required") is not True:
+        missing.append("INNOVATION_PACKET.innovation_search_contract.ablation_required must be true")
+    if contract.get("confirmation_required") is not True:
+        missing.append("INNOVATION_PACKET.innovation_search_contract.confirmation_required must be true")
+
+
+def validate_evidence_import_gate(packet: dict[str, Any], missing: list[str]) -> None:
+    gate = packet.get("evidence_import_gate")
+    require_nested(gate, "INNOVATION_PACKET.evidence_import_gate", ["status", "reason", "launch_blocked"], missing)
+    if not isinstance(gate, dict):
+        return
+
+    status = str(gate.get("status") or "").strip().lower()
+    if status not in EVIDENCE_GATE_STATUSES:
+        missing.append("INNOVATION_PACKET.evidence_import_gate.status must be passed, not_required, async_wait, or blocked")
+
+    if status in {"passed", "not_required"}:
+        if gate.get("launch_blocked") is True:
+            missing.append("INNOVATION_PACKET.evidence_import_gate.launch_blocked must be false for passed/not_required")
+        if not present(gate.get("material_refs")) and not present(gate.get("evidence_ids")):
+            missing.append("INNOVATION_PACKET.evidence_import_gate.material_refs or evidence_ids")
+        if status == "passed" and gate.get("mcp_attempted") is not True:
+            missing.append("INNOVATION_PACKET.evidence_import_gate.mcp_attempted must be true when status is passed")
+
+    if status in {"async_wait", "blocked"}:
+        missing.append("INNOVATION_PACKET.evidence_import_gate must pass before launch")
+        if gate.get("launch_blocked") is not True:
+            missing.append("INNOVATION_PACKET.evidence_import_gate.launch_blocked must be true for async_wait/blocked")
+        if not present(gate.get("claim_limits")):
+            missing.append("INNOVATION_PACKET.evidence_import_gate.claim_limits")
+        if not present(gate.get("attempts")):
+            missing.append("INNOVATION_PACKET.evidence_import_gate.attempts")
 
 
 def relpath(base: Path, path: Path) -> str:
@@ -91,6 +249,72 @@ def design_review_ready(payload: Any) -> bool:
         return False
     status = str(payload.get("status") or payload.get("verdict") or payload.get("decision") or "").lower()
     return status in READY
+
+
+def proposal_graph_controller_ready(base: Path, packet: dict[str, Any], details: dict[str, Any]) -> bool:
+    manifest_value = first_present(
+        packet,
+        [
+            "proposal_graph_session_manifest_path",
+            "proposalSessionManifestPath",
+            "proposal_session_manifest_path",
+            "proposal_manifest_path",
+        ],
+    )
+    result_value = first_present(
+        packet,
+        [
+            "proposal_graph_session_path",
+            "proposalGraphSessionPath",
+            "proposal_session_path",
+            "proposal_graph_session_result_path",
+        ],
+    )
+    manifest_path = resolve_path(base, manifest_value) if manifest_value else None
+    result_path = resolve_path(base, result_value) if result_value else base / "papernexus/proposal_graph_session.json"
+    manifest = read_json(manifest_path) if manifest_path else None
+    result = read_json(result_path) if result_path else None
+    if not isinstance(manifest, dict) and isinstance(result, dict) and isinstance(result.get("manifest"), dict):
+        manifest = result["manifest"]
+    if not isinstance(manifest, dict):
+        return False
+    ready = (
+        str(manifest.get("final_status") or "").strip().lower() == "committed"
+        and present(manifest.get("committed_subgraph_id"))
+        and present(manifest.get("controller_trace_paths"))
+        and present(manifest.get("validation_report_paths"))
+    )
+    details["proposal_graph_session_manifest_path"] = relpath(base, manifest_path) if manifest_path else None
+    details["proposal_graph_session_path"] = relpath(base, result_path) if result_path else None
+    details["proposal_graph_controller_ready"] = ready
+    details["proposal_graph_committed_subgraph_id"] = manifest.get("committed_subgraph_id")
+    return ready
+
+
+def validate_pre_idea_refs(base: Path, packet: dict[str, Any], missing: list[str], details: dict[str, Any]) -> None:
+    gate_value = first_present(packet, ["pre_idea_evidence_gate_path", "preIdeaEvidenceGatePath"])
+    slot_value = first_present(packet, ["innovation_slot_map_path", "innovationSlotMapPath"])
+    consumed = first_present(packet, ["consumed_innovation_slot_ids", "consumedInnovationSlotIds", "innovation_slot_refs"])
+    if not present(gate_value):
+        missing.append("INNOVATION_PACKET.pre_idea_evidence_gate_path")
+    else:
+        gate_path = resolve_path(base, gate_value)
+        gate = read_json(gate_path) if gate_path else None
+        details["pre_idea_evidence_gate_path"] = relpath(base, gate_path) if gate_path else None
+        if not isinstance(gate, dict):
+            missing.append("INNOVATION_PACKET.pre_idea_evidence_gate_path target")
+        elif str(gate.get("status") or "").strip().lower() != "passed":
+            missing.append("INNOVATION_PACKET.pre_idea_evidence_gate_path status passed")
+    if not present(slot_value):
+        missing.append("INNOVATION_PACKET.innovation_slot_map_path")
+    else:
+        slot_path = resolve_path(base, slot_value)
+        slot_map = read_json(slot_path) if slot_path else None
+        details["innovation_slot_map_path"] = relpath(base, slot_path) if slot_path else None
+        if not isinstance(slot_map, dict):
+            missing.append("INNOVATION_PACKET.innovation_slot_map_path target")
+    if not present(consumed):
+        missing.append("INNOVATION_PACKET.consumed_innovation_slot_ids")
 
 
 def find_design_review(base: Path, packet: dict[str, Any]) -> tuple[Path | None, Any, bool]:
@@ -137,6 +361,11 @@ def lint_packet(project: str, packet_path: Path | None = None) -> dict[str, Any]
     if not present(first_present(packet, DATASET_KEYS)):
         missing.append("INNOVATION_PACKET.dataset_or_benchmark")
 
+    validate_baseline_backend_paths(packet, missing)
+    validate_innovation_contract(packet, missing)
+    validate_evidence_import_gate(packet, missing)
+    validate_pre_idea_refs(base, packet, missing, details)
+
     summary, boundary_missing = boundary_summary(packet)
     missing.extend(boundary_missing)
     details["evidence_boundary_summary"] = summary
@@ -162,12 +391,15 @@ def lint_packet(project: str, packet_path: Path | None = None) -> dict[str, Any]
     elif not controller_available:
         warnings.append("research_controller unavailable or unrecorded; controller innovation brief not required")
 
+    proposal_controller_ready = proposal_graph_controller_ready(base, packet, details)
     design_path, design_payload, design_ready = find_design_review(base, packet)
-    if design_payload is None:
+    if design_payload is None and not proposal_controller_ready:
         missing.append("controller design review or fallback panel review")
-    elif not design_ready:
+    elif design_payload is not None and not design_ready and not proposal_controller_ready:
         missing.append("controller design review status/verdict ready")
     details["design_review_path"] = relpath(base, design_path) if design_path else None
+    if proposal_controller_ready and design_payload is None:
+        warnings.append("using committed proposal graph controller trace as design-review authority")
 
     evidence = first_present(packet, ["evidence_paths", "evidencePaths", "supporting_papers", "supportingPapers"])
     if not present(evidence):

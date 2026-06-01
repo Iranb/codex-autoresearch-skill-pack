@@ -181,19 +181,19 @@ def execution_spec(stage: str, state: dict[str, Any], contract: dict[str, Any]) 
     lane_topics = {
         "target_domain": (
             f"{goal_topic}\n\n"
-            "Search lane: target_domain. Focus on closest priors, SOTA methods, baselines, "
-            "datasets, metrics, protocols, limitations, future work, and negative evidence."
+            "Search lane: target_domain. Focus on closest priors, SOTA methods already present in the current field, "
+            "baselines, datasets, metrics, protocols, limitations, future work, negative evidence, and reviewer overlap risk."
         ),
         "near_neighbor": (
             f"{goal_topic}\n\n"
             "Search lane: near_neighbor. Focus on adjacent tasks with similar evaluation pressure "
-            "but different mechanisms, assumptions, optimization routes, or continual/open-world settings."
+            "but different mechanisms, assumptions, optimization routes, or continual/open-world settings that could become the primary method source."
         ),
         "far_neighbor": (
             f"{goal_topic}\n\n"
             "Search lane: far_neighbor. Focus on transferable mechanisms from domain-agnostic challenges "
             "such as identity preservation, non-stationarity, streaming discovery, memory, novelty calibration, "
-            "and duplicate prevention."
+            "and duplicate prevention that could become the primary method source or story bridge."
         ),
     }
     common = {
@@ -271,7 +271,7 @@ def execution_spec(stage: str, state: dict[str, Any], contract: dict[str, Any]) 
         "ideation": {
             "skill": "autoreskill-ideation-panel",
             "role": "Researcher",
-            "goal": "Generate a broad 12-15 item academic-paper-oriented experiment idea pool only after the pre-idea evidence gate passes. Trigger target-domain, near-neighbor, and far-neighbor discovery through papernexus-remote; actively screen raw discovery; satisfy the venue-agnostic breadth lint, not just one attempt per lane; import/supplement or split-read roughly 60-80% of the high-signal eligible set; build INNOVATION_SLOT_MAP.json; write PRE_IDEA_EVIDENCE_GATE.json status=passed; then generate ideas tied to innovation_slot_refs and score every idea against target/near/far evidence before idea_gate selection.",
+            "goal": "Generate a broad 12-15 item academic-paper-oriented experiment idea pool only after the pre-idea evidence gate passes. Trigger target-domain, near-neighbor, and far-neighbor discovery through papernexus-remote; use target-domain evidence to anchor problem/baseline/protocol and overlap risk, and use near/far-neighbor or cross-lane transfer as the preferred primary method source for top-tier ideas. Actively screen raw discovery; satisfy the venue-agnostic breadth lint, not just one attempt per lane; import/supplement or split-read roughly 60-80% of the high-signal eligible set; build INNOVATION_SLOT_MAP.json; write PRE_IDEA_EVIDENCE_GATE.json status=passed; then generate ideas tied to innovation_slot_refs and score every idea against target/near/far evidence before idea_gate selection.",
             "mcp_calls": [
                 {"tool": "literature_discovery", "args": {"operation": "search", "corpus": corpus, "topic": lane_topics["target_domain"], **broad_metadata_discovery}},
                 {"tool": "literature_discovery", "args": {"operation": "search", "corpus": corpus, "topic": lane_topics["near_neighbor"], **broad_metadata_discovery}},
