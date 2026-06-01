@@ -10,9 +10,64 @@
   "working_dir": "",
   "session_id": "",
   "started_at": "",
-  "status": "running|completed|failed",
+  "status": "queued|running|completed|failed|budget_stopped",
+  "track_id": "",
+  "selected_idea_id": "",
+  "innovation_mechanism": "",
+  "mechanism_type": "ALGO|CODE|PARAM",
+  "promotion_stage": "candidate|ablation|confirmation",
+  "ablation_of": "",
+  "confirmation_of": "",
+  "source_snapshot": {
+    "git_commit": "",
+    "git_status_porcelain": "",
+    "git_diff_stat": ""
+  },
+  "locked_protocol": {
+    "dataset": "",
+    "data_split": "",
+    "primary_metric": "",
+    "metric_direction": "higher|lower",
+    "evaluation_command": ""
+  },
+  "protected_path_hashes": [],
+  "metrics": {
+    "baseline": null,
+    "proposed": null,
+    "primary_metric": null,
+    "score_delta": null
+  },
+  "promotion_decision": "candidate_supported|promoted|not_promoted|record_only|rollback_to_best|repair",
+  "promotion_reason": "",
+  "next_action": "",
   "result_paths": [],
   "log_paths": [],
-  "budget": {}
+  "budget": {},
+  "monitoring": {
+    "schema_version": 1,
+    "status": "active|paused",
+    "last_checked_at": "",
+    "next_check_at": "",
+    "interval_minutes": 15,
+    "desired_rrule": "",
+    "cadence_reason": "",
+    "estimated_remaining_minutes": null,
+    "expected_finish_at": null,
+    "stale_count": 0,
+    "last_progress_at": null,
+    "automation": {
+      "key": "autoreskill-experiment-monitor:<project>",
+      "name": "autoreskill-experiment-monitor:<project>",
+      "kind": "heartbeat",
+      "destination": "thread",
+      "action": "create|update|pause|none",
+      "automation_id": null,
+      "desired_rrule": ""
+    }
+  }
 }
 ```
+
+`coder/EXPERIMENT_LEDGER.json` also records `best_run`, `track_best_runs`, `candidate_runs`, all entries, and whether promoted results are ready for analysis.
+`.autoreskill/automation_registry.json` records the single reusable experiment monitor for the project. Keep the registry stable across runs so Codex can update the existing monitor instead of creating duplicate scheduled checks.
+For stable active runs with `estimated_remaining_minutes`, `monitoring.interval_minutes` should match the remaining time to `expected_finish_at`; it is a completion wakeup, not a fixed 30-minute poll. Short health-check intervals are reserved for queued, startup, stale, hung, no-progress, or no-ETA states.

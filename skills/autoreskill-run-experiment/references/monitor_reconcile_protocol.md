@@ -19,12 +19,13 @@ Adaptive monitor cadence:
 - queued BJTU/HPC jobs: around 30 min
 - generic queued jobs: around 15 min
 - provisioning/startup: around 3 min
-- stable training with ETA: ETA / 10, clamped to roughly 10-30 min
-- approaching expected finish: around 5 min
-- short or nearly terminal runs: around 1 min
+- stable training with ETA: schedule the next heartbeat for the estimated completion interval
+- at or past expected finish: fast recheck on the next reconcile if the run is still active
 - stale/no-progress paid GPU runs: around 3 min
 - stale/no-progress non-paid runs: around 5 min
 - terminal runs: reconcile once, then pause the reused monitor
+
+`estimated_remaining_minutes` is the completion wakeup interval for stable active runs. Reconcile records `expected_finish_at`, updates the single heartbeat monitor to that interval, and then switches to fast follow-up checks only when the expected finish time has arrived but the run is still active. Startup, queued, stale, hung, and no-ETA states still use health-check intervals.
 
 When Codex app automations are available, use the single monitor described by `.autoreskill/automation_registry.json`. Preserve its `automation_id` and update the same scheduled monitor as status/ETA changes; do not create one monitor per experiment run.
 

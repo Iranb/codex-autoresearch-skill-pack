@@ -1,0 +1,103 @@
+#!/usr/bin/env python3
+"""Lint adaptive experiment monitor plans."""
+
+from __future__ import annotations
+
+import argparse
+import json
+from pathlib import Path
+from typing import Any
+
+
+ACTIVE_STATES = {"queued", "submitted", "pending", "waiting", "launching", "provisioning", "starting", "running", "stale", "hung", "no_progress"}
+TERMINAL_STATES = {"completed", "complete", "done", "succeeded", "success", "failed", "failure", "cancelled", "canceled", "stopped", "timeout", "timed_out", "budget_stopped", "killed"}
+
+
+def ar(project: str) -> Path:
+    return Path(project).expanduser().resolve() / ".autoreskill"
+
+
+def read_json(path: Path) -> Any:
+    if not path.exists():
+        return None
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return None
+
+
+def present(value: Any) -> bool:
+    if value is None:
+        return False
+    if isinstance(value, str):
+        return bool(value.strip())
+    if isinstance(value, (list, tuple, set, dict)):
+        return bool(value)
+    return True
+
+
+def lint(project: str, rel: str) -> dict[str, Any]:
+    base = ar(project)
+    path = base / rel
+    payload = read_json(path)
+    missing: list[str] = []
+    warnings: list[str] = []
+    if not isinstance(payload, dict):
+        return {"complete": False, "status": "incomplete", "missing": [rel], "warnings": [], "path": str(path)}
+    for key in [
+        "run_id",
+        "backend",
+        "state",
+        "automation_kind",
+        "reuse_policy",
+        "check_interval_policy",
+        "last_check_at",
+        "stop_conditions",
+        "escalation_conditions",
+    ]:
+        if not present(payload.get(key)):
+            missing.append(key)
+    state = str(payload.get("state") or "").strip().lower()
+    policy = payload.get("check_interval_policy") if isinstance(payload.get("check_interval_policy"), dict) else {}
+    reuse = payload.get("reuse_policy") if isinstance(payload.get("reuse_policy"), dict) else {}
+    interval = policy.get("interval_minutes")
+    if state in ACTIVE_STATES:
+        if not isinstance(interval, int) or interval <= 0:
+            missing.append("check_interval_policy.interval_minutes positive integer for active runs")
+        if not present(payload.get("next_check_after")):
+            missing.append("next_check_after for active runs")
+        if reuse.get("reuse_existing_monitor") is not True:
+            missing.append("reuse_policy.reuse_existing_monitor=true")
+        if reuse.get("no_duplicate_monitor_per_run") is not True:
+            missing.append("reuse_policy.no_duplicate_monitor_per_run=true")
+    elif state in TERMINAL_STATES:
+        if interval is not None:
+            warnings.append("terminal run should pause monitor and clear interval")
+    else:
+        warnings.append(f"unknown state {state!r}; ensure cadence is intentionally chosen")
+    if payload.get("automation_kind") != "heartbeat":
+        warnings.append("Codex app monitor should use heartbeat when available")
+    return {
+        "complete": not missing,
+        "status": "complete" if not missing else "incomplete",
+        "missing": missing,
+        "warnings": warnings,
+        "path": str(path),
+        "state": state,
+        "interval_minutes": interval,
+        "monitor_id": payload.get("monitor_id"),
+    }
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--project", required=True)
+    parser.add_argument("--plan", default="experiment/EXPERIMENT_MONITOR_PLAN.json")
+    args = parser.parse_args()
+    out = lint(args.project, args.plan)
+    print(json.dumps(out, indent=2, ensure_ascii=False))
+    raise SystemExit(0 if out["complete"] else 1)
+
+
+if __name__ == "__main__":
+    main()
