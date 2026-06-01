@@ -17,6 +17,9 @@ Outputs:
 - `analyzer/NARRATIVE_REPORT.md`
 - `analyzer/tables/`
 - `analyzer/figures/`
+- `user_view/innovation_story/00_STORYLINE_DESIGN.md`
+- `user_view/innovation_story/01_METHOD_INNOVATION_STORY.md`
+- `user_view/innovation_story/02_CLAIM_EVIDENCE_MAP.md`
 
 Rules:
 
@@ -32,12 +35,14 @@ Rules:
 - If results contradict the proposed mechanism or need source-backed limitation/negative-evidence framing, trigger targeted PaperNexus literature discovery and record the evidence boundary before writing.
 - Unsupported claims must be removed or softened before writing.
 - Figures/tables must be reproducible from scripts or data.
+- After analysis, update the user-facing story docs so the storyline follows the evidence instead of the original hope. Revise the proof ladder, claim limits, experiment mapping, and current user-facing summary. Candidate-supported evidence remains pilot-only in both the analysis files and `02_CLAIM_EVIDENCE_MAP.md`.
 
 Validation:
 
 ```bash
 python scripts/analysis_lint.py --project <project-root>
 python scripts/analysis_scaffold.py --project <project-root>
+python ../autoreskill-workflow/scripts/innovation_story_lint.py --project <project-root> --stage analysis
 ```
 
 Use `--strict` before final packaging if unsupported claims and narrative report must be mandatory.

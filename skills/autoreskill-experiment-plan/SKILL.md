@@ -15,6 +15,17 @@ When the selected idea was generated from a committed PaperNexus `proposal_graph
 
 `orchestrator/INNOVATION_PACKET.json` is the stage authority. `planner/EXPERIMENT_REVIEW_PACKET.json` is the prelaunch gate.
 
+This stage must also produce the full user-facing innovation story directory:
+
+```text
+.autoreskill/user_view/innovation_story/
+  00_STORYLINE_DESIGN.md
+  01_METHOD_INNOVATION_STORY.md
+  02_CLAIM_EVIDENCE_MAP.md
+```
+
+These files are derived explanatory artifacts for the user, not launch authorities. They must translate the selected idea into a coherent paper story and method-formation narrative: the current field supplies the problem, baseline/protocol, and reviewer-risk anchor; the main method mechanism should remain grounded in near-neighbor, far-neighbor, proposal-graph, external-domain, or cross-lane transfer evidence. Do not reduce them to contribution bullets or module inventories.
+
 Required authority fields:
 
 - selected idea fragment id
@@ -104,6 +115,7 @@ Run these steps before continuing the remaining experiment-plan workflow:
 - Record `idea_pool_path` as `ideation/EXPERIMENT_IDEA_POOL.json` and record the selected `selected_idea_id` in `EXPERIMENT_REVIEW_PACKET.json`.
 - Record `proposal_session_ref` from the idea pool in the innovation packet when present; do not flatten the proposal bundle into unsupported prose without artifact paths and committed subgraph id.
 - Record the innovation mechanism and promotion gate before implementation starts; no experiment may launch from a metric-only or parameter-only search unless it is tied to an idea-bound mechanism and explicitly marked `PARAM`.
+- Update all three `user_view/innovation_story/` files after the packets are internally consistent. `00_STORYLINE_DESIGN.md` should state the belief shift and proof ladder; `01_METHOD_INNOVATION_STORY.md` should explain where the method came from and why the transfer is legitimate; `02_CLAIM_EVIDENCE_MAP.md` should map planned claims to evidence requirements and current claim limits.
 
 ## Validation
 
@@ -115,6 +127,7 @@ python scripts/experiment_materialize.py --project <project-root>
 python ../autoreskill-papernexus-innovation/scripts/proposal_graph_session_lint.py --project <project-root>
 python scripts/prelaunch_lint.py --project <project-root>
 python scripts/innovation_lint.py --project <project-root>
+python ../autoreskill-workflow/scripts/innovation_story_lint.py --project <project-root> --stage experiment_plan
 ```
 
 `experiment_materialize.py` refuses to overwrite existing `INNOVATION_PACKET.json` or `EXPERIMENT_REVIEW_PACKET.json` unless `--force` is passed. Use `--force` only when intentionally regenerating after backing up or replacing stale plan authority; do not use it to simplify a detailed packet into a generic scaffold.

@@ -148,6 +148,10 @@ def has_literature_search(calls: list[Any]) -> bool:
     return False
 
 
+def has_innovation_story_output(outputs: list[Any]) -> bool:
+    return any(isinstance(item, str) and ".autoreskill/user_view/innovation_story/" in item for item in outputs)
+
+
 def render_prompt(project: str, packet: dict[str, Any], mode: str) -> str:
     mcp_calls = packet.get("mcp_calls") or []
     capture_commands = packet.get("capture_commands") or []
@@ -173,6 +177,21 @@ For every useful `literature_discovery(operation="search")` result:
 
 Do not use raw discovery rows directly as novelty, baseline, method, limitation, or citation evidence.
 For broad/long-running discovery or import work, prefer `literature_discovery(operation="submit")` plus progress/report polling so MCP client timeouts do not discard server-side state.
+"""
+    innovation_story = ""
+    if has_innovation_story_output(outputs):
+        innovation_story = """
+## User-Facing Innovation Story
+
+Maintain `.autoreskill/user_view/innovation_story/` as the project-bound explanation for the user. This is not a machine-readable authority artifact and not a contribution bullet list. It should explain how the paper story persuades a reviewer and how the method grows from current-field pressure plus near/far-neighbor or cross-lane transfer.
+
+Required files by maturity:
+
+- `00_STORYLINE_DESIGN.md`: reader belief shift, opening tension, hidden cause, method-as-resolution, novelty positioning, proof ladder, figure story, reviewer-risk defense, and final narrative spine.
+- `01_METHOD_INNOVATION_STORY.md`: core problem tension, source domains, one-sentence method idea, mechanism construction, what is actually new, evidence chain, experiment implications, and user-facing summary.
+- `02_CLAIM_EVIDENCE_MAP.md`: main claims, evidence support, claim limits, experiment mapping, and revision notes.
+
+Run `innovation_story_lint.py --project <project-root> --stage <stage>` before completion. The linter rejects placeholder text and bullet-dominant files.
 """
 
     return f"""# AutoResearch Job Packet
@@ -202,6 +221,7 @@ Skill to use: `{packet.get('skill')}`
 
 If a PaperNexus MCP call fails at config, transport, auth, or session-tool-mount level, do not use local PaperNexus CLI, raw HTTP, local graph files, local MCP, or SSH graph commands as substitutes. Record the failure with `papernexus_probe_record.py` when relevant and update this job as `failed` or `retry`.
 {discovery_closure}
+{innovation_story}
 
 ## Capture Commands
 

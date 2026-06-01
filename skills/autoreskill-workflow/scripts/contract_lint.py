@@ -93,6 +93,19 @@ def run_json(cmd: list[str]) -> dict[str, Any]:
     return parsed
 
 
+def run_innovation_story_lint(skill_root: Path, project: str, stage: str) -> dict[str, Any]:
+    return run_json(
+        [
+            sys.executable,
+            str(skill_root / "autoreskill-workflow/scripts/innovation_story_lint.py"),
+            "--project",
+            str(Path(project).expanduser().resolve()),
+            "--stage",
+            stage,
+        ]
+    )
+
+
 def lint(project: str, stage: str) -> dict[str, Any]:
     base = ar(project)
     if stage == "init":
@@ -260,6 +273,7 @@ def lint(project: str, stage: str) -> dict[str, Any]:
                 str(Path(project).expanduser().resolve()),
             ]
         )
+        innovation_story_lint = run_innovation_story_lint(skill_root, project, stage)
         missing = []
         warnings = []
         if approved_degraded:
@@ -323,6 +337,13 @@ def lint(project: str, stage: str) -> dict[str, Any]:
                 missing.append("idea_scorecard_lint failed without structured missing output")
         items = scorecard_lint.get("warnings") if isinstance(scorecard_lint.get("warnings"), list) else []
         warnings.extend(f"idea_scorecard_lint: {item}" for item in items)
+        if not innovation_story_lint.get("complete"):
+            items = innovation_story_lint.get("missing") if isinstance(innovation_story_lint.get("missing"), list) else []
+            missing.extend(f"innovation_story_lint: {item}" for item in items)
+            if innovation_story_lint.get("returncode", 1) != 0 and not items:
+                missing.append("innovation_story_lint failed without structured missing output")
+        items = innovation_story_lint.get("warnings") if isinstance(innovation_story_lint.get("warnings"), list) else []
+        warnings.extend(f"innovation_story_lint: {item}" for item in items)
         return result(
             stage,
             not missing,
@@ -337,6 +358,7 @@ def lint(project: str, stage: str) -> dict[str, Any]:
                 "graph_import_plan_lint": graph_import_lint,
                 "import_workflow_status_lint": import_workflow_lint,
                 "split_reading_evidence_pack_lint": split_reading_lint,
+                "innovation_story_lint": innovation_story_lint,
                 "proposal_graph_session_lint": proposal_graph_lint,
                 "idea_pool_lint": pool_lint,
                 "idea_scorecard_lint": scorecard_lint,
@@ -375,6 +397,7 @@ def lint(project: str, stage: str) -> dict[str, Any]:
                 "--allow-degraded",
             ]
         )
+        innovation_story_lint = run_innovation_story_lint(skill_root, project, stage)
         missing = []
         warnings = []
         if not has_any(base, ["ideation/TOURNAMENT_SCOREBOARD.json", "ideation/TOP3_DIRECTION_SUMMARY.md", "reviewer/IDEA_GATE_REVIEW.json"]):
@@ -400,7 +423,21 @@ def lint(project: str, stage: str) -> dict[str, Any]:
                 missing.append("idea_scorecard_lint failed without structured missing output")
         items = scorecard_lint.get("warnings") if isinstance(scorecard_lint.get("warnings"), list) else []
         warnings.extend(f"idea_scorecard_lint: {item}" for item in items)
-        return result(stage, not missing, missing, "idea_gate_contract", warnings, {"pre_idea_evidence_gate_lint": pre_idea_gate_lint, "idea_pool_lint": pool_lint, "idea_scorecard_lint": scorecard_lint})
+        if not innovation_story_lint.get("complete"):
+            items = innovation_story_lint.get("missing") if isinstance(innovation_story_lint.get("missing"), list) else []
+            missing.extend(f"innovation_story_lint: {item}" for item in items)
+            if innovation_story_lint.get("returncode", 1) != 0 and not items:
+                missing.append("innovation_story_lint failed without structured missing output")
+        items = innovation_story_lint.get("warnings") if isinstance(innovation_story_lint.get("warnings"), list) else []
+        warnings.extend(f"innovation_story_lint: {item}" for item in items)
+        return result(
+            stage,
+            not missing,
+            missing,
+            "idea_gate_contract",
+            warnings,
+            {"pre_idea_evidence_gate_lint": pre_idea_gate_lint, "idea_pool_lint": pool_lint, "idea_scorecard_lint": scorecard_lint, "innovation_story_lint": innovation_story_lint},
+        )
 
     if stage == "experiment_plan":
         skill_root = Path(__file__).resolve().parents[2]
@@ -416,6 +453,14 @@ def lint(project: str, stage: str) -> dict[str, Any]:
                 str(skill_root / "autoreskill-experiment-plan/scripts/innovation_lint.py"),
                 "--project",
                 str(Path(project).expanduser().resolve()),
+            ],
+            "innovation_story_lint": [
+                sys.executable,
+                str(skill_root / "autoreskill-workflow/scripts/innovation_story_lint.py"),
+                "--project",
+                str(Path(project).expanduser().resolve()),
+                "--stage",
+                stage,
             ],
         }
         details = {name: run_json(cmd) for name, cmd in scripts.items()}
@@ -528,6 +573,8 @@ def lint(project: str, stage: str) -> dict[str, Any]:
         return result(stage, not missing, missing, "experiment_contract", warnings, details)
 
     if stage == "analysis":
+        skill_root = Path(__file__).resolve().parents[2]
+        innovation_story_lint = run_innovation_story_lint(skill_root, project, stage)
         missing = []
         warnings = []
         if not nonempty(base / "analyzer/CLAIM_EVIDENCE_MATRIX.md"):
@@ -540,9 +587,18 @@ def lint(project: str, stage: str) -> dict[str, Any]:
             warnings.append("analyzer/UNSUPPORTED_CLAIMS.md")
         if not (nonempty(base / "analyzer/NARRATIVE_REPORT.md") or nonempty(base / "analyzer/ANALYSIS_REPORT.md")):
             warnings.append("analyzer/NARRATIVE_REPORT.md or analyzer/ANALYSIS_REPORT.md")
-        return result(stage, not missing, missing, "analysis_contract", warnings)
+        if not innovation_story_lint.get("complete"):
+            items = innovation_story_lint.get("missing") if isinstance(innovation_story_lint.get("missing"), list) else []
+            missing.extend(f"innovation_story_lint: {item}" for item in items)
+            if innovation_story_lint.get("returncode", 1) != 0 and not items:
+                missing.append("innovation_story_lint failed without structured missing output")
+        items = innovation_story_lint.get("warnings") if isinstance(innovation_story_lint.get("warnings"), list) else []
+        warnings.extend(f"innovation_story_lint: {item}" for item in items)
+        return result(stage, not missing, missing, "analysis_contract", warnings, {"innovation_story_lint": innovation_story_lint})
 
     if stage == "review_pressure":
+        skill_root = Path(__file__).resolve().parents[2]
+        innovation_story_lint = run_innovation_story_lint(skill_root, project, stage)
         findings = read_json(base / "reviewer/REVIEW_FINDINGS.json")
         status = str((findings or {}).get("status", "")).lower()
         issues = []
@@ -566,11 +622,29 @@ def lint(project: str, stage: str) -> dict[str, Any]:
             missing.append("reviewer/REVIEW_FINDINGS.json status ready")
         if blocking:
             missing.append("open high/critical review findings")
-        return result(stage, ok, missing, "review_pressure_contract")
+        if not innovation_story_lint.get("complete"):
+            items = innovation_story_lint.get("missing") if isinstance(innovation_story_lint.get("missing"), list) else []
+            missing.extend(f"innovation_story_lint: {item}" for item in items)
+            if innovation_story_lint.get("returncode", 1) != 0 and not items:
+                missing.append("innovation_story_lint failed without structured missing output")
+        warnings = []
+        items = innovation_story_lint.get("warnings") if isinstance(innovation_story_lint.get("warnings"), list) else []
+        warnings.extend(f"innovation_story_lint: {item}" for item in items)
+        return result(stage, ok and not missing, missing, "review_pressure_contract", warnings, {"innovation_story_lint": innovation_story_lint})
 
     if stage == "writing":
-        ok = nonempty(base / "paper/main.tex")
-        return result(stage, ok, [] if ok else ["paper/main.tex"], "writing_contract")
+        skill_root = Path(__file__).resolve().parents[2]
+        innovation_story_lint = run_innovation_story_lint(skill_root, project, stage)
+        missing = [] if nonempty(base / "paper/main.tex") else ["paper/main.tex"]
+        warnings = []
+        if not innovation_story_lint.get("complete"):
+            items = innovation_story_lint.get("missing") if isinstance(innovation_story_lint.get("missing"), list) else []
+            missing.extend(f"innovation_story_lint: {item}" for item in items)
+            if innovation_story_lint.get("returncode", 1) != 0 and not items:
+                missing.append("innovation_story_lint failed without structured missing output")
+        items = innovation_story_lint.get("warnings") if isinstance(innovation_story_lint.get("warnings"), list) else []
+        warnings.extend(f"innovation_story_lint: {item}" for item in items)
+        return result(stage, not missing, missing, "writing_contract", warnings, {"innovation_story_lint": innovation_story_lint})
 
     if stage == "submission_ready":
         skill_root = Path(__file__).resolve().parents[2]
@@ -597,7 +671,16 @@ def lint(project: str, stage: str) -> dict[str, Any]:
             missing.extend(f"citation_lint: {item}" for item in items)
             if citation_lint.get("returncode", 1) != 0 and not items:
                 missing.append("citation_lint failed without structured missing output")
-        return result(stage, ok, missing, "submission_ready_contract", details={"citation_lint": citation_lint})
+        innovation_story_lint = run_innovation_story_lint(skill_root, project, stage)
+        if not innovation_story_lint.get("complete"):
+            items = innovation_story_lint.get("missing") if isinstance(innovation_story_lint.get("missing"), list) else []
+            missing.extend(f"innovation_story_lint: {item}" for item in items)
+            if innovation_story_lint.get("returncode", 1) != 0 and not items:
+                missing.append("innovation_story_lint failed without structured missing output")
+        warnings = []
+        items = innovation_story_lint.get("warnings") if isinstance(innovation_story_lint.get("warnings"), list) else []
+        warnings.extend(f"innovation_story_lint: {item}" for item in items)
+        return result(stage, ok and not missing, missing, "submission_ready_contract", warnings, {"citation_lint": citation_lint, "innovation_story_lint": innovation_story_lint})
 
     return result(stage, False, [f"unknown stage {stage}"], "unknown_contract")
 

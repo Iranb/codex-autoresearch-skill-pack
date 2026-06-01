@@ -83,6 +83,23 @@ Every packet containing `literature_discovery(operation="search")` must also clo
 
 Raw discovery results are search evidence only. They are not graph-grounded evidence.
 
+Packets for `ideation`, `idea_gate`, `experiment_plan`, `analysis`, `review_pressure`, `writing`, or `submission_ready` must also maintain the project-bound user-facing story directory when their outputs include `.autoreskill/user_view/innovation_story/`:
+
+```text
+.autoreskill/user_view/innovation_story/
+  00_STORYLINE_DESIGN.md
+  01_METHOD_INNOVATION_STORY.md
+  02_CLAIM_EVIDENCE_MAP.md
+```
+
+The rendered prompt must tell the role pass to write narrative prose, not a bullet list of novelty points. `00_STORYLINE_DESIGN.md` starts at `ideation` and is revised at `idea_gate`; all three files are required from `experiment_plan` onward. Before completion, run:
+
+```bash
+python <skill-root>/scripts/innovation_story_lint.py --project <project-root> --stage <stage>
+```
+
+These files are a user view derived from evidence artifacts. They do not replace `EXPERIMENT_IDEA_POOL.json`, `INNOVATION_PACKET.json`, `EXPERIMENT_REVIEW_PACKET.json`, analysis matrices, review gates, or manuscript/package authorities.
+
 After executing a packet, update the queue:
 
 Render a prompt for a serialized role pass or sub-agent:

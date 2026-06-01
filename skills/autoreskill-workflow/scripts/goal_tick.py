@@ -16,6 +16,12 @@ from goal_state import NEXT_ACTIONS, OWNERS, STAGES, ar, load_state, next_stage,
 
 
 SKILLS_ROOT = Path(__file__).resolve().parents[2]
+INNOVATION_STORY_STAGES = {"ideation", "idea_gate", "experiment_plan", "analysis", "review_pressure", "writing", "submission_ready"}
+INNOVATION_STORY_FILES = [
+    ".autoreskill/user_view/innovation_story/00_STORYLINE_DESIGN.md",
+    ".autoreskill/user_view/innovation_story/01_METHOD_INNOVATION_STORY.md",
+    ".autoreskill/user_view/innovation_story/02_CLAIM_EVIDENCE_MAP.md",
+]
 
 
 def script_cmd(skill: str, script: str, args: str = "") -> str:
@@ -363,6 +369,7 @@ def execution_spec(stage: str, state: dict[str, Any], contract: dict[str, Any]) 
                     "--project <project-root> --pool ideation/EXPERIMENT_IDEA_POOL.json",
                 ),
                 script_cmd("autoreskill-ideation-panel", "idea_scorecard_lint.py", "--project <project-root>"),
+                script_cmd("autoreskill-workflow", "innovation_story_lint.py", "--project <project-root> --stage ideation"),
             ],
             "outputs": [
                 ".autoreskill/literature/PRE_IDEA_DISCOVERY_PLAN.json",
@@ -381,6 +388,7 @@ def execution_spec(stage: str, state: dict[str, Any], contract: dict[str, Any]) 
                 ".autoreskill/ideation/EXPERIMENT_IDEA_POOL.json",
                 ".autoreskill/ideation/IDEA_NOVELTY_VENUE_SCORECARD.json",
                 ".autoreskill/ideation/IDEA_NOVELTY_VENUE_SCORECARD.md",
+                ".autoreskill/user_view/innovation_story/00_STORYLINE_DESIGN.md",
             ],
         },
         "literature_review": {
@@ -414,6 +422,7 @@ def execution_spec(stage: str, state: dict[str, Any], contract: dict[str, Any]) 
                     "idea_pool_lint.py",
                     "--project <project-root> --pool ideation/EXPERIMENT_IDEA_POOL.json --require-selected",
                 ),
+                script_cmd("autoreskill-workflow", "innovation_story_lint.py", "--project <project-root> --stage idea_gate"),
             ],
             "outputs": [
                 ".autoreskill/ideation/TOURNAMENT_SCOREBOARD.json",
@@ -421,6 +430,7 @@ def execution_spec(stage: str, state: dict[str, Any], contract: dict[str, Any]) 
                 ".autoreskill/reviewer/IDEA_GATE_REVIEW.json",
                 ".autoreskill/ideation/EXPERIMENT_IDEA_POOL.json",
                 ".autoreskill/ideation/IDEA_NOVELTY_VENUE_SCORECARD.json",
+                ".autoreskill/user_view/innovation_story/00_STORYLINE_DESIGN.md",
             ],
         },
         "experiment_plan": {
@@ -435,10 +445,12 @@ def execution_spec(stage: str, state: dict[str, Any], contract: dict[str, Any]) 
             "capture": [
                 script_cmd("autoreskill-experiment-plan", "prelaunch_lint.py", "--project <project-root>"),
                 script_cmd("autoreskill-experiment-plan", "innovation_lint.py", "--project <project-root>"),
+                script_cmd("autoreskill-workflow", "innovation_story_lint.py", "--project <project-root> --stage experiment_plan"),
             ],
             "outputs": [
                 ".autoreskill/orchestrator/INNOVATION_PACKET.json",
                 ".autoreskill/planner/EXPERIMENT_REVIEW_PACKET.json",
+                *INNOVATION_STORY_FILES,
             ],
         },
         "code": {
@@ -483,10 +495,14 @@ def execution_spec(stage: str, state: dict[str, Any], contract: dict[str, Any]) 
                 {"tool": "literature_discovery", "args": {"operation": "search", "corpus": corpus, "topic": f"{goal_topic}\n\nSearch purpose: post-result claim repair, contradictory evidence, negative results, limitations, failure modes, and mechanism diagnosis.", **broad_metadata_discovery}},
                 {"tool": "agent_materials", "args": {"operation": "research_material_pack", "corpus": corpus}},
             ],
-            "capture": [script_cmd("autoreskill-analyze-results", "analysis_lint.py", "--project <project-root>")],
+            "capture": [
+                script_cmd("autoreskill-analyze-results", "analysis_lint.py", "--project <project-root>"),
+                script_cmd("autoreskill-workflow", "innovation_story_lint.py", "--project <project-root> --stage analysis"),
+            ],
             "outputs": [
                 ".autoreskill/analyzer/CLAIM_EVIDENCE_MATRIX.md",
                 ".autoreskill/analyzer/TRACK_VERDICTS.md",
+                *INNOVATION_STORY_FILES,
             ],
         },
         "review_pressure": {
@@ -500,8 +516,9 @@ def execution_spec(stage: str, state: dict[str, Any], contract: dict[str, Any]) 
             "capture": [
                 script_cmd("autoreskill-review-gate", "review_lint.py", "--project <project-root>"),
                 script_cmd("autoreskill-review-gate", "citation_lint.py", "--project <project-root>"),
+                script_cmd("autoreskill-workflow", "innovation_story_lint.py", "--project <project-root> --stage review_pressure"),
             ],
-            "outputs": [".autoreskill/reviewer/REVIEW_FINDINGS.json"],
+            "outputs": [".autoreskill/reviewer/REVIEW_FINDINGS.json", *INNOVATION_STORY_FILES],
         },
         "writing": {
             "skill": "autoreskill-paper-write",
@@ -511,8 +528,8 @@ def execution_spec(stage: str, state: dict[str, Any], contract: dict[str, Any]) 
                 {"tool": "literature_discovery", "args": {"operation": "search", "corpus": corpus, "topic": f"{goal_topic}\n\nSearch purpose: manuscript related-work and citation closure, closest-prior contrast, must-cite papers, and claim support.", **broad_metadata_discovery}},
                 {"tool": "research_briefing", "args": {"operation": "research_brief", "corpus": corpus}},
             ],
-            "capture": [],
-            "outputs": [".autoreskill/paper/main.tex", ".autoreskill/paper/write_package.json"],
+            "capture": [script_cmd("autoreskill-workflow", "innovation_story_lint.py", "--project <project-root> --stage writing")],
+            "outputs": [".autoreskill/paper/main.tex", ".autoreskill/paper/write_package.json", *INNOVATION_STORY_FILES],
         },
         "submission_ready": {
             "skill": "autoreskill-review-gate",
@@ -524,11 +541,13 @@ def execution_spec(stage: str, state: dict[str, Any], contract: dict[str, Any]) 
             "capture": [
                 script_cmd("autoreskill-review-gate", "review_lint.py", "--project <project-root>"),
                 script_cmd("autoreskill-review-gate", "citation_lint.py", "--project <project-root>"),
+                script_cmd("autoreskill-workflow", "innovation_story_lint.py", "--project <project-root> --stage submission_ready"),
             ],
             "outputs": [
                 ".autoreskill/paper/main.tex",
                 ".autoreskill/paper/main.pdf",
                 ".autoreskill/submission_ready.json",
+                *INNOVATION_STORY_FILES,
             ],
         },
     }
@@ -610,6 +629,10 @@ def write_job_packet(
                 ".autoreskill/papernexus/SPLIT_READING_EVIDENCE_PACK.json",
             ],
         )
+    if stage in INNOVATION_STORY_STAGES:
+        outputs = append_unique(outputs, INNOVATION_STORY_FILES if stage not in {"ideation", "idea_gate"} else [INNOVATION_STORY_FILES[0]])
+        if not any("innovation_story_lint.py" in command for command in capture_commands):
+            capture_commands.append(script_cmd("autoreskill-workflow", "innovation_story_lint.py", f"--project <project-root> --stage {stage}"))
     constraints = [
         "Use PaperNexus live graph work only through papernexus-remote MCP.",
         "Do not use local PaperNexus CLI, raw HTTP, local graph files, local MCP, or SSH graph commands as substitutes.",
@@ -639,6 +662,22 @@ def write_job_packet(
                 "Selected usable papers have explicit graph_import, split_read_only, watchlist, or rejection decisions",
                 "IMPORT_WORKFLOW_STATUS.json records taskIds/batchIds/queue progress or wait results for selected import tasks",
                 "Graph/material import, authoritative-sync wait, or split-reading blockers are recorded instead of silently treating raw search rows as evidence",
+            ]
+        )
+    if stage in INNOVATION_STORY_STAGES:
+        constraints.extend(
+            [
+                "Maintain the project-bound user-facing innovation story under .autoreskill/user_view/innovation_story/.",
+                "Write the story as a narrative persuasion design, not a bullet list of modules or contribution points.",
+                "Keep 00_STORYLINE_DESIGN.md focused on reader belief shift, opening tension, hidden cause, method-as-resolution, proof ladder, figures, reviewer risk, and final narrative spine.",
+                "Keep 01_METHOD_INNOVATION_STORY.md focused on how the method grows from current-field pressure plus near/far-neighbor or cross-lane transfer mechanisms.",
+                "Keep 02_CLAIM_EVIDENCE_MAP.md focused on which paper claims are supported, limited, downgraded, or still waiting for evidence.",
+            ]
+        )
+        acceptance_criteria.extend(
+            [
+                "innovation_story_lint.py reports complete for this stage",
+                "The user-facing innovation story explains the paper storyline and method logic rather than only listing innovation points",
             ]
         )
     path = base / "job_packets" / f"{job['job_id']}.json"
@@ -699,15 +738,15 @@ def stage_write_scopes(stage: str) -> list[str]:
         "graph_build": [".autoreskill/graph/", ".autoreskill/papernexus/"],
         "frontier_mapping": [".autoreskill/papernexus/", ".autoreskill/literature/", ".autoreskill/ideation/"],
         "literature_review": [".autoreskill/literature/", ".autoreskill/papernexus/"],
-        "ideation": [".autoreskill/ideation/", ".autoreskill/papernexus/", ".autoreskill/literature/"],
-        "idea_gate": [".autoreskill/ideation/", ".autoreskill/reviewer/", ".autoreskill/literature/", ".autoreskill/papernexus/"],
-        "experiment_plan": [".autoreskill/orchestrator/", ".autoreskill/planner/", ".autoreskill/literature/", ".autoreskill/papernexus/"],
+        "ideation": [".autoreskill/ideation/", ".autoreskill/papernexus/", ".autoreskill/literature/", ".autoreskill/user_view/"],
+        "idea_gate": [".autoreskill/ideation/", ".autoreskill/reviewer/", ".autoreskill/literature/", ".autoreskill/papernexus/", ".autoreskill/user_view/"],
+        "experiment_plan": [".autoreskill/orchestrator/", ".autoreskill/planner/", ".autoreskill/literature/", ".autoreskill/papernexus/", ".autoreskill/user_view/"],
         "code": [".autoreskill/coder/"],
         "experiment": [".autoreskill/coder/"],
-        "analysis": [".autoreskill/analyzer/", ".autoreskill/literature/", ".autoreskill/papernexus/"],
-        "review_pressure": [".autoreskill/reviewer/", ".autoreskill/literature/", ".autoreskill/papernexus/"],
-        "writing": [".autoreskill/paper/", ".autoreskill/literature/", ".autoreskill/papernexus/"],
-        "submission_ready": [".autoreskill/paper/", ".autoreskill/literature/", ".autoreskill/papernexus/", ".autoreskill/submission_ready.json"],
+        "analysis": [".autoreskill/analyzer/", ".autoreskill/literature/", ".autoreskill/papernexus/", ".autoreskill/user_view/"],
+        "review_pressure": [".autoreskill/reviewer/", ".autoreskill/literature/", ".autoreskill/papernexus/", ".autoreskill/user_view/"],
+        "writing": [".autoreskill/paper/", ".autoreskill/literature/", ".autoreskill/papernexus/", ".autoreskill/user_view/"],
+        "submission_ready": [".autoreskill/paper/", ".autoreskill/literature/", ".autoreskill/papernexus/", ".autoreskill/submission_ready.json", ".autoreskill/user_view/"],
     }
     stage_scopes = scopes.get(stage, [f".autoreskill/{stage}/"])
     return [*stage_scopes, *common]

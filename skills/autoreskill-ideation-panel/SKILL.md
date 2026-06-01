@@ -13,6 +13,8 @@ The 12-15 experiment ideas are created here, during idea construction. Immediate
 
 Every item in `EXPERIMENT_IDEA_POOL.json` must be a plausible academic paper idea, not a standalone engineering task. Treat a valid idea as a paper thesis with a novelty claim, baseline pressure, minimum experiment table, ablation plan, and falsifier. These fields may be provisional during brainstorming, but they must be specific enough to show how the idea could become a paper. Tooling, metric guards, dashboards, split scripts, and harnesses are supporting artifacts unless they are framed as a benchmark, evaluation, dataset, or systems paper with its own research claim.
 
+Also maintain `.autoreskill/user_view/innovation_story/00_STORYLINE_DESIGN.md` for the user. This file is not another idea list. It should explain the paper storyline: what belief the reader starts with, what tension breaks that belief, what hidden cause the method resolves, why near-neighbor/far-neighbor or cross-lane transfer supplies the main method mechanism, what evidence ladder would persuade a reviewer, and what figure sequence should carry the argument. Update it after idea-gate selection so the selected idea has a coherent narrative spine before experiment planning.
+
 ## Pre-Idea Evidence Gate
 
 Before writing `ideation/EXPERIMENT_IDEA_POOL.json`, require:
@@ -136,6 +138,7 @@ Outputs:
 - `TOURNAMENT_SCOREBOARD.json`
 - `TOP3_DIRECTION_SUMMARY.md`
 - `RESEARCH_PROPOSAL.md`
+- `.autoreskill/user_view/innovation_story/00_STORYLINE_DESIGN.md`
 
 `EXPERIMENT_IDEA_POOL.json` must contain 12-15 paper-oriented experiment ideas, not only high-level research directions and not engineering backlog items. Prefer method-paper `ALGO` ideas. `CODE` ideas are allowed when they are performance-bearing algorithmic/engineering-method contributions, or benchmark/evaluation/dataset/system paper contributions. Pure infrastructure chores with no measurable research claim go to `SUPPORTING_ARTIFACTS.json`. Target at least 8 `ALGO` ideas, keep `CODE` ideas to 4 or fewer, and keep `PARAM` ideas to 2 or fewer. At least some ideas should cite source papers, techniques, or PaperNexus evidence when available, but absence of complete PaperNexus evidence should become `missing_materials`, not a reason to shrink the pool. Include:
 
@@ -172,6 +175,7 @@ python ../autoreskill-papernexus-innovation/scripts/split_reading_evidence_pack_
 python ../autoreskill-papernexus-innovation/scripts/proposal_graph_session_lint.py --project <project-root>
 python ../autoreskill-experiment-plan/scripts/idea_pool_lint.py --project <project-root> --pool ideation/EXPERIMENT_IDEA_POOL.json
 python ../autoreskill-experiment-plan/scripts/idea_pool_lint.py --project <project-root> --pool ideation/EXPERIMENT_IDEA_POOL.json --require-selected
+python ../autoreskill-workflow/scripts/innovation_story_lint.py --project <project-root> --stage ideation
 ```
 
 Read references for panel protocol and novelty gate. For the idea pool schema, read `../autoreskill-experiment-plan/references/experiment_idea_pool.md`; despite its file location, the canonical owner is this ideation skill.
