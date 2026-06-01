@@ -47,6 +47,14 @@ In addition to one-attempt lane coverage, run the general breadth gate. By defau
 
 Idea generation must consume `INNOVATION_SLOT_MAP.json`, not a bare topic. When a committed proposal graph session exists, use its `proposal.md`, `proposal.json`, committed subgraph, role-action trace, and commit decisions as the primary PaperNexus seed for idea construction. Every non-degraded idea should cite challenge/insight/transfer slot ids through `innovation_slot_refs` or an equivalent field, and any idea derived from the proposal bundle should also cite `proposal_session_ref` or `proposal_graph_refs`. If the gate is missing, blocked, or only metadata-backed, return to discovery/material repair instead of generating the idea pool. A degraded metadata-only path requires explicit user approval and must mark claim limits.
 
+Before writing final ideas, build the local Graph-of-Evidence package:
+
+- `ideation/EVIDENCE_GRAPH_PROJECTION.json` from screened papers, split-reading materials, innovation slots, and proposal graph artifacts.
+- `ideation/IDEA_BUILD_BRIEF.json` and `.md` as the ScientistOne-style brief for the ideation panel.
+- `ideation/GOE_IDEA_AUDIT.json` from `idea_graph_lint.py --write-audit`.
+
+These artifacts are evidence-only. They compress the current evidence state and expose missing paths; they do not replace `PRE_IDEA_EVIDENCE_GATE.json`, the idea pool, or the novelty/venue scorecard as stage authorities.
+
 Approved degraded ideation is an exception path, not the default. It is valid only when `ideation/PRE_IDEA_EVIDENCE_GATE.json` has `status="degraded_requires_user_approval"`, `allowed_next_action="generate_experiment_idea_pool_degraded"` or equivalent, `claim_limits`, and `degraded_approval` with `approved=true`, `approved_by`, `approved_at`, and `reason`. In that mode, run `pre_idea_evidence_gate_lint.py --allow-degraded`, and every generated `EXPERIMENT_IDEA_POOL.json` plus `IDEA_NOVELTY_VENUE_SCORECARD.json` must carry `claim_limits` and `evidence_boundary`. Degraded ideas are speculative only; `autoreskill-experiment-plan` must close selected-idea PaperNexus evidence before any formal launch or manuscript claim.
 
 ## Brainstorming Policy
@@ -95,6 +103,8 @@ The JSON scorecard must include:
 
 The scorecard is the screening authority for choosing which idea enters experiment planning. It must rank the full 12-15 idea pool before any `idea_gate` selection, surface top-tier-paper support and reviewer risk, and identify the 3-4 candidates worth closest-prior closure. Scorecards are still ideation-stage judgments, not novelty certificates. Do not claim an idea can support a top-tier paper solely because it scores highly here. `autoreskill-experiment-plan` must still supplement/import relevant papers, build the closest-prior difference table, lock baselines/protocols, and upgrade the selected idea to `plan_ready` before launch.
 
+Each score row must also record `graph_path_status`, `evidence_closure_level`, `scientistone_fast_rank`, `paper_potential_rank`, and `recommended_track_action`. During `idea_gate`, generate `ideation/IDEA_TRACK_SEEDS.json` with one primary track and 2-3 alternate/risk-repair tracks. Track seeds keep `launch_approval=false`; they are handoff candidates for `experiment_plan`, not permission to run experiments.
+
 ## Mandatory Pre-Idea Discovery And Screening
 
 Every ideation run must trigger broad PaperNexus literature discovery in all three lanes, regardless of whether the graph already has data. The first pass may be metadata-only, but it must use the widest recall-oriented search profile available rather than quick defaults. The pre-idea gate is not metadata-only: high-signal eligible papers must be imported, supplemented, or split-read through PaperNexus unless explicitly blocked.
@@ -135,6 +145,11 @@ Outputs:
 - `EXPERIMENT_IDEA_POOL.json`
 - `IDEA_NOVELTY_VENUE_SCORECARD.json`
 - `IDEA_NOVELTY_VENUE_SCORECARD.md`
+- `EVIDENCE_GRAPH_PROJECTION.json`
+- `IDEA_BUILD_BRIEF.json`
+- `IDEA_BUILD_BRIEF.md`
+- `GOE_IDEA_AUDIT.json`
+- `IDEA_TRACK_SEEDS.json`
 - `TOURNAMENT_SCOREBOARD.json`
 - `TOP3_DIRECTION_SUMMARY.md`
 - `RESEARCH_PROPOSAL.md`
@@ -163,9 +178,14 @@ During `idea_gate`, select one idea by setting `selected_idea_id` or marking one
 
 ```bash
 python scripts/panel_review.py --project <project-root> --force-ready
+python scripts/idea_graph_projection.py --project <project-root>
+python scripts/idea_graph_lint.py --project <project-root> --write-audit
+python scripts/idea_build_brief.py --project <project-root>
 python scripts/ideation_lint.py --project <project-root>
 python scripts/pre_idea_evidence_gate_lint.py --project <project-root>
 python scripts/idea_scorecard_lint.py --project <project-root>
+python scripts/idea_track_seeds.py --project <project-root>
+python scripts/idea_track_seeds.py --project <project-root> --check
 python ../autoreskill-papernexus-innovation/scripts/pre_idea_discovery_plan.py --project <project-root> --topic "<topic>" --target-domain "<domain>"
 python ../autoreskill-papernexus-innovation/scripts/discovery_metadata_triage.py --project <project-root> --input literature/LITERATURE_DISCOVERY_PACKET.json --stage ideation
 python ../autoreskill-papernexus-innovation/scripts/paper_selection_scorecard_lint.py --project <project-root>

@@ -6,6 +6,8 @@ This is an ideation-stage artifact consumed by experiment planning. Do not refre
 
 Immediately after the pool is generated, create `ideation/IDEA_NOVELTY_VENUE_SCORECARD.json` and `ideation/IDEA_NOVELTY_VENUE_SCORECARD.md`. The scorecard compares every idea against existing papers and the discovery/report evidence, scores top-tier support across multiple dimensions, and recommends which 3-4 ideas should be promoted to closest-prior closure. This scoring happens before `idea_gate` selection so the user can choose one idea for `experiment_plan` with explicit novelty and venue-risk context. Each score row must include `paper_comparison.closest_prior_papers`, `paper_comparison.innovation_comparison`, `paper_comparison.overlap_risk`, `paper_comparison.differentiation_claim`, plus `evidence_debt` and `next_evidence_closure`.
 
+The idea pool must also preserve Graph-of-Evidence handoff fields for ranked or selected ideas: `goe_path_refs`, `closest_prior_delta`, `mechanism_source_path`, `negative_evidence_refs`, `reviewer_attack_surface`, `falsifier_probe`, and `track_seed_spec`. Low-maturity ideas may carry these as evidence debt, but selected or evidence-backed ideas cannot pass `idea_gate` without them.
+
 Required shape:
 
 ```json
@@ -59,6 +61,21 @@ Required shape:
         }
       ],
       "followup_evidence_plan": [],
+      "goe_path_refs": [],
+      "closest_prior_delta": "",
+      "mechanism_source_path": "",
+      "negative_evidence_refs": [],
+      "reviewer_attack_surface": [],
+      "falsifier_probe": "",
+      "track_seed_spec": {
+        "track_id": "",
+        "one_variable_change": "",
+        "expected_metric_effect": "",
+        "baseline_pressure": "",
+        "locked_or_missing_protocol_fields": [],
+        "minimum_pilot": [],
+        "kill_condition": ""
+      },
       "description": "",
       "hypothesis": "",
       "one_variable_change": "",
@@ -95,6 +112,7 @@ Selection rules:
 - Generate 12-15 ideas during `ideation`, before `experiment_plan`.
 - When `proposal_graph_session` is available and committed, use it as the primary PaperNexus seed, then expand it into a diverse pool by changing mechanism, evaluation protocol, risk repair, near-neighbor pressure, or far-neighbor transfer. Do not reduce the default AutoResearch pool to one idea unless the user explicitly requests a single full-paper proposal.
 - Score all generated ideas in `IDEA_NOVELTY_VENUE_SCORECARD.json` before `idea_gate`; the scorecard is the screening authority for choosing which idea enters experiment planning.
+- Generate `EVIDENCE_GRAPH_PROJECTION.json`, `IDEA_BUILD_BRIEF.json/md`, and `GOE_IDEA_AUDIT.json` before final ranking. Generate `IDEA_TRACK_SEEDS.json` during `idea_gate` for the primary plus 2-3 alternate tracks.
 - Use the scorecard to front-load novelty comparison and top-tier-paper support analysis. Do not select an idea for experiment planning until every idea has been ranked, compared with closest priors, and assigned an `advance`, `advance_with_constraints`, `park`, or `kill` recommendation.
 - Each item must be writable as a paper thesis. If an item would appear only in an implementation checklist, move it to `SUPPORTING_ARTIFACTS.json`.
 - Prefer Tier 1 `ALGO` method/cross-paper/architecture ideas. Require at least 8 `ALGO` ideas by default.
@@ -105,5 +123,6 @@ Selection rules:
 - Select one idea during `idea_gate` before entering `experiment_plan`.
 - A selected idea may still be `promising`, but it cannot become a launchable plan until experiment planning upgrades it to `plan_ready` by closing novelty, baseline, protocol, PaperNexus support, and falsifier gaps.
 - Mark ideas that fail the red-line audit as `REJECTED` or `NOT_PROMOTED` before launch.
+- Track seeds are not launch approval. `experiment_plan` must convert them into `TRACK_PLAN_MATRIX.json` rows and mark each row `ready`, `blocked`, `diagnostic_only`, or `parked` after baseline/protocol/evidence closure.
 
 Idea status is a ledger pointer, not a claim. An idea becomes evidence only after `REMOTE_RUN.json`, metrics, source snapshot, and `EXPERIMENT_LEDGER.json` record the result.

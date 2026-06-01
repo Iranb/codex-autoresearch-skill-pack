@@ -13,6 +13,9 @@ Outputs:
 
 - `analyzer/CLAIM_EVIDENCE_MATRIX.md`
 - `analyzer/TRACK_VERDICTS.md`
+- `analyzer/BEST_RUN_SELECTION.json`
+- `analyzer/SCORE_VERIFICATION.json`
+- `analyzer/SPEC_VIOLATION_AUDIT.json`
 - `analyzer/UNSUPPORTED_CLAIMS.md`
 - `analyzer/NARRATIVE_REPORT.md`
 - `analyzer/tables/`
@@ -28,6 +31,7 @@ Rules:
 - Do not report only best result.
 - Use `coder/EXPERIMENT_LEDGER.json` as the run trajectory authority. Report promoted, not_promoted, failed, and rollback decisions.
 - Treat `best_run` and `track_best_runs` promoted entries as the only sources for improvement claims unless a later confirmation run supersedes them.
+- Run `best_run_selector.py` before writing. It is the deterministic selector for promoted evidence and emits the score/spec audit artifacts consumed by paper writing.
 - Treat `candidate_supported` as pilot evidence only. It may justify ablation/confirmation scheduling, but it must not be phrased as a stable improvement.
 - Report each innovation track with selected idea, mechanism, mechanism type, promotion stage, ablation/confirmation links, verdict, and next action.
 - Downgrade or remove claims when improvement comes from a fixture, single seed, missing matched baseline, protected-path hash change, protocol drift, or unreconciled run.
@@ -41,6 +45,8 @@ Validation:
 
 ```bash
 python scripts/analysis_lint.py --project <project-root>
+python scripts/best_run_selector.py --project <project-root>
+python scripts/best_run_selector.py --project <project-root> --check
 python scripts/analysis_scaffold.py --project <project-root>
 python ../autoreskill-workflow/scripts/innovation_story_lint.py --project <project-root> --stage analysis
 ```

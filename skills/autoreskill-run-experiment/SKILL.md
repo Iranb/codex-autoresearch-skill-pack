@@ -16,6 +16,7 @@ Write:
 ```text
 .autoreskill/coder/experiments/<track-id>/<experiment-id>/REMOTE_RUN.json
 .autoreskill/coder/EXPERIMENT_INDEX.md
+.autoreskill/coder/TRACK_RANKING.json
 .autoreskill/experiment/EXPERIMENT_MONITOR_PLAN.json
 ```
 
@@ -31,6 +32,7 @@ Write:
 - Treat the first positive run for an idea as `candidate_supported`, not `promoted`.
 - Promote only after a linked `ablation` or `confirmation` run supports the same `selected_idea_id` and `innovation_mechanism` under the locked protocol.
 - Maintain per-track best promoted runs as well as the global best; candidate-supported runs stay available as pilot evidence but cannot support strong improvement claims.
+- Maintain `TRACK_RANKING.json` from canonical metrics, promotion status, retire reasons, and spec-violation status. Do not rank tracks from model-written summaries.
 - Roll back or mark `not_promoted` after regression; final export/checkpoint must point to the best validated state.
 - Hash protected eval/test/metric paths before and after the run when paths are available.
 - After launch or reconcile, refresh `REMOTE_RUN.json.monitoring` and `.autoreskill/automation_registry.json` with an adaptive monitor cadence based on status, backend, ETA, progress/log freshness, stale count, and paid-resource risk.

@@ -39,7 +39,32 @@ def main() -> None:
         missing.append("paper/write_package.json")
     if not nonempty(base / "analyzer/CLAIM_EVIDENCE_MATRIX.md"):
         missing.append("analyzer/CLAIM_EVIDENCE_MATRIX.md")
-    out = {"complete": not missing, "status": "complete" if not missing else "incomplete", "missing": missing}
+    representation = read_json(base / "paper/RESEARCH_REPRESENTATION.json")
+    if not representation:
+        missing.append("paper/RESEARCH_REPRESENTATION.json")
+    if not nonempty(base / "paper/RESEARCH_REPRESENTATION.md"):
+        missing.append("paper/RESEARCH_REPRESENTATION.md")
+    grounded = read_json(base / "paper/GROUNDED_WRITE_PACKAGE.json")
+    if not grounded:
+        missing.append("paper/GROUNDED_WRITE_PACKAGE.json")
+    elif grounded.get("ground_status") != "passed":
+        missing.append("paper/GROUNDED_WRITE_PACKAGE.json ground_status=passed")
+    verifier = read_json(base / "paper/PAPER_CLAIM_VERIFICATION.json")
+    if not verifier:
+        missing.append("paper/PAPER_CLAIM_VERIFICATION.json")
+    elif verifier.get("status") != "passed":
+        missing.append("paper/PAPER_CLAIM_VERIFICATION.json status=passed")
+    best = read_json(base / "analyzer/BEST_RUN_SELECTION.json")
+    score = read_json(base / "analyzer/SCORE_VERIFICATION.json")
+    if representation and isinstance(representation.get("performance_claims"), list) and representation["performance_claims"]:
+        if not best or best.get("final_promotion_status") != "promoted":
+            missing.append("performance claims require analyzer/BEST_RUN_SELECTION.json final_promotion_status=promoted")
+        if not score or score.get("status") != "passed":
+            missing.append("performance claims require analyzer/SCORE_VERIFICATION.json status=passed")
+    warnings = []
+    if verifier and verifier.get("warnings"):
+        warnings.append("paper/PAPER_CLAIM_VERIFICATION.json has non-blocking warnings")
+    out = {"complete": not missing, "status": "complete" if not missing else "incomplete", "missing": missing, "warnings": warnings}
     print(json.dumps(out, indent=2, ensure_ascii=False))
     raise SystemExit(0 if out["complete"] else 1)
 

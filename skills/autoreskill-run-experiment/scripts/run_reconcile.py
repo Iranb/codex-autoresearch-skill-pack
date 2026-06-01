@@ -546,7 +546,7 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--project", required=True)
     parser.add_argument("--backend", choices=["local", "ssh", "autodl", "bjtu_hpc", "manual"], default="local")
-    parser.add_argument("--status", choices=["queued", "running", "completed", "failed", "budget_stopped"], default="completed")
+    parser.add_argument("--status", choices=["queued", "running", "completed", "failed", "budget_stopped"])
     parser.add_argument("--command")
     parser.add_argument("--session-id", default="")
     parser.add_argument("--remote-path", default="")
@@ -572,12 +572,13 @@ def main() -> None:
         manifest = read_json(manifest_path, {})
         exp_dir = manifest_path.parent
         previous_remote = read_json(exp_dir / "REMOTE_RUN.json", {})
+        status = args.status or normalized_status(previous_remote.get("status") if isinstance(previous_remote, dict) else None)
         identity = run_identity(manifest, review, innovation)
         direction = args.metric_direction or manifest.get("metric_direction") or review.get("metric_direction") or "higher"
         metrics, metrics_rel = read_metrics(exp_dir)
         metric_info = metric_payload(metrics, str(direction))
         hashes = protected_hashes(args.project, manifest, review)
-        decision, reason = promotion_decision(args.status, args.fixture_result, metrics, metric_info, hashes, identity)
+        decision, reason = promotion_decision(status, args.fixture_result, metrics, metric_info, hashes, identity)
         source_snapshot = manifest.get("source_snapshot") or {
             "git_commit": git_capture(args.project, ["rev-parse", "HEAD"]),
             "git_status_porcelain": git_capture(args.project, ["status", "--porcelain"]),
@@ -588,7 +589,7 @@ def main() -> None:
             "schema_version": 1,
             "created_at": now(),
             "backend": args.backend,
-            "status": args.status,
+            "status": status,
             "track_id": identity.get("track_id"),
             "experiment_id": manifest.get("experiment_id"),
             "selected_idea_id": identity.get("selected_idea_id"),
@@ -642,8 +643,11 @@ def main() -> None:
         entry = {
             "manifest": str(manifest_path.relative_to(base)),
             "remote_run": str((exp_dir / "REMOTE_RUN.json").relative_to(base)),
-            "status": args.status,
+            "status": status,
             "track_id": identity.get("track_id"),
+            "parent_track_id": manifest.get("parent_track_id"),
+            "derived_from_run_id": manifest.get("derived_from_run_id"),
+            "iteration": manifest.get("iteration", 1),
             "experiment_id": manifest.get("experiment_id"),
             "selected_idea_id": identity.get("selected_idea_id"),
             "innovation_mechanism": identity.get("innovation_mechanism"),
@@ -652,12 +656,18 @@ def main() -> None:
             "ablation_of": identity.get("ablation_of"),
             "confirmation_of": identity.get("confirmation_of"),
             "metrics": metric_info,
+            "metric_value": metric_info.get("proposed"),
+            "metric_source": metrics_rel,
+            "canonical_eval_status": "passed" if status == "completed" and metrics_rel else "missing_or_pending",
             "metrics_path": metrics_rel,
             "promotion_decision": decision,
+            "promotion_status": decision,
             "verdict": decision,
             "promotion_reason": reason,
             "next_action": next_action(decision, identity),
             "metric_direction": direction,
+            "retire_reason": reason if decision in {"not_promoted", "rollback_to_best"} else None,
+            "spec_violation_status": manifest.get("spec_violation_status") or "not_checked",
             "source_snapshot": source_snapshot,
         }
         ledger_entries.append(entry)
@@ -680,6 +690,37 @@ def main() -> None:
         "entries": ledger_entries,
     }
     write_json(base / "coder/EXPERIMENT_LEDGER.json", ledger)
+    ranked = sorted(
+        ledger_entries,
+        key=lambda row: (
+            row.get("metric_value") is None,
+            -float(row.get("metric_value") or 0) if str(row.get("metric_direction") or "higher") != "lower" else float(row.get("metric_value") or 0),
+        ),
+    )
+    write_json(
+        base / "coder/TRACK_RANKING.json",
+        {
+            "schema_version": 1,
+            "created_at": now(),
+            "ranking_source": "coder/EXPERIMENT_LEDGER.json",
+            "selection_policy": "canonical_metric_then_promotion_gate",
+            "ready_for_analysis": ready_for_analysis,
+            "ranked_tracks": [
+                {
+                    "rank": index + 1,
+                    "track_id": row.get("track_id"),
+                    "experiment_id": row.get("experiment_id"),
+                    "metric_value": row.get("metric_value"),
+                    "metric_source": row.get("metric_source"),
+                    "promotion_status": row.get("promotion_status"),
+                    "canonical_eval_status": row.get("canonical_eval_status"),
+                    "spec_violation_status": row.get("spec_violation_status"),
+                    "retire_reason": row.get("retire_reason"),
+                }
+                for index, row in enumerate(ranked)
+            ],
+        },
+    )
     write_text(
         base / "coder/EXPERIMENT_INDEX.md",
         "# Experiment Index\n\n"
@@ -698,7 +739,7 @@ def main() -> None:
             "action": "run_reconcile",
             "details": {
                 "backend": args.backend,
-                "status": args.status,
+                "status": args.status or "preserved",
                 "count": len(ledger_entries),
                 "promoted_count": len([row for row in ledger_entries if row.get("promotion_decision") == "promoted"]),
                 "candidate_supported_count": len(candidate_runs),

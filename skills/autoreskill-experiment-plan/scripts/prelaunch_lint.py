@@ -56,6 +56,8 @@ PLACEHOLDER_VALUES = {
 }
 BACKENDS = {"local_gpu", "autodl_gpu"}
 EVIDENCE_GATE_STATUSES = {"passed", "not_required", "async_wait", "blocked"}
+TRACK_LAUNCH_STATUSES = {"ready", "blocked", "diagnostic_only", "parked"}
+TRACK_EVIDENCE_READY = {"passed", "complete", "completed", "graph_closed", "source_backed"}
 MECHANISM_TYPES = {"ALGO", "CODE", "PARAM"}
 PROMOTION_STAGES = {"candidate", "ablation", "confirmation"}
 VALID_METHOD_SOURCE_ROLES = {
@@ -98,6 +100,16 @@ def read_json(path: Path) -> dict[str, Any] | None:
         return json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError:
         return None
+
+
+def rows_from_payload(payload: Any) -> list[dict[str, Any]]:
+    if isinstance(payload, dict):
+        for key in ["tracks", "rows", "track_plans"]:
+            if isinstance(payload.get(key), list):
+                return [row for row in payload[key] if isinstance(row, dict)]
+    if isinstance(payload, list):
+        return [row for row in payload if isinstance(row, dict)]
+    return []
 
 
 def present(value: Any) -> bool:
@@ -298,6 +310,56 @@ def validate_pre_idea_refs(packet: dict[str, Any], project: str, missing: list[s
         missing.append("EXPERIMENT_REVIEW_PACKET.consumed_innovation_slot_ids")
 
 
+def validate_track_plan_matrix(project: str, missing: list[str], warnings: list[str]) -> None:
+    base = ar(project)
+    seeds = read_json(base / "ideation/IDEA_TRACK_SEEDS.json")
+    matrix = read_json(base / "orchestrator/TRACK_PLAN_MATRIX.json")
+    if not isinstance(seeds, dict):
+        return
+    seed_rows = rows_from_payload(seeds)
+    if not isinstance(matrix, dict):
+        missing.append("orchestrator/TRACK_PLAN_MATRIX.json for IDEA_TRACK_SEEDS")
+        return
+    rows = rows_from_payload(matrix)
+    if not rows:
+        missing.append("orchestrator/TRACK_PLAN_MATRIX.json tracks")
+        return
+    rows_by_track = {str(row.get("track_id")): row for row in rows if present(row.get("track_id"))}
+    for seed in seed_rows:
+        track_id = str(seed.get("track_id") or "")
+        if track_id and track_id not in rows_by_track:
+            missing.append(f"TRACK_PLAN_MATRIX missing seed track {track_id}")
+    for index, row in enumerate(rows):
+        prefix = f"TRACK_PLAN_MATRIX[{index}]"
+        for key in [
+            "track_id",
+            "idea_id",
+            "baseline_code",
+            "dataset",
+            "split",
+            "primary_metric",
+            "metric_direction",
+            "eval_command",
+            "compute_budget",
+            "evidence_closure_status",
+            "launch_status",
+            "promotion_gate",
+        ]:
+            if not present(row.get(key)) or placeholder(row.get(key)):
+                missing.append(f"{prefix}.{key}")
+        status = str(row.get("launch_status") or "").strip().lower()
+        if status and status not in TRACK_LAUNCH_STATUSES:
+            missing.append(f"{prefix}.launch_status must be ready/blocked/diagnostic_only/parked")
+        if status == "ready":
+            closure = str(row.get("evidence_closure_status") or "").strip().lower()
+            if closure not in TRACK_EVIDENCE_READY:
+                missing.append(f"{prefix}.evidence_closure_status must be ready before launch")
+            if present(row.get("blocked_reason")):
+                missing.append(f"{prefix}.blocked_reason must be empty for ready tracks")
+        if status in {"blocked", "diagnostic_only", "parked"} and not present(row.get("blocked_reason")):
+            warnings.append(f"{prefix}.blocked_reason recommended for non-ready tracks")
+
+
 def lint(packet: dict[str, Any] | None, project: str) -> dict[str, Any]:
     missing: list[str] = []
     warnings: list[str] = []
@@ -329,6 +391,7 @@ def lint(packet: dict[str, Any] | None, project: str) -> dict[str, Any]:
     validate_pre_idea_refs(packet, project, missing)
     validate_compute_backend(packet, missing)
     validate_path_mapping(packet, missing)
+    validate_track_plan_matrix(project, missing, warnings)
 
     idea_pool_path = packet.get("idea_pool_path") or packet.get("candidate_library_path")
     if present(idea_pool_path):

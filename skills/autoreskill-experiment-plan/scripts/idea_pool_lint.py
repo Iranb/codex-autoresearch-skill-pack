@@ -43,6 +43,15 @@ VALID_METHOD_SOURCE_ROLES = {
 }
 TARGET_DOMAIN_ONLY_ROLES = {"target_domain", "current_field", "target_domain_only"}
 METHOD_BEARING_CONTRIBUTIONS = {"method", "engineering_method", "system"}
+GOE_REQUIRED_FIELDS = [
+    "goe_path_refs",
+    "closest_prior_delta",
+    "mechanism_source_path",
+    "negative_evidence_refs",
+    "reviewer_attack_surface",
+    "falsifier_probe",
+    "track_seed_spec",
+]
 
 
 def project_root(project: str) -> Path:
@@ -298,21 +307,37 @@ def lint(pool: Any, require_selected: bool, project: str | None = None) -> dict[
 
         method_bearing = itype in {"ALGO", "CODE"} or contribution_type in METHOD_BEARING_CONTRIBUTIONS
         if method_bearing:
+            method_missing = warnings if pre_idea_degraded else missing
             source_role = normalized_role(idea.get("primary_method_source_role") or idea.get("method_source_role"))
             if not source_role:
-                missing.append(f"{prefix}.primary_method_source_role")
+                method_missing.append(f"{prefix}.primary_method_source_role")
             elif source_role in TARGET_DOMAIN_ONLY_ROLES:
                 if not present(idea.get("current_field_absence_evidence")):
-                    missing.append(f"{prefix}.current_field_absence_evidence required for target-domain-only main method")
+                    method_missing.append(f"{prefix}.current_field_absence_evidence required for target-domain-only main method")
             elif source_role not in VALID_METHOD_SOURCE_ROLES:
-                missing.append(f"{prefix}.primary_method_source_role must be near/far-neighbor transfer, cross-lane recombination, proposal-graph transfer, external-domain transfer, or target_domain_absence_proven")
+                method_missing.append(f"{prefix}.primary_method_source_role must be near/far-neighbor transfer, cross-lane recombination, proposal-graph transfer, external-domain transfer, or target_domain_absence_proven")
             else:
                 transfer_method_count += 1
             for key in ["target_domain_anchor", "neighbor_transfer_mechanism", "target_domain_method_overlap_risk"]:
                 if not present(idea.get(key)):
-                    missing.append(f"{prefix}.{key}")
+                    method_missing.append(f"{prefix}.{key}")
             if source_role in {"near_neighbor", "far_neighbor", "cross_lane_recombination", "proposal_graph_transfer", "external_domain_transfer"} and not present(idea.get("neighbor_transfer_mechanism")):
-                missing.append(f"{prefix}.neighbor_transfer_mechanism")
+                method_missing.append(f"{prefix}.neighbor_transfer_mechanism")
+
+        selected_or_mature = str(idea.get("status") or "").lower() == "selected" or maturity in {"evidence_backed", "plan_ready"}
+        for field in GOE_REQUIRED_FIELDS:
+            if not present(idea.get(field)):
+                if pre_idea_degraded or maturity in {"blue_sky", "promising"}:
+                    warnings.append(f"{prefix}.{field} missing; keep as evidence debt before ranking or selection")
+                elif selected_or_mature:
+                    missing.append(f"{prefix}.{field}")
+                else:
+                    warnings.append(f"{prefix}.{field} missing; required before idea_gate ranking")
+        seed_spec = idea.get("track_seed_spec")
+        if isinstance(seed_spec, dict):
+            for key in ["one_variable_change", "expected_metric_effect", "kill_condition"]:
+                if selected_or_mature and not present(seed_spec.get(key)):
+                    missing.append(f"{prefix}.track_seed_spec.{key}")
 
         slot_refs = idea.get("innovation_slot_refs") or idea.get("slot_refs") or idea.get("supporting_slot_ids")
         degraded = str(idea.get("evidence_maturity") or "").strip().lower() in {"blue_sky", "promising"}
@@ -335,8 +360,10 @@ def lint(pool: Any, require_selected: bool, project: str | None = None) -> dict[
         missing.append(f"CODE ideas must be <= 4 and only performance-bearing engineering-method or benchmark/evaluation/dataset/system paper contributions, got {type_counts['CODE']}")
     if type_counts["ALGO"] < 8:
         missing.append(f"need at least 8 ALGO paper ideas, got {type_counts['ALGO']}")
-    if transfer_method_count < 8:
+    if transfer_method_count < 8 and not pre_idea_degraded:
         missing.append(f"need at least 8 method ideas with near/far-neighbor or cross-lane primary method source, got {transfer_method_count}")
+    elif transfer_method_count < 8:
+        warnings.append(f"approved degraded idea pool has only {transfer_method_count} transfer-backed method ideas; experiment_plan must close this before launch")
     if source_backed_algo < 6:
         warnings.append(f"prefer at least 6 ALGO ideas with source paper/technique or PaperNexus evidence when available, got {source_backed_algo}; do not block brainstorm, record evidence debt instead")
 

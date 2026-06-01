@@ -18,6 +18,8 @@ DIMENSIONS = [
     "risk_control",
 ]
 PROMOTION_DECISIONS = {"advance", "advance_with_constraints", "park", "kill"}
+RECOMMENDED_TRACK_ACTIONS = {"primary", "alternate", "risk_repair", "mechanism_variant", "park", "kill"}
+EVIDENCE_CLOSURE_LEVELS = {"graph_closed", "source_backed", "split_read", "metadata_only", "degraded", "blocked", "needs_closure"}
 PAPER_COMPARISON_KEYS = [
     "closest_prior_papers",
     "innovation_comparison",
@@ -151,6 +153,8 @@ def lint(project: str, scorecard_rel: str, pool_rel: str) -> dict[str, Any]:
         missing.append("weights")
     if not present(scorecard.get("top_recommendations")):
         missing.append("top_recommendations")
+    if not present(scorecard.get("top_track_recommendations")):
+        missing.append("top_track_recommendations")
     if not present(scorecard.get("pre_idea_evidence_gate_path")):
         missing.append("pre_idea_evidence_gate_path")
     caps = read_json(base / "capabilities.json") or {}
@@ -225,6 +229,8 @@ def lint(project: str, scorecard_rel: str, pool_rel: str) -> dict[str, Any]:
         for key in [
             "closest_prior_pressure",
             "novelty_separation_needed",
+            "graph_path_status",
+            "evidence_closure_level",
             "near_neighbor_pressure",
             "far_neighbor_transfer_rationale",
             "primary_method_source_role",
@@ -238,6 +244,15 @@ def lint(project: str, scorecard_rel: str, pool_rel: str) -> dict[str, Any]:
         ]:
             if not present(row.get(key)):
                 missing.append(f"{prefix}.{key}")
+        if str(row.get("evidence_closure_level") or "").strip().lower() not in EVIDENCE_CLOSURE_LEVELS:
+            missing.append(f"{prefix}.evidence_closure_level must be one of {sorted(EVIDENCE_CLOSURE_LEVELS)}")
+        if not positive_int(row.get("scientistone_fast_rank")):
+            missing.append(f"{prefix}.scientistone_fast_rank positive integer")
+        if not positive_int(row.get("paper_potential_rank")):
+            missing.append(f"{prefix}.paper_potential_rank positive integer")
+        action = str(row.get("recommended_track_action") or "").strip().lower()
+        if action not in RECOMMENDED_TRACK_ACTIONS:
+            missing.append(f"{prefix}.recommended_track_action must be one of {sorted(RECOMMENDED_TRACK_ACTIONS)}")
         source_role = normalized_role(row.get("primary_method_source_role") or row.get("method_source_role"))
         if source_role in TARGET_DOMAIN_ONLY_ROLES:
             if not present(row.get("current_field_absence_evidence")):
@@ -252,6 +267,24 @@ def lint(project: str, scorecard_rel: str, pool_rel: str) -> dict[str, Any]:
         decision = str(row.get("promotion_recommendation") or "").strip().lower()
         if decision not in PROMOTION_DECISIONS:
             missing.append(f"{prefix}.promotion_recommendation advance/advance_with_constraints/park/kill")
+
+    if isinstance(scorecard.get("top_track_recommendations"), list):
+        top_track_ids = set()
+        for item in scorecard["top_track_recommendations"]:
+            if isinstance(item, dict):
+                raw_id = item.get("idea_id") or item.get("id")
+            else:
+                raw_id = item
+            if present(raw_id):
+                top_track_ids.add(str(raw_id))
+        unknown = sorted(top_track_ids - idea_ids)
+        if unknown:
+            missing.append("top_track_recommendations unknown idea ids: " + ", ".join(unknown))
+        if len(top_track_ids) < 3:
+            warnings.append("top_track_recommendations should usually include 3-4 candidate tracks")
+    selected_primary = scorecard.get("selected_primary_idea_id")
+    if present(selected_primary) and str(selected_primary) not in idea_ids:
+        missing.append(f"selected_primary_idea_id {selected_primary!r} is not in idea pool")
 
     if proposal_graph_available and not any(present(row.get("proposal_graph_basis")) for row in rows):
         warnings.append("proposal_graph_session is available but no score rows include proposal_graph_basis")

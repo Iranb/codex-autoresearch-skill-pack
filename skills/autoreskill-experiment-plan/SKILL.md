@@ -14,6 +14,7 @@ When the selected idea was generated from a committed PaperNexus `proposal_graph
 ## Direct Authority
 
 `orchestrator/INNOVATION_PACKET.json` is the stage authority. `planner/EXPERIMENT_REVIEW_PACKET.json` is the prelaunch gate.
+`orchestrator/TRACK_PLAN_MATRIX.json` is the bounded explore/exploit handoff from `idea_gate`; it converts one primary plus alternate `IDEA_TRACK_SEEDS.json` rows into `ready`, `blocked`, `diagnostic_only`, or `parked` experiment tracks. A seed row or matrix row is not launch approval.
 
 This stage must also produce the full user-facing innovation story directory:
 
@@ -116,6 +117,7 @@ Run these steps before continuing the remaining experiment-plan workflow:
 - Record `proposal_session_ref` from the idea pool in the innovation packet when present; do not flatten the proposal bundle into unsupported prose without artifact paths and committed subgraph id.
 - Record the innovation mechanism and promotion gate before implementation starts; no experiment may launch from a metric-only or parameter-only search unless it is tied to an idea-bound mechanism and explicitly marked `PARAM`.
 - Update all three `user_view/innovation_story/` files after the packets are internally consistent. `00_STORYLINE_DESIGN.md` should state the belief shift and proof ladder; `01_METHOD_INNOVATION_STORY.md` should explain where the method came from and why the transfer is legitimate; `02_CLAIM_EVIDENCE_MAP.md` should map planned claims to evidence requirements and current claim limits.
+- Convert `ideation/IDEA_TRACK_SEEDS.json` into `orchestrator/TRACK_PLAN_MATRIX.json` before prelaunch lint. Keep alternates parked or blocked until their own baseline/protocol/evidence closure is explicit; do not inherit readiness from the primary track.
 
 ## Validation
 
@@ -123,6 +125,8 @@ Before `autoreskill-run-experiment`, run:
 
 ```bash
 python scripts/experiment_materialize.py --project <project-root>
+python scripts/track_plan_matrix.py --project <project-root>
+python scripts/track_plan_matrix.py --project <project-root> --check
 # When the selected idea cites proposal_session_ref:
 python ../autoreskill-papernexus-innovation/scripts/proposal_graph_session_lint.py --project <project-root>
 python scripts/prelaunch_lint.py --project <project-root>

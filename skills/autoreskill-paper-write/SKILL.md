@@ -12,6 +12,9 @@ Use after analysis has claim-evidence outputs.
 Rules:
 
 - Strong claims must link to experiment or citation evidence.
+- Build `paper/RESEARCH_REPRESENTATION.json` and `.md` before composing prose. This is the claim-evidence tagged representation; it is not a draft.
+- Run `grounded_write_lint.py` before accepting `paper/main.tex`; `GROUNDED_WRITE_PACKAGE.json` must have `ground_status="passed"`.
+- Run `paper_claim_verifier.py` after composing LaTeX; `PAPER_CLAIM_VERIFICATION.json` must have no blocking numerical, citation, method, or conclusion failures.
 - Unsupported claims are softened, moved to limitations, or deleted.
 - Do not invent citations, results, datasets, or baselines.
 - If a paragraph needs a citation, closest-prior contrast, related-work bridge, limitation source, or target-venue framing that is missing from the citation queue, trigger targeted literature discovery instead of writing around the gap.
@@ -23,6 +26,12 @@ Rules:
 
 ```bash
 python scripts/paper_scaffold.py --project <project-root> --venue NeurIPS
+python scripts/research_representation.py --project <project-root>
+python scripts/research_representation.py --project <project-root> --check
+python scripts/grounded_write_lint.py --project <project-root>
+python scripts/grounded_write_lint.py --project <project-root> --check
+python scripts/paper_claim_verifier.py --project <project-root>
+python scripts/paper_claim_verifier.py --project <project-root> --check
 python scripts/write_package_lint.py --project <project-root>
 python ../autoreskill-workflow/scripts/innovation_story_lint.py --project <project-root> --stage writing
 ```

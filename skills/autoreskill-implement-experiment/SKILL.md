@@ -52,6 +52,7 @@ The default path is a real baseline/data/GPU-backed experiment bundle. Synthetic
 - Run a real-data or real-feature smoke run before reporting launch-ready.
 - Record source state in `EXPERIMENT_MANIFEST.json`: git commit when available, diff/status summary, selected idea id, locked protocol, and protected eval/test/metric paths.
 - Record `baseline_code`, `compute_backend`, `path_mapping`, `baseline_data_audit`, `backend_upload`, `remote_run`, `dry_run_kind`, `innovation_search_contract`, `promotion_stage`, and any `ablation_of`/`confirmation_of` link in `EXPERIMENT_MANIFEST.json`; linters treat drift or fixture-only proof as launch-blocking.
+- After manifests are written, run `track_implementation_index.py` to create `coder/TRACK_IMPLEMENTATION_INDEX.json`. This index must map every ready or selected `TRACK_PLAN_MATRIX.json` row to manifest paths, baseline audit paths, patch proof status, remote-run proof, and fixture status.
 - If implementation discovers a red-line violation, stop and return to `autoreskill-experiment-plan` instead of repairing by changing the metric, data, or eval.
 
 ## Execution Order
@@ -68,12 +69,14 @@ The default path is a real baseline/data/GPU-backed experiment bundle. Synthetic
    - write `REMOTE_UPLOAD.json`.
 4. Implement comparable baseline/proposed entrypoints around the locked baseline. The proposed path may change only the planned one-variable controller.
 5. Run a real-data or real-feature smoke/pilot on the selected backend, persist logs/results, and write `REMOTE_RUN.json`.
-6. Run `experiment_drift_lint.py` and `experiment_real_readiness_lint.py` before marking the job complete.
+6. Run `track_implementation_index.py`, `experiment_drift_lint.py`, and `experiment_real_readiness_lint.py` before marking the job complete.
 
 ## Deterministic Helpers
 
 ```bash
 python scripts/experiment_scaffold.py --project <project-root> --experiment-id <id>
+python scripts/track_implementation_index.py --project <project-root>
+python scripts/track_implementation_index.py --project <project-root> --check
 python scripts/baseline_clone_lint.py --project <project-root>
 python scripts/experiment_drift_lint.py --project <project-root>
 python scripts/experiment_real_readiness_lint.py --project <project-root>
