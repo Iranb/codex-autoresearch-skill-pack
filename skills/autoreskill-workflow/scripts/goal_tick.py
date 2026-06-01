@@ -82,7 +82,7 @@ def write_rows(path: Path, data: list[dict[str, Any]]) -> None:
 
 def classify(reason: str) -> tuple[str, str]:
     text = reason.lower()
-    if any(key in text for key in ["import", "queue", "running", "remote", "async", "wait"]):
+    if any(key in text for key in ["import", "import_workflow", "queue", "queued", "running", "remote", "async", "wait", "authoritative", "sync"]):
         return "async_wait", "schedule_async_poll"
     if any(key in text for key in ["controller_unavailable", "single_seed", "cost_evidence", "provider", "sparse", "stale"]):
         return "degradable", "advance_with_downgrade_or_fallback"
@@ -191,6 +191,10 @@ def execution_spec(stage: str, state: dict[str, Any], contract: dict[str, Any]) 
         "preferMarkdown": True,
         "generateArxivMarkdownSources": True,
         "allowDownloads": False,
+        "importBatchEnabled": True,
+        "importBatchInitialTasks": 4,
+        "importBatchMaxTasks": 16,
+        "importBatchProgressive": True,
         "importResolved": False,
         "processImports": False,
         "returnPartial": True,
@@ -246,6 +250,7 @@ def execution_spec(stage: str, state: dict[str, Any], contract: dict[str, Any]) 
             "goal": "Probe PaperNexus corpus state and write a source-backed graph build decision.",
             "mcp_calls": [
                 {"tool": "list_corpora", "args": {}},
+                {"tool": "import_workflow", "args": {"operation": "queue_progress", "corpus": corpus, "limit": 20}},
                 {"tool": "agent_materials", "args": {"operation": "source_discovery_plan", "corpus": corpus}},
                 {"tool": "agent_materials", "args": {"operation": "research_material_pack", "corpus": corpus}},
             ],
@@ -258,6 +263,11 @@ def execution_spec(stage: str, state: dict[str, Any], contract: dict[str, Any]) 
                 script_cmd(
                     "autoreskill-papernexus-innovation",
                     "papernexus_artifact_capture.py",
+                    "--project <project-root> --kind import_workflow_status --input <import-workflow-result.json> --stage graph_build --source papernexus-remote.import_workflow --tag graph --tag import_workflow",
+                ),
+                script_cmd(
+                    "autoreskill-papernexus-innovation",
+                    "papernexus_artifact_capture.py",
                     "--project <project-root> --kind source_discovery_plan --input <mcp-result.json> --stage graph_build --source papernexus-remote.agent_materials --tag graph",
                 ),
                 script_cmd(
@@ -266,7 +276,7 @@ def execution_spec(stage: str, state: dict[str, Any], contract: dict[str, Any]) 
                     "--project <project-root> --kind graph_build_decision --input <decision.json> --stage graph_build --source WorkflowGuard --status complete",
                 ),
             ],
-            "outputs": [".autoreskill/graph/GRAPH_BUILD_DECISION.json"],
+            "outputs": [".autoreskill/graph/GRAPH_BUILD_DECISION.json", ".autoreskill/papernexus/IMPORT_WORKFLOW_STATUS.json"],
         },
         "frontier_mapping": {
             "skill": "autoreskill-papernexus-innovation",
@@ -290,7 +300,7 @@ def execution_spec(stage: str, state: dict[str, Any], contract: dict[str, Any]) 
         "ideation": {
             "skill": "autoreskill-ideation-panel",
             "role": "Researcher",
-            "goal": "Generate a broad 12-15 item academic-paper-oriented experiment idea pool only after the pre-idea evidence gate passes. Trigger target-domain, near-neighbor, and far-neighbor discovery through papernexus-remote; use target-domain evidence to anchor problem/baseline/protocol and overlap risk, and use near/far-neighbor or cross-lane transfer as the preferred primary method source for top-tier ideas. Actively screen raw discovery; satisfy the venue-agnostic breadth lint, not just one attempt per lane; import/supplement or split-read roughly 60-80% of the high-signal eligible set; build INNOVATION_SLOT_MAP.json; write PRE_IDEA_EVIDENCE_GATE.json status=passed; then generate ideas tied to innovation_slot_refs and score every idea against target/near/far evidence before idea_gate selection.",
+            "goal": "Generate a broad 12-15 item academic-paper-oriented experiment idea pool only after the pre-idea evidence gate passes. Trigger target-domain, near-neighbor, and far-neighbor discovery through papernexus-remote; use target-domain evidence to anchor problem/baseline/protocol and overlap risk, and use near/far-neighbor or cross-lane transfer as the preferred primary method source for top-tier ideas. Actively screen raw discovery; satisfy the venue-agnostic breadth lint, not just one attempt per lane; submit import/supplement work for roughly 60-80% of the high-signal eligible set through PaperNexus import_workflow with progressive batching, wait for completed task/stage plus authoritative sync before graph-grounded use, and split-read/materialize the selected evidence roles; build INNOVATION_SLOT_MAP.json; write PRE_IDEA_EVIDENCE_GATE.json status=passed; then generate ideas tied to innovation_slot_refs and score every idea against target/near/far evidence before idea_gate selection.",
             "mcp_calls": [
                 {"tool": "literature_discovery", "args": {"operation": "search", "corpus": corpus, "topic": lane_topics["target_domain"], **broad_metadata_discovery}},
                 {"tool": "literature_discovery", "args": {"operation": "search", "corpus": corpus, "topic": lane_topics["near_neighbor"], **broad_metadata_discovery}},
@@ -334,6 +344,11 @@ def execution_spec(stage: str, state: dict[str, Any], contract: dict[str, Any]) 
                 ),
                 script_cmd(
                     "autoreskill-papernexus-innovation",
+                    "import_workflow_status_lint.py",
+                    "--project <project-root>",
+                ),
+                script_cmd(
+                    "autoreskill-papernexus-innovation",
                     "split_reading_evidence_pack_lint.py",
                     "--project <project-root>",
                 ),
@@ -359,6 +374,7 @@ def execution_spec(stage: str, state: dict[str, Any], contract: dict[str, Any]) 
                 ".autoreskill/papernexus/PAPER_SELECTION_SCORECARD.json",
                 ".autoreskill/papernexus/GRAPH_IMPORT_PLAN.json",
                 ".autoreskill/papernexus/GRAPH_IMPORT_STATUS.json",
+                ".autoreskill/papernexus/IMPORT_WORKFLOW_STATUS.json",
                 ".autoreskill/papernexus/SPLIT_READING_EVIDENCE_PACK.json",
                 ".autoreskill/ideation/INNOVATION_SLOT_MAP.json",
                 ".autoreskill/ideation/PRE_IDEA_EVIDENCE_GATE.json",
@@ -542,17 +558,28 @@ def write_job_packet(
 ) -> Path:
     stage = str(job.get("stage") or state.get("stage", "init"))
     spec = execution_spec(stage, state, contract)
-    mcp_calls = spec["mcp_calls"]
+    mcp_calls = list(spec["mcp_calls"])
     capture_commands = list(spec["capture"])
     outputs = list(spec["outputs"])
     literature_search = has_literature_search(mcp_calls)
     if literature_search:
+        corpus = (state.get("paperNexus") or {}).get("corpus")
+        if not any(isinstance(call, dict) and call.get("tool") == "import_workflow" for call in mcp_calls):
+            mcp_calls.append({"tool": "import_workflow", "args": {"operation": "queue_progress", "corpus": corpus, "limit": 20}})
         if not any("--kind literature_discovery_packet" in command for command in capture_commands):
             capture_commands.append(
                 script_cmd(
                     "autoreskill-papernexus-innovation",
                     "papernexus_artifact_capture.py",
                     f"--project <project-root> --kind literature_discovery_packet --input <mcp-result.json> --stage {stage} --source papernexus-remote.literature_discovery --evidence-note \"{stage} literature discovery evidence\" --tag {stage} --tag literature_discovery",
+                )
+            )
+        if not any("--kind import_workflow_status" in command for command in capture_commands):
+            capture_commands.append(
+                script_cmd(
+                    "autoreskill-papernexus-innovation",
+                    "papernexus_artifact_capture.py",
+                    f"--project <project-root> --kind import_workflow_status --input <import-workflow-queue-or-wait-result.json> --stage {stage} --source papernexus-remote.import_workflow --tag {stage} --tag import_workflow",
                 )
             )
         if not any("discovery_metadata_triage.py" in command for command in capture_commands):
@@ -563,6 +590,14 @@ def write_job_packet(
                     f"--project <project-root> --input literature/LITERATURE_DISCOVERY_PACKET.json --stage {stage}",
                 )
             )
+        if not any("import_workflow_status_lint.py" in command for command in capture_commands):
+            capture_commands.append(
+                script_cmd(
+                    "autoreskill-papernexus-innovation",
+                    "import_workflow_status_lint.py",
+                    "--project <project-root>",
+                )
+            )
         outputs = append_unique(
             outputs,
             [
@@ -571,6 +606,7 @@ def write_job_packet(
                 ".autoreskill/papernexus/PAPER_SELECTION_SCORECARD.json",
                 ".autoreskill/papernexus/GRAPH_IMPORT_PLAN.json",
                 ".autoreskill/papernexus/GRAPH_IMPORT_STATUS.json",
+                ".autoreskill/papernexus/IMPORT_WORKFLOW_STATUS.json",
                 ".autoreskill/papernexus/SPLIT_READING_EVIDENCE_PACK.json",
             ],
         )
@@ -589,15 +625,20 @@ def write_job_packet(
         constraints.extend(
             [
                 "Treat literature_discovery search results as recall only, not graph-grounded evidence.",
+                "For broad or long-running discovery/import work, prefer literature_discovery operation=submit plus progress/report polling; do not lose server-side state to an MCP client timeout.",
                 "After every useful discovery result, screen candidates into papernexus/PAPER_SELECTION_SCORECARD.json and reject duplicates, weak relevance, unresolved sources, survey noise, and generic benchmark-only papers.",
                 "Build papernexus/GRAPH_IMPORT_PLAN.json from selected usable papers, then request PaperNexus import/supplement/material-view or split-reading evidence before using those papers for novelty, baseline, mechanism, limitation, or citation claims.",
+                "Use PaperNexus import_workflow queue_progress/status/wait for selected import tasks; capture papernexus/IMPORT_WORKFLOW_STATUS.json and require status=completed, stage=completed, plus authoritative sync completion or supersession before treating a paper as graph-visible.",
+                "Use progressive import batching defaults unless the server overrides them: importBatchEnabled=true, importBatchInitialTasks=4, importBatchMaxTasks=16, importBatchProgressive=true.",
+                "A fast commit with authoritativeSync pending is an async wait condition, not graph-grounded evidence closure.",
             ]
         )
         acceptance_criteria.extend(
             [
                 "Raw discovery candidates are screened before any graph/material evidence claim",
                 "Selected usable papers have explicit graph_import, split_read_only, watchlist, or rejection decisions",
-                "Graph/material import or split-reading blockers are recorded instead of silently treating raw search rows as evidence",
+                "IMPORT_WORKFLOW_STATUS.json records taskIds/batchIds/queue progress or wait results for selected import tasks",
+                "Graph/material import, authoritative-sync wait, or split-reading blockers are recorded instead of silently treating raw search rows as evidence",
             ]
         )
     path = base / "job_packets" / f"{job['job_id']}.json"

@@ -18,6 +18,8 @@ REQUIRED_SEARCH_EQUALS = {
     "citationExpansion": True,
     "openAlexRelatedExpansion": True,
     "allowDownloads": False,
+    "importBatchEnabled": True,
+    "importBatchProgressive": True,
     "importResolved": False,
     "processImports": False,
     "returnPartial": True,
@@ -44,6 +46,8 @@ REQUIRED_SEARCH_MIN_VALUES = {
     "retryCount": 5,
     "timeoutMs": 300000,
     "searchBudgetMs": 300000,
+    "importBatchInitialTasks": 4,
+    "importBatchMaxTasks": 16,
 }
 
 
@@ -162,9 +166,13 @@ For every useful `literature_discovery(operation="search")` result:
 2. Run candidate triage and write `papernexus/PAPER_SELECTION_SCORECARD.json`.
 3. Reject duplicates, weak relevance, unresolved sources, survey noise, and generic benchmark-only papers.
 4. Build `papernexus/GRAPH_IMPORT_PLAN.json` from selected usable papers.
-5. Use the plan for PaperNexus import/supplement/material-view or split-reading work, then capture `papernexus/GRAPH_IMPORT_STATUS.json` and/or `papernexus/SPLIT_READING_EVIDENCE_PACK.json`.
+5. Use the plan for PaperNexus import/supplement/material-view or split-reading work.
+6. For any import/supplement task, use `import_workflow(operation="queue_progress"|"status"|"wait")`; capture `papernexus/IMPORT_WORKFLOW_STATUS.json` with task ids and batch ids.
+7. Treat a paper as graph-visible only after the relevant task has `status=completed`, `stage=completed`, and authoritative graph sync is complete or superseded. A fast commit with `authoritativeSync=pending` is an async wait, not evidence closure.
+8. Capture `papernexus/SPLIT_READING_EVIDENCE_PACK.json` before using the paper as novelty, baseline, method, limitation, or citation evidence.
 
 Do not use raw discovery rows directly as novelty, baseline, method, limitation, or citation evidence.
+For broad/long-running discovery or import work, prefer `literature_discovery(operation="submit")` plus progress/report polling so MCP client timeouts do not discard server-side state.
 """
 
     return f"""# AutoResearch Job Packet

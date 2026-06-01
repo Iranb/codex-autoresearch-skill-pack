@@ -30,6 +30,7 @@ ARTIFACT_PATHS = {
     "paper_selection_scorecard": "papernexus/PAPER_SELECTION_SCORECARD.json",
     "graph_import_plan": "papernexus/GRAPH_IMPORT_PLAN.json",
     "graph_import_status": "papernexus/GRAPH_IMPORT_STATUS.json",
+    "import_workflow_status": "papernexus/IMPORT_WORKFLOW_STATUS.json",
     "split_reading_evidence_pack": "papernexus/SPLIT_READING_EVIDENCE_PACK.json",
     "innovation_slot_map": "ideation/INNOVATION_SLOT_MAP.json",
     "pre_idea_evidence_gate": "ideation/PRE_IDEA_EVIDENCE_GATE.json",
@@ -58,6 +59,7 @@ CONTRACT_KINDS = {
     "paper_selection_scorecard",
     "graph_import_plan",
     "graph_import_status",
+    "import_workflow_status",
     "experiment_monitor_plan",
 }
 

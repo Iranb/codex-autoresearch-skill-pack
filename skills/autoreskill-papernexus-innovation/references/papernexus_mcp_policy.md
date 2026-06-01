@@ -17,9 +17,12 @@ If graph evidence is sparse, use policy-bounded:
 
 ```text
 literature_discovery plan/search/run
+literature_discovery submit/progress/report for broad or long-running discovery
 optional open-access import
-import_workflow status/wait
+import_workflow queue_progress/status/wait with waitForAuthoritativeSync=true
 repeat graph-grounded lookup
 ```
+
+Selected papers are graph-grounded only after `import_workflow` reports the relevant task `status=completed` and `stage=completed`, with authoritative graph sync complete or superseded. Progressive import batching is the default path (`importBatchEnabled=true`, initial 4, max 16); queued/running tasks are async wait, not failure.
 
 Label evidence as `graph_grounded`, `discovery`, `provider_snippet`, `live_discovery`, `agent_inferred`, or `open_risk`.

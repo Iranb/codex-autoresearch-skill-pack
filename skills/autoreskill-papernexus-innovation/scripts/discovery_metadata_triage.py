@@ -515,7 +515,17 @@ def graph_import_plan(triage: dict[str, Any]) -> dict[str, Any]:
         "policy": {
             "raw_discovery_results_are_not_imported_directly": True,
             "selection_source": "papernexus/PAPER_SELECTION_SCORECARD.json",
-            "next_step": "execute PaperNexus import/supplement/material-view calls for selected_papers, then capture GRAPH_IMPORT_STATUS.json and SPLIT_READING_EVIDENCE_PACK.json",
+            "import_workflow": {
+                "capture": "papernexus/IMPORT_WORKFLOW_STATUS.json",
+                "batch_defaults": {
+                    "importBatchEnabled": True,
+                    "importBatchInitialTasks": 4,
+                    "importBatchMaxTasks": 16,
+                    "importBatchProgressive": True,
+                },
+                "ready_when": "selected task status=completed, stage=completed, and authoritativeSync is complete or superseded",
+            },
+            "next_step": "execute PaperNexus import/supplement/material-view calls for selected_papers via import_workflow, capture IMPORT_WORKFLOW_STATUS.json, wait for authoritative graph sync, then capture SPLIT_READING_EVIDENCE_PACK.json",
         },
         "selected_papers": selected,
         "lane_balance": lane_balance,

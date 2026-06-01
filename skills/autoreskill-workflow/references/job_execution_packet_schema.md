@@ -51,6 +51,10 @@ Required fields:
         "timeoutMs": 300000,
         "searchBudgetMs": 300000,
         "allowDownloads": false,
+        "importBatchEnabled": true,
+        "importBatchInitialTasks": 4,
+        "importBatchMaxTasks": 16,
+        "importBatchProgressive": true,
         "importResolved": false,
         "processImports": false,
         "returnPartial": true,
@@ -65,7 +69,7 @@ Required fields:
 }
 ```
 
-`goal_job_dispatch.py` refuses to render any job packet containing `literature_discovery(operation="search")` unless the search uses the broad configuration above. This applies to topic search, ideation lanes, and later targeted discovery repair packets; the topic may be narrow, but the discovery configuration must remain recall-oriented. Use `operation=resolve`, `import`, `ingest`, or `import_and_process` only after screening selected papers.
+`goal_job_dispatch.py` refuses to render any job packet containing `literature_discovery(operation="search")` unless the search uses the broad configuration above. This applies to topic search, ideation lanes, and later targeted discovery repair packets; the topic may be narrow, but the discovery configuration must remain recall-oriented. Use `operation=submit` plus progress/report polling for broad or long-running discovery/import work. Use `operation=resolve`, `import`, `ingest`, or `import_and_process` only after screening selected papers, and then track graph visibility through `import_workflow`.
 
 Every packet containing `literature_discovery(operation="search")` must also close the post-discovery evidence loop in the serialized prompt:
 
@@ -73,7 +77,9 @@ Every packet containing `literature_discovery(operation="search")` must also clo
 2. Run candidate triage/screening and write `papernexus/PAPER_SELECTION_SCORECARD.json`.
 3. Build `papernexus/GRAPH_IMPORT_PLAN.json` from selected usable papers.
 4. Use the plan to request PaperNexus import/supplement/material-view or split-reading work.
-5. Capture `papernexus/GRAPH_IMPORT_STATUS.json` and/or `papernexus/SPLIT_READING_EVIDENCE_PACK.json` before using the papers as novelty, method, baseline, limitation, or citation evidence.
+5. Capture `papernexus/IMPORT_WORKFLOW_STATUS.json` from `import_workflow queue_progress/status/wait`, including selected task ids or batch ids.
+6. Wait until selected tasks report `status=completed`, `stage=completed`, and authoritative graph sync is complete or superseded. If they are pending, queue async wait instead of treating raw discovery as evidence.
+7. Capture `papernexus/SPLIT_READING_EVIDENCE_PACK.json` before using the papers as novelty, method, baseline, limitation, or citation evidence.
 
 Raw discovery results are search evidence only. They are not graph-grounded evidence.
 

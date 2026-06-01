@@ -126,18 +126,34 @@ def lint(project: str, stage: str) -> dict[str, Any]:
         return result(stage, not missing, missing, "topic_search_contract")
 
     if stage == "graph_build":
+        skill_root = Path(__file__).resolve().parents[2]
         decision = read_json(base / "graph/GRAPH_BUILD_DECISION.json")
         graph_plan = read_json(base / "papernexus/GRAPH_IMPORT_PLAN.json")
+        import_workflow_lint = run_json(
+            [
+                sys.executable,
+                str(skill_root / "autoreskill-papernexus-innovation/scripts/import_workflow_status_lint.py"),
+                "--project",
+                str(Path(project).expanduser().resolve()),
+            ]
+        )
         missing = []
+        warnings = []
         if not bool(decision and decision.get("decision") == "complete" and decision.get("source_backed_graph_claim") is True):
             missing.append("graph/GRAPH_BUILD_DECISION.json decision=complete source_backed_graph_claim=true")
         if not isinstance(graph_plan, dict):
             missing.append("papernexus/GRAPH_IMPORT_PLAN.json")
         elif graph_plan.get("selected_papers") and not (
-            nonempty(base / "papernexus/GRAPH_IMPORT_STATUS.json") or nonempty(base / "papernexus/SPLIT_READING_EVIDENCE_PACK.json")
+            import_workflow_lint.get("complete") or nonempty(base / "papernexus/SPLIT_READING_EVIDENCE_PACK.json")
         ):
-            missing.append("papernexus/GRAPH_IMPORT_STATUS.json or papernexus/SPLIT_READING_EVIDENCE_PACK.json for selected usable papers")
-        return result(stage, not missing, missing, "graph_build_contract")
+            items = import_workflow_lint.get("missing") if isinstance(import_workflow_lint.get("missing"), list) else []
+            if items:
+                missing.extend(f"import_workflow_status_lint: {item}" for item in items)
+            else:
+                missing.append("papernexus/IMPORT_WORKFLOW_STATUS.json or papernexus/SPLIT_READING_EVIDENCE_PACK.json for selected usable papers")
+        items = import_workflow_lint.get("warnings") if isinstance(import_workflow_lint.get("warnings"), list) else []
+        warnings.extend(f"import_workflow_status_lint: {item}" for item in items)
+        return result(stage, not missing, missing, "graph_build_contract", warnings, {"import_workflow_status_lint": import_workflow_lint})
 
     if stage == "frontier_mapping":
         ok = has_any(base, ["papernexus/research_material_pack.json", "papernexus/source_discovery_plan.json", "ideation/CHALLENGE_INSIGHT_TREE.md"])
@@ -228,6 +244,14 @@ def lint(project: str, stage: str) -> dict[str, Any]:
                 str(Path(project).expanduser().resolve()),
             ]
         )
+        import_workflow_lint = run_json(
+            [
+                sys.executable,
+                str(skill_root / "autoreskill-papernexus-innovation/scripts/import_workflow_status_lint.py"),
+                "--project",
+                str(Path(project).expanduser().resolve()),
+            ]
+        )
         split_reading_lint = run_json(
             [
                 sys.executable,
@@ -256,6 +280,7 @@ def lint(project: str, stage: str) -> dict[str, Any]:
                 "paper_selection_scorecard_lint": paper_selection_lint,
                 "pre_idea_breadth_lint": breadth_lint,
                 "graph_import_plan_lint": graph_import_lint,
+                "import_workflow_status_lint": import_workflow_lint,
                 "split_reading_evidence_pack_lint": split_reading_lint,
             }.items():
                 if not out.get("complete"):
@@ -310,6 +335,7 @@ def lint(project: str, stage: str) -> dict[str, Any]:
                 "paper_selection_scorecard_lint": paper_selection_lint,
                 "pre_idea_breadth_lint": breadth_lint,
                 "graph_import_plan_lint": graph_import_lint,
+                "import_workflow_status_lint": import_workflow_lint,
                 "split_reading_evidence_pack_lint": split_reading_lint,
                 "proposal_graph_session_lint": proposal_graph_lint,
                 "idea_pool_lint": pool_lint,
