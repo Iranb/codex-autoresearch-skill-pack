@@ -83,10 +83,10 @@ Every packet containing `literature_discovery(operation="search")` must also clo
 
 1. Capture the search result as a discovery artifact.
 2. Run candidate triage/screening and write `papernexus/PAPER_SELECTION_SCORECARD.json`.
-3. Build `papernexus/GRAPH_IMPORT_PLAN.json` from selected usable papers.
-4. Use the plan to request PaperNexus import/supplement/material-view or split-reading work.
-5. Capture `papernexus/IMPORT_WORKFLOW_STATUS.json` from `import_workflow queue_progress/status/wait`, including selected task ids or batch ids.
-6. Wait until selected tasks report `status=completed`, `stage=completed`, and authoritative graph sync is complete or superseded. If they are pending, queue async wait and schedule a heartbeat from the tick `wakeup` recommendation instead of treating raw discovery as evidence.
+3. Build `papernexus/GRAPH_IMPORT_PLAN.json` from selected usable papers, including `planned_import_count` and `required_graph_import_keys` for every `import`/`supplement` row.
+4. Use the plan to request PaperNexus import/supplement for every required graph-import row and material-view or split-reading work only for `material_view` rows.
+5. Capture `papernexus/IMPORT_WORKFLOW_STATUS.json` from `import_workflow queue_progress/status/wait`, including planned/submitted/completed/authoritative-sync counts, selected task ids or batch ids, and any missing unsubmitted/incomplete/unsynced keys.
+6. Wait until every required graph-import task reports `status=completed`, `stage=completed`, and authoritative graph sync is complete or superseded. If any task is pending, queue async wait and schedule a heartbeat from the tick `wakeup` recommendation instead of treating raw discovery as evidence.
 7. Capture `papernexus/SPLIT_READING_EVIDENCE_PACK.json` before using the papers as novelty, method, baseline, limitation, or citation evidence.
 
 Raw discovery results are search evidence only. They are not graph-grounded evidence.

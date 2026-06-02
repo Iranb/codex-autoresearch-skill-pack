@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -61,6 +62,7 @@ NEXT_ACTIONS = {
     "submission_ready": "package_for_submission",
 }
 
+DEFAULT_CORPUS = os.environ.get("AUTORESEARCH_DEFAULT_CORPUS", "default-papernexus-corpus")
 DEFAULT_TARGET_VENUE = "unspecified_top_tier"
 
 
@@ -278,7 +280,7 @@ def main() -> None:
     p = sub.add_parser("init")
     p.add_argument("--project", required=True)
     p.add_argument("--goal", required=True)
-    p.add_argument("--corpus", default="PN-ICML-Ideation-Shared-240-v1")
+    p.add_argument("--corpus", default=DEFAULT_CORPUS)
     p.add_argument("--venue", default=DEFAULT_TARGET_VENUE)
     p.add_argument("--autonomy", default="full_auto_bounded")
     p.set_defaults(func=initialize)

@@ -130,6 +130,22 @@ def track_seed_idea_ids(seeds: Any) -> set[str]:
     return ids
 
 
+def graph_plan_action_counts(graph_plan: Any) -> dict[str, int]:
+    counts = {"import_required": 0, "material_required": 0, "selected": 0}
+    if not isinstance(graph_plan, dict):
+        return counts
+    for row in graph_plan.get("selected_papers") or []:
+        if not isinstance(row, dict):
+            continue
+        counts["selected"] += 1
+        action = str(row.get("import_action") or "").strip()
+        if action in {"import", "supplement"}:
+            counts["import_required"] += 1
+        elif action == "material_view":
+            counts["material_required"] += 1
+    return counts
+
+
 def validate_idea_decision_ledger(base: Path) -> tuple[list[str], list[str], dict[str, Any]]:
     missing: list[str] = []
     warnings: list[str] = []
@@ -353,6 +369,7 @@ def lint(project: str, stage: str) -> dict[str, Any]:
         skill_root = Path(__file__).resolve().parents[2]
         decision = read_json(base / "graph/GRAPH_BUILD_DECISION.json")
         graph_plan = read_json(base / "papernexus/GRAPH_IMPORT_PLAN.json")
+        graph_plan_counts = graph_plan_action_counts(graph_plan)
         import_workflow_lint = run_json(
             [
                 sys.executable,
@@ -367,17 +384,20 @@ def lint(project: str, stage: str) -> dict[str, Any]:
             missing.append("graph/GRAPH_BUILD_DECISION.json decision=complete source_backed_graph_claim=true")
         if not isinstance(graph_plan, dict):
             missing.append("papernexus/GRAPH_IMPORT_PLAN.json")
-        elif graph_plan.get("selected_papers") and not (
-            import_workflow_lint.get("complete") or nonempty(base / "papernexus/SPLIT_READING_EVIDENCE_PACK.json")
-        ):
-            items = import_workflow_lint.get("missing") if isinstance(import_workflow_lint.get("missing"), list) else []
-            if items:
-                missing.extend(f"import_workflow_status_lint: {item}" for item in items)
-            else:
-                missing.append("papernexus/IMPORT_WORKFLOW_STATUS.json or papernexus/SPLIT_READING_EVIDENCE_PACK.json for selected usable papers")
+        elif graph_plan_counts["import_required"]:
+            if not import_workflow_lint.get("complete"):
+                items = import_workflow_lint.get("missing") if isinstance(import_workflow_lint.get("missing"), list) else []
+                if items:
+                    missing.extend(f"import_workflow_status_lint: {item}" for item in items)
+                else:
+                    missing.append("papernexus/IMPORT_WORKFLOW_STATUS.json with all graph_import import/supplement tasks completed and authoritative-synced")
+            if graph_plan_counts["material_required"] and not nonempty(base / "papernexus/SPLIT_READING_EVIDENCE_PACK.json"):
+                warnings.append("material_view selected papers still need papernexus/SPLIT_READING_EVIDENCE_PACK.json before downstream evidence use")
+        elif graph_plan_counts["selected"] and not nonempty(base / "papernexus/SPLIT_READING_EVIDENCE_PACK.json"):
+            missing.append("papernexus/SPLIT_READING_EVIDENCE_PACK.json for selected material_view papers")
         items = import_workflow_lint.get("warnings") if isinstance(import_workflow_lint.get("warnings"), list) else []
         warnings.extend(f"import_workflow_status_lint: {item}" for item in items)
-        return result(stage, not missing, missing, "graph_build_contract", warnings, {"import_workflow_status_lint": import_workflow_lint})
+        return result(stage, not missing, missing, "graph_build_contract", warnings, {"import_workflow_status_lint": import_workflow_lint, "graph_plan_counts": graph_plan_counts})
 
     if stage == "frontier_mapping":
         ok = has_any(base, ["papernexus/research_material_pack.json", "papernexus/source_discovery_plan.json", "ideation/CHALLENGE_INSIGHT_TREE.md"])
@@ -452,6 +472,14 @@ def lint(project: str, stage: str) -> dict[str, Any]:
                 str(Path(project).expanduser().resolve()),
             ]
         )
+        abstract_screening_lint = run_json(
+            [
+                sys.executable,
+                str(skill_root / "autoreskill-papernexus-innovation/scripts/abstract_screening_audit_lint.py"),
+                "--project",
+                str(Path(project).expanduser().resolve()),
+            ]
+        )
         paper_selection_lint = run_json(
             [
                 sys.executable,
@@ -511,6 +539,7 @@ def lint(project: str, stage: str) -> dict[str, Any]:
         if not approved_degraded:
             for name, out in {
                 "pre_idea_discovery_config_lint": discovery_config_lint,
+                "abstract_screening_audit_lint": abstract_screening_lint,
                 "paper_selection_scorecard_lint": paper_selection_lint,
                 "pre_idea_breadth_lint": breadth_lint,
                 "graph_import_plan_lint": graph_import_lint,
@@ -584,6 +613,7 @@ def lint(project: str, stage: str) -> dict[str, Any]:
             {
                 "pre_idea_evidence_gate_lint": pre_idea_gate_lint,
                 "pre_idea_discovery_config_lint": discovery_config_lint,
+                "abstract_screening_audit_lint": abstract_screening_lint,
                 "paper_selection_scorecard_lint": paper_selection_lint,
                 "pre_idea_breadth_lint": breadth_lint,
                 "graph_import_plan_lint": graph_import_lint,

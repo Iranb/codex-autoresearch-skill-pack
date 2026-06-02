@@ -169,11 +169,11 @@ For every useful `literature_discovery(operation="search")` result:
 1. Capture the raw discovery result.
 2. Run candidate triage and write `papernexus/PAPER_SELECTION_SCORECARD.json`.
 3. Reject duplicates, weak relevance, unresolved sources, survey noise, and generic benchmark-only papers.
-4. Build `papernexus/GRAPH_IMPORT_PLAN.json` from selected usable papers.
-5. Use the plan for PaperNexus import/supplement/material-view or split-reading work.
-6. For any import/supplement task, use `import_workflow(operation="queue_progress"|"status"|"wait")`; capture `papernexus/IMPORT_WORKFLOW_STATUS.json` with task ids and batch ids.
-7. Treat a paper as graph-visible only after the relevant task has `status=completed`, `stage=completed`, and authoritative graph sync is complete or superseded. A fast commit with `authoritativeSync=pending` is an async wait, not evidence closure.
-8. Capture `papernexus/SPLIT_READING_EVIDENCE_PACK.json` before using the paper as novelty, baseline, method, limitation, or citation evidence.
+4. Build `papernexus/GRAPH_IMPORT_PLAN.json` from selected usable papers, including `planned_import_count` and `required_graph_import_keys`.
+5. Use the plan for PaperNexus import/supplement work for every `import_action=import/supplement` row; use material-view or split-reading only for `material_view` rows.
+6. For all import/supplement tasks, use `import_workflow(operation="queue_progress"|"status"|"wait")`; capture `papernexus/IMPORT_WORKFLOW_STATUS.json` with planned/submitted/completed/authoritative-sync counts, task ids, batch ids, and missing unsubmitted/incomplete/unsynced keys.
+7. Treat an `import`/`supplement` paper as graph-visible only after its task has `status=completed`, `stage=completed`, and authoritative graph sync is complete or superseded. A fast commit with `authoritativeSync=pending` is an async wait, not evidence closure.
+8. Capture `papernexus/SPLIT_READING_EVIDENCE_PACK.json` before using `material_view` papers as novelty, baseline, method, limitation, or citation evidence.
 
 Do not use raw discovery rows directly as novelty, baseline, method, limitation, or citation evidence.
 For broad/long-running discovery or import work, prefer `literature_discovery(operation="submit")` plus progress/report polling so MCP client timeouts do not discard server-side state.

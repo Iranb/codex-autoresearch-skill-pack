@@ -19,10 +19,11 @@ Also use this skill after ideation whenever a later stage exposes a concrete evi
 - If `proposal_graph_session` is exposed, use it as the preferred PaperNexus idea-generation call after the pre-idea evidence gate passes. Legacy `idea_catalyst` and `research_controller` are fallback/scoring evidence, not the primary generator, unless `proposal_graph_session` is unavailable or fails into a recorded diagnosis/blocker.
 - If remote evidence is sparse, use bounded provider/live/literature discovery according to `.autoreskill/autopilot_policy.json`.
 - During ideation, always run broad `literature_discovery` for three lanes: `target_domain`, `near_neighbor`, and `far_neighbor`. The first search pass can be metadata-only, but it must use deep/recall-oriented planning and expansion defaults rather than quick metadata defaults. `pre_idea_discovery_config_lint.py` must pass before idea generation. Idea generation is blocked until high-signal eligible papers have been imported, supplemented, or split-read through PaperNexus, or until an explicit blocker/degraded approval is recorded.
+- Metadata-only discovery still needs explicit reading proof. Before `PAPER_SELECTION_SCORECARD.json`, write `.autoreskill/papernexus/ABSTRACT_SCREENING_AUDIT.json` with one row per merged discovery candidate. Each row records lane, title, stable id, abstract-read status or no-abstract metadata fallback, screening decision, and rationale. `abstract_screening_audit_lint.py` must pass before the pre-idea gate can pass.
 - The three-lane breadth requirement is venue-agnostic. Do not apply it only to TPAMI, top journals, or manually named venues. Every paper-oriented research workflow must consider the current field, near-neighbor fields, and far-neighbor transfer fields before idea generation.
 - For top-tier method novelty, target-domain evidence is the current-field prior and evaluation anchor; it should usually attack, constrain, or falsify an idea rather than serve as the main method source. Prefer near-neighbor, far-neighbor, external-domain transfer, cross-lane recombination, or committed proposal-graph transfer as the primary method mechanism. Treat target-domain-only method variants as baselines or ablations unless a current-field absence audit is recorded.
 - Do not mechanically import raw discovery results. Use `PAPER_SELECTION_SCORECARD.json` to reject duplicates, weak relevance, unresolved sources, survey noise, and generic benchmark papers; select roughly 60-80% of the high-signal eligible set, not raw results. Then convert selected usable papers into `GRAPH_IMPORT_PLAN.json` before requesting PaperNexus import/supplement/material views or split-reading evidence.
-- Treat PaperNexus import as asynchronous queue work. Use `import_workflow queue_progress/status/wait` for selected import tasks, keep progressive batching enabled (`importBatchEnabled=true`, `importBatchInitialTasks=4`, `importBatchMaxTasks=16`, `importBatchProgressive=true`), and capture `IMPORT_WORKFLOW_STATUS.json`. A paper is graph-visible only after `status=completed`, `stage=completed`, and authoritative graph sync is complete or superseded; fast commit alone is not enough.
+- Treat PaperNexus import as asynchronous queue work. Use `import_workflow queue_progress/status/wait` for every `GRAPH_IMPORT_PLAN` row with `import_action=import/supplement`, keep progressive batching enabled (`importBatchEnabled=true`, `importBatchInitialTasks=4`, `importBatchMaxTasks=16`, `importBatchProgressive=true`), and capture `IMPORT_WORKFLOW_STATUS.json` with planned/submitted/completed/authoritative-sync counts. A paper is graph-visible only after `status=completed`, `stage=completed`, and authoritative graph sync is complete or superseded; fast commit alone is not enough. Split-reading/material views can satisfy `material_view` rows only, never an `import`/`supplement` graph-import row.
 
 ## Pre-Idea Evidence Expansion Policy
 
@@ -32,6 +33,7 @@ Before `autoreskill-ideation-panel` may write `ideation/EXPERIMENT_IDEA_POOL.jso
 - `.autoreskill/literature/TARGET_DOMAIN_DISCOVERY_PACKET.json`
 - `.autoreskill/literature/NEAR_NEIGHBOR_DISCOVERY_PACKET.json`
 - `.autoreskill/literature/FAR_NEIGHBOR_DISCOVERY_PACKET.json`
+- `.autoreskill/papernexus/ABSTRACT_SCREENING_AUDIT.json`
 - `.autoreskill/papernexus/PAPER_SELECTION_SCORECARD.json`
 - `.autoreskill/papernexus/GRAPH_IMPORT_PLAN.json`
 - `.autoreskill/papernexus/IMPORT_WORKFLOW_STATUS.json` when PaperNexus import/supplement tasks are submitted or already queued
@@ -106,7 +108,7 @@ For each ideation candidate, attach lightweight evidence notes when available:
 - `missing_materials`
 - `followup_evidence_plan`
 
-At ideation time, produce `papernexus/LITERATURE_DISCOVERY_TRIAGE.json`, `papernexus/PAPER_SELECTION_SCORECARD.json`, `papernexus/GRAPH_IMPORT_PLAN.json`, and `papernexus/IMPORT_WORKFLOW_STATUS.json` from discovery and import-workflow packets. The scorecard must identify which discovered papers should be imported, supplemented, split-read, watched, or rejected before idea generation for novelty risk, baseline candidates, negative evidence, dataset/benchmark anchors, method lineage, limitations/future work, and transfer bridges. The graph import plan is the handoff into PaperNexus import/material work; raw discovery candidates must not be used directly as graph evidence.
+At ideation time, produce `papernexus/LITERATURE_DISCOVERY_TRIAGE.json`, `papernexus/ABSTRACT_SCREENING_AUDIT.json`, `papernexus/PAPER_SELECTION_SCORECARD.json`, `papernexus/GRAPH_IMPORT_PLAN.json`, and `papernexus/IMPORT_WORKFLOW_STATUS.json` from discovery and import-workflow packets. The abstract audit proves that each merged discovery candidate was considered at abstract level, or explicitly marked as no-abstract metadata fallback. The scorecard must identify which discovered papers should be imported, supplemented, split-read, watched, or rejected before idea generation for novelty risk, baseline candidates, negative evidence, dataset/benchmark anchors, method lineage, limitations/future work, and transfer bridges. The graph import plan is the handoff into PaperNexus import/material work and must include a hard `required_graph_import_keys` list for `import`/`supplement` rows; raw discovery candidates must not be used directly as graph evidence.
 
 Before a selected idea can enter `experiment_plan`, collect:
 
@@ -139,6 +141,7 @@ python scripts/pre_idea_discovery_plan.py --project <project-root> --topic "<top
 python scripts/papernexus_artifact_capture.py --project <project-root> --kind research_material_pack --input <mcp-result.json> --stage frontier_mapping --evidence-note "PaperNexus material pack evidence" --tag papernexus
 python scripts/papernexus_artifact_capture.py --project <project-root> --kind literature_discovery_packet --input <literature-discovery-search-result.json> --stage ideation --source papernexus-remote.literature_discovery --evidence-note "Ideation broad metadata-only literature discovery" --tag ideation --tag literature_discovery
 python scripts/discovery_metadata_triage.py --project <project-root> --input literature/LITERATURE_DISCOVERY_PACKET.json --stage ideation
+python scripts/abstract_screening_audit_lint.py --project <project-root>
 python scripts/paper_selection_scorecard_lint.py --project <project-root>
 python scripts/pre_idea_breadth_lint.py --project <project-root>
 python scripts/graph_import_plan_lint.py --project <project-root>

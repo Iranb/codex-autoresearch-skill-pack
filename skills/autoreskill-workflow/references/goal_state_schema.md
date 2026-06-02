@@ -12,7 +12,7 @@ Required fields:
   "target_venue": "unspecified_top_tier",
   "paperNexus": {
     "mode": "remote_mcp",
-    "corpus": "PN-ICML-Ideation-Shared-240-v1"
+    "corpus": "default-papernexus-corpus"
   },
   "stage": "init",
   "owner": "WorkflowGuard",

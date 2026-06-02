@@ -163,7 +163,11 @@ def classify(stage: str, reason: str, base: Path) -> tuple[str, str]:
         return classify_topic_search(base)
     text = reason.lower()
     if stage == "graph_build":
+        if "unsubmitted graph_import papers" in text or "submitted graph_import" in text:
+            return "auto_repairable", "submit_graph_import_tasks"
         if "queued/running" in text or "authoritative graph sync not complete" in text:
+            return "async_wait", "poll_graph_import_sync"
+        if "incomplete graph_import papers" in text or "authoritative graph sync incomplete for graph_import papers" in text:
             return "async_wait", "poll_graph_import_sync"
         if "taskids/relevanttaskids" in text or "task rows or explicit graph_visible" in text:
             return "auto_repairable", "submit_graph_import_tasks"
@@ -177,6 +181,20 @@ def classify(stage: str, reason: str, base: Path) -> tuple[str, str]:
         if local_queue_artifact and not any(name in text for name in ["import_workflow", "remote", "async", "authoritative", "sync"]):
             return "auto_repairable", "schedule_repair"
     if stage == "experiment" and ("promoted best_run" in text or "ready_for_analysis" in text):
+        active_statuses = {
+            "queued",
+            "pending",
+            "submitted",
+            "launching",
+            "starting",
+            "running",
+            "submitted_running",
+        }
+        for remote_path in sorted(base.glob("coder/experiments/**/REMOTE_RUN.json")):
+            remote = read_json(remote_path, {})
+            status = str(remote.get("status") or "").strip().lower() if isinstance(remote, dict) else ""
+            if status in active_statuses:
+                return "async_wait", "poll_experiment_run"
         negative_blocker = read_json(base / "coder/EXPERIMENT_NEGATIVE_BLOCKER.json", {})
         status = str(negative_blocker.get("status") or "").strip().lower() if isinstance(negative_blocker, dict) else ""
         if status in {"blocked_without_promoted_evidence", "no_promoted_evidence", "negative_result_route"}:
@@ -501,7 +519,7 @@ def execution_spec(stage: str, state: dict[str, Any], contract: dict[str, Any], 
         "graph_build": {
             "skill": "autoreskill-papernexus-innovation",
             "role": "Researcher",
-            "goal": "Submit or poll PaperNexus import/material tasks for selected graph import plan papers, then write a source-backed graph build decision only after selected evidence is graph-visible or explicitly routed to split-reading/material evidence.",
+            "goal": "Submit or poll PaperNexus import/material tasks for selected graph import plan papers. Every GRAPH_IMPORT_PLAN selected_papers row with import_action=import/supplement must receive a submitted import_workflow task and reach completed/stage=completed plus authoritative sync before graph_build can complete; split-reading/material evidence may satisfy material_view rows only.",
             "mcp_calls": [
                 {"tool": "list_corpora", "args": {}},
                 {"tool": "import_workflow", "args": {"operation": "queue_progress", "corpus": corpus, "limit": 20}},
@@ -510,7 +528,7 @@ def execution_spec(stage: str, state: dict[str, Any], contract: dict[str, Any], 
                     "args": {
                         "operation": "submit",
                         "corpus": corpus,
-                        "identifiers": "<repeat for each GRAPH_IMPORT_PLAN selected_papers import_action=import/supplement with DOI/arxivId/PMID/PMCID/ISBN/ISSN; capture returned taskIds>",
+                        "identifiers": "<repeat for every remaining GRAPH_IMPORT_PLAN selected_papers import_action=import/supplement with DOI/arxivId/PMID/PMCID/ISBN/ISSN; continue progressive batches until submitted_import_count equals planned_import_count; capture taskIds and idempotency keys>",
                         "trigger": "graph_build_selected_import_plan",
                     },
                 },
@@ -914,7 +932,8 @@ def write_job_packet(
                 "For broad or long-running discovery/import work, prefer literature_discovery operation=submit plus progress/report polling; do not lose server-side state to an MCP client timeout.",
                 "After every useful discovery result, screen candidates into papernexus/PAPER_SELECTION_SCORECARD.json and reject duplicates, weak relevance, unresolved sources, survey noise, and generic benchmark-only papers.",
                 "Build papernexus/GRAPH_IMPORT_PLAN.json from selected usable papers, then request PaperNexus import/supplement/material-view or split-reading evidence before using those papers for novelty, baseline, mechanism, limitation, or citation claims.",
-                "Use PaperNexus import_workflow queue_progress/status/wait for selected import tasks; capture papernexus/IMPORT_WORKFLOW_STATUS.json and require status=completed, stage=completed, plus authoritative sync completion or supersession before treating a paper as graph-visible.",
+                "Use PaperNexus import_workflow queue_progress/status/wait for every GRAPH_IMPORT_PLAN selected_papers row with import_action=import/supplement; capture papernexus/IMPORT_WORKFLOW_STATUS.json and require submitted_import_count, completed_import_count, and authoritative_sync_completed_count to equal planned_import_count before treating graph_import papers as graph-visible.",
+                "Do not use split-reading/material evidence to satisfy import_action=import/supplement rows. Split-reading/material evidence may satisfy material_view rows only.",
                 "Use progressive import batching defaults unless the server overrides them: importBatchEnabled=true, importBatchInitialTasks=4, importBatchMaxTasks=16, importBatchProgressive=true.",
                 "A fast commit with authoritativeSync pending is an async wait condition, not graph-grounded evidence closure.",
             ]
@@ -923,7 +942,7 @@ def write_job_packet(
             [
                 "Raw discovery candidates are screened before any graph/material evidence claim",
                 "Selected usable papers have explicit graph_import, split_read_only, watchlist, or rejection decisions",
-                "IMPORT_WORKFLOW_STATUS.json records taskIds/batchIds/queue progress or wait results for selected import tasks",
+                "IMPORT_WORKFLOW_STATUS.json records planned/submitted/completed/authoritative-sync counts, taskIds/batchIds, and missing unsubmitted/incomplete/unsynced keys for selected import tasks",
                 "Graph/material import, authoritative-sync wait, or split-reading blockers are recorded instead of silently treating raw search rows as evidence",
             ]
         )

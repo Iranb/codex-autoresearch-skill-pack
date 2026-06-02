@@ -41,6 +41,101 @@ SURVEY_HINTS = {"survey", "review", "systematic literature review", "overview", 
 GENERIC_BENCHMARK_HINTS = {"benchmarking", "benchmark suite", "dataset benchmark", "leaderboard"}
 FAR_TRANSFER_HINTS = {"analogy", "transfer", "control", "psychology", "sociology", "cognitive", "coordination", "feedback", "adaptation"}
 
+TARGET_DOMAIN_HINTS = {
+    "generalized category discovery",
+    "generalized class discovery",
+    "category discovery",
+    "class discovery",
+    "novel category discovery",
+    "novel class discovery",
+    "visual category discovery",
+    "novel target discovery",
+}
+NEAR_NEIGHBOR_HINTS = {
+    "open set",
+    "open-set",
+    "open world",
+    "open-world",
+    "open long tailed",
+    "domain adaptation",
+    "domain generalization",
+    "domain shift",
+    "source-free",
+    "semi supervised",
+    "semi-supervised",
+    "self-supervised",
+    "contrastive learning",
+    "prototype learning",
+    "prompt learning",
+    "vision language",
+    "vision-language",
+    "low-rank adaptation",
+    "lora",
+}
+FAR_NEIGHBOR_HINTS = {
+    "optimal transport",
+    "wasserstein",
+    "gromov",
+    "gromov-wasserstein",
+    "partial optimal transport",
+    "unbalanced optimal transport",
+    "pitman-yor",
+    "pitman yor",
+    "dirichlet process",
+    "dp-means",
+    "dp means",
+    "finite mixture",
+    "split-merge",
+    "information bottleneck",
+    "mutual information",
+    "gemini",
+    "von mises",
+    "v-m-f",
+    "vmf",
+    "neural collapse",
+    "equiangular tight frame",
+    "simplex etf",
+    "spectral clustering",
+    "manifold",
+    "spherical",
+    "hyperspherical",
+    "hyperbolic",
+}
+ML_VISION_CONTEXT_HINTS = TARGET_DOMAIN_HINTS | NEAR_NEIGHBOR_HINTS | FAR_NEIGHBOR_HINTS | {
+    "computer vision",
+    "image",
+    "visual",
+    "representation learning",
+    "clustering",
+    "classification",
+    "recognition",
+    "learning",
+    "neural",
+    "deep",
+    "transformer",
+    "dataset",
+}
+OUT_OF_SCOPE_HINTS = {
+    "antibiotic",
+    "respiratory infection",
+    "patient",
+    "healthcare",
+    "clinical",
+    "cancer",
+    "sociological review",
+    "humanities",
+    "social sciences",
+    "legal language",
+    "rough sets",
+    "topology and rough set",
+    "veteran population",
+    "heavy quark",
+    "gravitational entropy",
+    "black hole",
+    "ads/cft",
+    "quantum gravity",
+}
+
 
 def now() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -101,6 +196,28 @@ def collect_candidates(payload: Any) -> list[dict[str, Any]]:
 
 
 def get_text(row: dict[str, Any]) -> str:
+    props = row.get("properties") if isinstance(row.get("properties"), dict) else {}
+    retrieval = row.get("retrievalEvidence") if isinstance(row.get("retrievalEvidence"), list) else []
+    retrieval_pieces: list[Any] = []
+    for item in retrieval:
+        if isinstance(item, dict):
+            retrieval_pieces.extend([item.get("query"), item.get("family"), item.get("seedTitle")])
+    pieces = [
+        row.get("title"),
+        row.get("name"),
+        row.get("abstract"),
+        row.get("venue"),
+        " ".join(str(item or "") for item in row.get("sourceHints") or [] if isinstance(row.get("sourceHints"), list)),
+        *retrieval_pieces,
+        props.get("title"),
+        props.get("name"),
+        props.get("abstract"),
+        props.get("venue"),
+    ]
+    return " ".join(str(piece or "") for piece in pieces).lower()
+
+
+def get_surface_text(row: dict[str, Any]) -> str:
     props = row.get("properties") if isinstance(row.get("properties"), dict) else {}
     pieces = [
         row.get("title"),
@@ -176,6 +293,25 @@ def lane_of(row: dict[str, Any], default_lane: str) -> str:
     props = row.get("properties") if isinstance(row.get("properties"), dict) else {}
     raw = str(row.get("lane") or props.get("lane") or default_lane or "").strip().lower()
     raw = raw.replace("-", "_").replace(" ", "_")
+    if raw in LANES and (row.get("lane") or props.get("lane")):
+        return raw
+    text = get_surface_text(row)
+    target = bool_hint(text, TARGET_DOMAIN_HINTS)
+    far = bool_hint(text, FAR_NEIGHBOR_HINTS)
+    near = bool_hint(text, NEAR_NEIGHBOR_HINTS)
+    if far:
+        return "far_neighbor"
+    if target:
+        return "target_domain"
+    if near:
+        return "near_neighbor"
+    text = get_text(row)
+    if bool_hint(text, FAR_NEIGHBOR_HINTS) and not bool_hint(text, TARGET_DOMAIN_HINTS | NEAR_NEIGHBOR_HINTS):
+        return "far_neighbor"
+    if bool_hint(text, NEAR_NEIGHBOR_HINTS):
+        return "near_neighbor"
+    if bool_hint(text, TARGET_DOMAIN_HINTS):
+        return "target_domain"
     return raw if raw in LANES else default_lane
 
 
@@ -203,13 +339,24 @@ def roles_for_candidate(row: dict[str, Any], lane: str) -> list[str]:
 
 def score_candidate(row: dict[str, Any], lane: str, duplicate: bool = False) -> tuple[int, list[str], list[str], dict[str, bool]]:
     text = get_text(row)
+    surface_text = get_surface_text(row)
     reasons: list[str] = []
+    target = bool_hint(surface_text, TARGET_DOMAIN_HINTS)
+    near = bool_hint(surface_text, NEAR_NEIGHBOR_HINTS)
+    far = bool_hint(surface_text, FAR_NEIGHBOR_HINTS)
+    ml_vision_context = bool_hint(surface_text, ML_VISION_CONTEXT_HINTS)
+    out_of_scope_noise = bool_hint(surface_text, OUT_OF_SCOPE_HINTS) and not target
     flags = {
         "duplicate": duplicate,
         "source_resolvable": source_resolvable(row),
         "survey_noise": bool_hint(text, SURVEY_HINTS),
         "substantive_limitation": bool_hint(text, SUBSTANTIVE_LIMITATION_HINTS),
         "generic_benchmark_risk": bool_hint(text, GENERIC_BENCHMARK_HINTS) or ("benchmark" in text and not bool_hint(text, MECHANISM_HINTS | LIMITATION_HINTS)),
+        "target_domain_signal": target,
+        "near_neighbor_signal": near,
+        "far_neighbor_signal": far,
+        "ml_vision_context": ml_vision_context,
+        "out_of_scope_noise": out_of_scope_noise or not ml_vision_context,
     }
     roles = roles_for_candidate(row, lane)
     score = 0
@@ -257,6 +404,21 @@ def score_candidate(row: dict[str, Any], lane: str, duplicate: bool = False) -> 
     if flags["generic_benchmark_risk"]:
         score -= 1
         reasons.append("generic_benchmark_risk")
+    if flags["target_domain_signal"]:
+        score += 2
+        reasons.append("target_domain_signal")
+    if flags["near_neighbor_signal"]:
+        score += 1
+        reasons.append("near_neighbor_signal")
+    if flags["far_neighbor_signal"]:
+        score += 2
+        reasons.append("far_neighbor_signal")
+    if not flags["ml_vision_context"]:
+        score -= 5
+        reasons.append("missing_ml_vision_context")
+    if flags["out_of_scope_noise"]:
+        score -= 6
+        reasons.append("out_of_scope_noise")
     if duplicate:
         score -= 4
         reasons.append("duplicate_group")
@@ -266,6 +428,8 @@ def score_candidate(row: dict[str, Any], lane: str, duplicate: bool = False) -> 
 def decision(score: int, roles: list[str], flags: dict[str, bool]) -> str:
     if flags.get("duplicate"):
         return "reject_duplicate"
+    if flags.get("out_of_scope_noise"):
+        return "reject_out_of_scope"
     if not flags.get("source_resolvable"):
         return "reject_unresolved_source"
     if flags.get("survey_noise") and not ({"mechanism", "limitation_future", "negative_evidence"} & set(roles)):
@@ -276,7 +440,7 @@ def decision(score: int, roles: list[str], flags: dict[str, bool]) -> str:
         return "graph_import"
     if score >= 5 and roles:
         return "split_read_only"
-    if score >= 2:
+    if score >= 3 and roles:
         return "watchlist"
     return "reject_weak_relevance"
 
@@ -489,7 +653,12 @@ def graph_import_plan(triage: dict[str, Any]) -> dict[str, Any]:
     import_batch = [
         paper
         for paper in selected
-        if paper.get("import_action") in {"import", "supplement", "skip_existing"}
+        if paper.get("import_action") in {"import", "supplement"}
+    ]
+    required_graph_import_keys = [
+        str(paper.get("idempotency_key") or paper.get("paper_ref") or "").strip()
+        for paper in import_batch
+        if str(paper.get("idempotency_key") or paper.get("paper_ref") or "").strip()
     ]
     material_requests = [
         {
@@ -525,8 +694,15 @@ def graph_import_plan(triage: dict[str, Any]) -> dict[str, Any]:
                 },
                 "ready_when": "selected task status=completed, stage=completed, and authoritativeSync is complete or superseded",
             },
+            "completion_policy": {
+                "require_all_graph_imports": True,
+                "allow_split_reading_to_satisfy_import": False,
+                "material_view_satisfied_by_split_reading": True,
+            },
             "next_step": "execute PaperNexus import/supplement/material-view calls for selected_papers via import_workflow, capture IMPORT_WORKFLOW_STATUS.json, wait for authoritative graph sync, then capture SPLIT_READING_EVIDENCE_PACK.json",
         },
+        "planned_import_count": len(required_graph_import_keys),
+        "required_graph_import_keys": required_graph_import_keys,
         "selected_papers": selected,
         "lane_balance": lane_balance,
         "role_balance": role_balance,

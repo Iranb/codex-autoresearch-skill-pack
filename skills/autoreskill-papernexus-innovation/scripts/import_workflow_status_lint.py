@@ -13,6 +13,7 @@ COMPLETE_STATUSES = {"complete", "completed", "ready", "succeeded", "success"}
 FAILED_STATUSES = {"failed", "error", "errored", "cancelled", "canceled"}
 PENDING_STATUSES = {"pending", "queued", "running", "processing", "in_progress", "submitted", "waiting"}
 AUTHORITATIVE_OK = {"complete", "completed", "ready", "succeeded", "success", "superseded", "not_required", "none", "skipped"}
+IMPORT_ACTIONS = {"import", "supplement"}
 
 
 def ar(project: str) -> Path:
@@ -150,24 +151,71 @@ def authoritative_sync_states(payload: Any) -> list[str]:
     return states
 
 
-def planned_import_count(base: Path) -> int:
+def stable_paper_key(row: dict[str, Any]) -> str:
+    for key in ["idempotency_key", "paper_ref", "canonicalId", "canonical_id", "doi", "arxivId", "arxiv_id", "pmid", "pmcid"]:
+        value = row.get(key)
+        if isinstance(value, str) and value.strip():
+            return f"{key}:{value.strip()}"
+    title = row.get("title")
+    return f"title:{title.strip()}" if isinstance(title, str) and title.strip() else ""
+
+
+def plan_required_import_keys(base: Path) -> list[str]:
     plan = read_json(base / "papernexus/GRAPH_IMPORT_PLAN.json")
     if not isinstance(plan, dict):
-        return 0
-    count = 0
-    for batch in plan.get("import_batches") or []:
-        if isinstance(batch, list):
-            for row in batch:
-                if isinstance(row, dict) and str(row.get("import_action") or "") in {"import", "supplement"}:
-                    count += 1
-        elif isinstance(batch, dict) and str(batch.get("import_action") or "") in {"import", "supplement"}:
-            count += 1
-    if count:
-        return count
+        return []
+    explicit = plan.get("required_graph_import_keys")
+    if isinstance(explicit, list) and explicit:
+        return sorted({str(item).strip() for item in explicit if str(item).strip()})
+    keys: list[str] = []
     for row in plan.get("selected_papers") or []:
-        if isinstance(row, dict) and str(row.get("import_action") or "") in {"import", "supplement"}:
-            count += 1
-    return count
+        if isinstance(row, dict) and str(row.get("import_action") or "") in IMPORT_ACTIONS:
+            key = stable_paper_key(row)
+            if key:
+                keys.append(key)
+    if not keys:
+        for batch in plan.get("import_batches") or []:
+            batch_rows = batch if isinstance(batch, list) else [batch]
+            for row in batch_rows:
+                if isinstance(row, dict) and str(row.get("import_action") or "") in IMPORT_ACTIONS:
+                    key = stable_paper_key(row)
+                    if key:
+                        keys.append(key)
+    return sorted(set(keys))
+
+
+def planned_import_count(base: Path) -> int:
+    return len(plan_required_import_keys(base))
+
+
+def explicit_key_set(payload: Any, keys: set[str]) -> set[str]:
+    out: set[str] = set()
+    if not isinstance(payload, dict):
+        return out
+    for row in iter_dicts(payload):
+        for key in keys:
+            for value in flattened(row.get(key)):
+                if isinstance(value, str) and value.strip():
+                    out.add(value.strip())
+    return out
+
+
+def explicit_int(payload: Any, keys: set[str]) -> int | None:
+    if not isinstance(payload, dict):
+        return None
+    values: list[int] = []
+    for row in iter_dicts(payload):
+        for key in keys:
+            value = row.get(key)
+            if isinstance(value, bool):
+                continue
+            if isinstance(value, int):
+                values.append(value)
+            elif isinstance(value, float) and value.is_integer():
+                values.append(int(value))
+            elif isinstance(value, str) and value.strip().isdigit():
+                values.append(int(value.strip()))
+    return max(values) if values else None
 
 
 def terminal_flag(payload: Any) -> bool:
@@ -194,12 +242,20 @@ def lint(project: str, rel: str) -> dict[str, Any]:
 
     missing: list[str] = []
     warnings: list[str] = []
+    planned_keys = plan_required_import_keys(base)
     details: dict[str, Any] = {
         "path": str(path),
-        "planned_import_count": planned_import_count(base),
+        "planned_import_count": len(planned_keys),
+        "planned_import_keys": planned_keys,
         "task_ids": [],
         "batch_ids": [],
         "authoritative_sync_statuses": [],
+        "submitted_import_count": 0,
+        "completed_import_count": 0,
+        "authoritative_sync_completed_count": 0,
+        "missing_unsubmitted_keys": [],
+        "missing_incomplete_keys": [],
+        "missing_unsynced_keys": [],
         "queue_summary": {},
     }
 
@@ -230,9 +286,20 @@ def lint(project: str, rel: str) -> dict[str, Any]:
     details["authoritative_sync_statuses"] = authoritative_sync_states(payload)
     details["queue_summary"] = queue_summary(payload)
 
-    if not task_ids and not terminal_flag(payload):
+    submitted_keys = explicit_key_set(payload, {"submittedImportKeys", "submitted_import_keys", "submittedGraphImportKeys", "submitted_graph_import_keys"})
+    completed_keys = explicit_key_set(payload, {"completedImportKeys", "completed_import_keys", "completedGraphImportKeys", "completed_graph_import_keys"})
+    synced_keys = explicit_key_set(payload, {"authoritativeSyncCompletedKeys", "authoritative_sync_completed_keys", "syncedImportKeys", "synced_import_keys"})
+    submitted_count = explicit_int(payload, {"submitted_import_count", "submittedImportCount", "submitted_graph_import_count", "submittedGraphImportCount"})
+    completed_count = explicit_int(payload, {"completed_import_count", "completedImportCount", "completed_graph_import_count", "completedGraphImportCount"})
+    sync_count = explicit_int(payload, {"authoritative_sync_completed_count", "authoritativeSyncCompletedCount", "synced_import_count", "syncedImportCount"})
+
+    if submitted_count is None:
+        submitted_count = len(submitted_keys) if submitted_keys else len(details["task_ids"])
+
+    if not task_ids and not terminal_flag(payload) and submitted_count == 0:
         missing.append("taskIds/relevantTaskIds from submitted PaperNexus import_workflow tasks")
 
+    completed_task_ids: set[str] = set()
     if tasks:
         status_pairs = [
             (
@@ -251,6 +318,11 @@ def lint(project: str, rel: str) -> dict[str, Any]:
             and task_id not in pending
             and not (status in COMPLETE_STATUSES and (not stage or stage in COMPLETE_STATUSES))
         ]
+        completed_task_ids = {
+            task_id
+            for task_id, status, stage in status_pairs
+            if status in COMPLETE_STATUSES and (not stage or stage in COMPLETE_STATUSES)
+        }
         if failed:
             missing.append("import_workflow failed tasks: " + ", ".join(failed[:8]))
         if pending:
@@ -260,7 +332,47 @@ def lint(project: str, rel: str) -> dict[str, Any]:
     elif not terminal_flag(payload):
         missing.append("import_workflow task rows or explicit graph_visible/complete status")
 
+    if completed_count is None:
+        if completed_keys:
+            completed_count = len(completed_keys)
+        elif completed_task_ids:
+            completed_count = len(completed_task_ids)
+        elif terminal_flag(payload) and submitted_count >= details["planned_import_count"]:
+            completed_count = submitted_count
+        else:
+            completed_count = 0
+    elif completed_task_ids:
+        completed_count = max(completed_count, len(completed_task_ids))
+
     sync_states = details["authoritative_sync_statuses"]
+    authoritative_ok_count = sum(1 for state in sync_states if state in AUTHORITATIVE_OK)
+    if sync_count is None:
+        if synced_keys:
+            sync_count = len(synced_keys)
+        else:
+            sync_count = authoritative_ok_count
+    else:
+        sync_count = max(sync_count, authoritative_ok_count)
+
+    details["submitted_import_count"] = submitted_count
+    details["completed_import_count"] = completed_count
+    details["authoritative_sync_completed_count"] = sync_count
+
+    if submitted_keys:
+        details["missing_unsubmitted_keys"] = sorted(set(planned_keys) - submitted_keys)
+    if completed_keys:
+        details["missing_incomplete_keys"] = sorted(set(planned_keys) - completed_keys)
+    if synced_keys:
+        details["missing_unsynced_keys"] = sorted(set(planned_keys) - synced_keys)
+
+    planned_count = details["planned_import_count"]
+    if submitted_count < planned_count:
+        missing.append(f"unsubmitted graph_import papers: planned={planned_count} submitted={submitted_count}")
+    if completed_count < planned_count:
+        missing.append(f"incomplete graph_import papers: planned={planned_count} completed={completed_count}")
+    if sync_count < planned_count:
+        missing.append(f"authoritative graph sync incomplete for graph_import papers: planned={planned_count} synced={sync_count}")
+
     if any(state in FAILED_STATUSES for state in sync_states):
         missing.append("authoritative graph sync failed")
     pending_sync = [state for state in sync_states if state not in AUTHORITATIVE_OK]
@@ -269,7 +381,17 @@ def lint(project: str, rel: str) -> dict[str, Any]:
     if not sync_states:
         warnings.append("authoritativeSync status absent; prefer import_workflow wait with waitForAuthoritativeSync=true")
 
-    status = "complete" if not missing else ("async_wait" if any("queued/running" in item or "authoritative graph sync not complete" in item for item in missing) else "incomplete")
+    status = "complete" if not missing else (
+        "async_wait"
+        if any(
+            "queued/running" in item
+            or "authoritative graph sync not complete" in item
+            or "incomplete graph_import papers" in item
+            or "authoritative graph sync incomplete" in item
+            for item in missing
+        )
+        else "incomplete"
+    )
     return {
         "complete": not missing,
         "status": status,
