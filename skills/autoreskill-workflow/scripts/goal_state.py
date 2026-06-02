@@ -116,6 +116,8 @@ def default_policy() -> dict[str, Any]:
         "max_experiment_gpu_hours": 24,
         "max_repair_attempts_per_blocker": 5,
         "max_stage_iterations": 16,
+        "async_poll_interval_minutes": 5,
+        "repair_retry_interval_minutes": 5,
         "experiment_launch_requires_baseline_protocol_lint": True,
         "experiment_requires_baseline_clone_patch": True,
         "allow_protocol_substitution": False,

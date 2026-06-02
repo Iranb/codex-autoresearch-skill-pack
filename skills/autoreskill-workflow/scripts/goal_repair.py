@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from contract_lint import lint
-from goal_state import ar, load_state, save_state
+from goal_state import NEXT_ACTIONS, OWNERS, ar, load_state, save_state
 from goal_tick import (
     append_jsonl,
     classify,
@@ -75,6 +75,8 @@ def main() -> None:
     state = load_state(project)
     if args.stage:
         state["stage"] = args.stage
+        state["owner"] = OWNERS.get(args.stage, state.get("owner"))
+        state["next_action"] = NEXT_ACTIONS.get(args.stage, state.get("next_action"))
     stage = str(state.get("stage", "init"))
     contract = lint(project, stage)
     if contract["complete"] and not args.reason:

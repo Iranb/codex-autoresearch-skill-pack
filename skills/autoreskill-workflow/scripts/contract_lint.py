@@ -12,6 +12,40 @@ from typing import Any
 
 
 READY = {"ready", "complete", "completed", "pass", "passed", "verified"}
+IDEA_LIFECYCLE_STATUSES = {
+    "selected_primary",
+    "alternate_track",
+    "risk_repair_track",
+    "advance_with_constraints",
+    "repair_needed",
+    "parked",
+    "killed",
+    "degraded_speculative",
+}
+IDEA_FAILURE_CLASSES = {
+    "none",
+    "novelty_collision",
+    "closest_prior_overlap",
+    "story_collapse",
+    "three_innovation_bundle_incomplete",
+    "evidence_gap",
+    "proposal_graph_uncommitted",
+    "target_domain_only_method",
+    "baseline_unavailable",
+    "protocol_unsafe",
+    "metric_or_dataset_drift_risk",
+    "feasibility_fail",
+    "risk_uncontrolled",
+    "low_expected_value",
+}
+BIE_REQUIRED_FIELDS = [
+    "branch_budget_B",
+    "search_iterations_I",
+    "versions_per_branch_E",
+    "retain_top_K",
+    "stop_on_spec_violation",
+    "promotion_required",
+]
 
 
 def ar(project: str) -> Path:
@@ -60,6 +94,183 @@ def degraded_gate_approved(gate: Any) -> bool:
     if not present(approval.get("approved_by")) or not present(approval.get("approved_at")) or not present(approval.get("reason")):
         return False
     return present(gate.get("claim_limits") or approval.get("claim_limits"))
+
+
+def rows_from_payload(payload: Any) -> list[dict[str, Any]]:
+    if isinstance(payload, dict):
+        for key in ["tracks", "rows", "track_plans", "ideas", "decisions", "outcomes", "idea_outcomes"]:
+            if isinstance(payload.get(key), list):
+                return [row for row in payload[key] if isinstance(row, dict)]
+    if isinstance(payload, list):
+        return [row for row in payload if isinstance(row, dict)]
+    return []
+
+
+def idea_ids_from_pool(pool: Any) -> set[str]:
+    ids: set[str] = set()
+    if not isinstance(pool, dict):
+        return ids
+    for key in ["ideas", "candidates"]:
+        rows = pool.get(key)
+        if isinstance(rows, list):
+            for row in rows:
+                if isinstance(row, dict):
+                    idea_id = row.get("id") or row.get("idea_id")
+                    if present(idea_id):
+                        ids.add(str(idea_id))
+    return ids
+
+
+def track_seed_idea_ids(seeds: Any) -> set[str]:
+    ids: set[str] = set()
+    for row in rows_from_payload(seeds):
+        idea_id = row.get("idea_id")
+        if present(idea_id):
+            ids.add(str(idea_id))
+    return ids
+
+
+def validate_idea_decision_ledger(base: Path) -> tuple[list[str], list[str], dict[str, Any]]:
+    missing: list[str] = []
+    warnings: list[str] = []
+    ledger_path = base / "ideation/IDEA_DECISION_LEDGER.json"
+    ledger = read_json(ledger_path)
+    pool = read_json(base / "ideation/EXPERIMENT_IDEA_POOL.json")
+    seeds = read_json(base / "ideation/IDEA_TRACK_SEEDS.json")
+    if not ledger:
+        return ["ideation/IDEA_DECISION_LEDGER.json"], warnings, {}
+    decisions = ledger.get("decisions")
+    if not isinstance(decisions, list) or not decisions:
+        missing.append("ideation/IDEA_DECISION_LEDGER.json decisions[]")
+        decisions = []
+    decision_ids: set[str] = set()
+    lifecycle_by_id: dict[str, str] = {}
+    for index, decision in enumerate(row for row in decisions if isinstance(row, dict)):
+        prefix = f"ideation/IDEA_DECISION_LEDGER.json decisions[{index}]"
+        for field in ["idea_id", "scorecard_rank", "lifecycle_status", "decision_reason", "failure_class", "evidence_refs", "claim_scope", "next_action"]:
+            if not present(decision.get(field)):
+                missing.append(f"{prefix}.{field}")
+        idea_id = decision.get("idea_id")
+        if present(idea_id):
+            decision_ids.add(str(idea_id))
+        status = str(decision.get("lifecycle_status") or "").strip()
+        failure_class = str(decision.get("failure_class") or "").strip()
+        if status and status not in IDEA_LIFECYCLE_STATUSES:
+            missing.append(f"{prefix}.lifecycle_status must be one of {sorted(IDEA_LIFECYCLE_STATUSES)}")
+        if failure_class and failure_class not in IDEA_FAILURE_CLASSES:
+            missing.append(f"{prefix}.failure_class must be one of {sorted(IDEA_FAILURE_CLASSES)}")
+        if status in {"parked", "killed", "repair_needed", "advance_with_constraints", "degraded_speculative"}:
+            if "can_reenter" not in decision:
+                missing.append(f"{prefix}.can_reenter")
+            if not present(decision.get("reentry_conditions")) and decision.get("can_reenter") is True:
+                missing.append(f"{prefix}.reentry_conditions")
+        if present(idea_id):
+            lifecycle_by_id[str(idea_id)] = status
+    pool_ids = idea_ids_from_pool(pool)
+    if pool_ids:
+        missing_ids = sorted(pool_ids - decision_ids)
+        if missing_ids:
+            missing.append("IDEA_DECISION_LEDGER missing pool ideas: " + ", ".join(missing_ids))
+        extra_ids = sorted(decision_ids - pool_ids)
+        if extra_ids:
+            warnings.append("IDEA_DECISION_LEDGER has decisions for ids not found in pool: " + ", ".join(extra_ids))
+    seed_ids = track_seed_idea_ids(seeds)
+    for seed_id in sorted(seed_ids):
+        status = lifecycle_by_id.get(seed_id)
+        if not status:
+            missing.append(f"IDEA_TRACK_SEEDS idea {seed_id} lacks IDEA_DECISION_LEDGER row")
+        elif status == "killed":
+            missing.append(f"IDEA_TRACK_SEEDS idea {seed_id} is killed in IDEA_DECISION_LEDGER")
+        elif status == "parked":
+            missing.append(f"IDEA_TRACK_SEEDS idea {seed_id} is parked in IDEA_DECISION_LEDGER")
+        elif status not in {"selected_primary", "alternate_track", "risk_repair_track", "advance_with_constraints"}:
+            warnings.append(f"IDEA_TRACK_SEEDS idea {seed_id} has lifecycle_status={status}; verify this is intentional")
+    return missing, warnings, {"decision_count": len(decisions), "pool_idea_count": len(pool_ids), "track_seed_count": len(seed_ids)}
+
+
+def validate_track_plan_lifecycle(base: Path) -> tuple[list[str], list[str], dict[str, Any]]:
+    missing: list[str] = []
+    warnings: list[str] = []
+    matrix = read_json(base / "orchestrator/TRACK_PLAN_MATRIX.json")
+    if not matrix:
+        return ["orchestrator/TRACK_PLAN_MATRIX.json"], warnings, {}
+    bie_config = matrix.get("bie_config") if isinstance(matrix.get("bie_config"), dict) else {}
+    if not bie_config:
+        missing.append("orchestrator/TRACK_PLAN_MATRIX.json bie_config")
+    else:
+        for field in BIE_REQUIRED_FIELDS:
+            if not present(bie_config.get(field)):
+                missing.append(f"orchestrator/TRACK_PLAN_MATRIX.json bie_config.{field}")
+    if not present(matrix.get("source_idea_decision_ledger_path")) and not present(matrix.get("idea_decision_ledger_path")):
+        missing.append("orchestrator/TRACK_PLAN_MATRIX.json source_idea_decision_ledger_path")
+    rows = rows_from_payload(matrix)
+    for index, row in enumerate(rows):
+        prefix = f"orchestrator/TRACK_PLAN_MATRIX.json tracks[{index}]"
+        if not present(row.get("idea_decision_ref")):
+            missing.append(f"{prefix}.idea_decision_ref")
+        if not present(row.get("branch_id")):
+            warnings.append(f"{prefix}.branch_id recommended for B/I/E search tracing")
+    return missing, warnings, {"bie_config_present": bool(bie_config), "track_count": len(rows)}
+
+
+def validate_experiment_failure_lineage(base: Path, ledger: dict[str, Any] | None) -> tuple[list[str], list[str], dict[str, Any]]:
+    missing: list[str] = []
+    warnings: list[str] = []
+    entries = rows_from_payload((ledger or {}).get("entries") if isinstance(ledger, dict) else None)
+    failure_like = {
+        "failed",
+        "failure",
+        "budget_stopped",
+        "not_promoted",
+        "rollback_to_best",
+        "repair",
+    }
+    for index, entry in enumerate(entries):
+        prefix = f"coder/EXPERIMENT_LEDGER.json entries[{index}]"
+        decision = str(entry.get("promotion_decision") or entry.get("promotion_status") or entry.get("verdict") or "").strip().lower()
+        status = str(entry.get("status") or "").strip().lower()
+        spec = str(entry.get("spec_violation_status") or "").strip().lower()
+        is_failure = decision in failure_like or status in {"failed", "failure", "budget_stopped"} or spec in {"flagged", "violation", "failed"}
+        if is_failure:
+            if not present(entry.get("failure_class")):
+                missing.append(f"{prefix}.failure_class")
+            if not present(entry.get("next_action")):
+                missing.append(f"{prefix}.next_action")
+            if not present(entry.get("selected_idea_id")):
+                missing.append(f"{prefix}.selected_idea_id")
+            if not present(entry.get("track_id")):
+                missing.append(f"{prefix}.track_id")
+        if decision == "candidate_supported":
+            warnings.append(f"{prefix} candidate_supported is pilot evidence and cannot support stable improvement claims")
+    return missing, warnings, {"entry_count": len(entries)}
+
+
+def validate_idea_outcome_summary(base: Path) -> tuple[list[str], list[str], dict[str, Any]]:
+    missing: list[str] = []
+    warnings: list[str] = []
+    summary = read_json(base / "analyzer/IDEA_OUTCOME_SUMMARY.json")
+    if not summary:
+        return ["analyzer/IDEA_OUTCOME_SUMMARY.json"], warnings, {}
+    outcomes = summary.get("idea_outcomes") or summary.get("outcomes")
+    if not isinstance(outcomes, list) or not outcomes:
+        missing.append("analyzer/IDEA_OUTCOME_SUMMARY.json idea_outcomes[]")
+        outcomes = []
+    if not present(summary.get("source_idea_decision_ledger_path")):
+        missing.append("analyzer/IDEA_OUTCOME_SUMMARY.json source_idea_decision_ledger_path")
+    if not present(summary.get("source_experiment_ledger_path")):
+        missing.append("analyzer/IDEA_OUTCOME_SUMMARY.json source_experiment_ledger_path")
+    for index, outcome in enumerate(row for row in outcomes if isinstance(row, dict)):
+        prefix = f"analyzer/IDEA_OUTCOME_SUMMARY.json idea_outcomes[{index}]"
+        for field in ["idea_id", "lifecycle_status", "claim_scope", "outcome_status", "next_action"]:
+            if not present(outcome.get(field)):
+                missing.append(f"{prefix}.{field}")
+        claim_scope = str(outcome.get("claim_scope") or "").strip().lower()
+        if claim_scope in {"strong_improvement", "stable_improvement", "promoted"} and not present(outcome.get("promoted_run_ref")):
+            missing.append(f"{prefix}.promoted_run_ref for strong/promoted claim scope")
+        if str(outcome.get("outcome_status") or "").strip().lower() in {"failed", "regressed", "killed", "parked"}:
+            if claim_scope not in {"negative_evidence", "limitation", "future_work", "pilot_only", "no_claim", "downgraded"}:
+                missing.append(f"{prefix}.claim_scope must not be strong for failed/regressed/parked/killed ideas")
+    return missing, warnings, {"outcome_count": len(outcomes)}
 
 
 def result(
@@ -282,6 +493,7 @@ def lint(project: str, stage: str) -> dict[str, Any]:
             ]
         )
         innovation_story_lint = run_innovation_story_lint(skill_root, project, stage)
+        idea_decision_missing, idea_decision_warnings, idea_decision_details = validate_idea_decision_ledger(base)
         missing = []
         warnings = []
         if approved_degraded:
@@ -427,6 +639,7 @@ def lint(project: str, stage: str) -> dict[str, Any]:
             ]
         )
         innovation_story_lint = run_innovation_story_lint(skill_root, project, stage)
+        idea_decision_missing, idea_decision_warnings, idea_decision_details = validate_idea_decision_ledger(base)
         missing = []
         warnings = []
         if not has_any(base, ["ideation/TOURNAMENT_SCOREBOARD.json", "ideation/TOP3_DIRECTION_SUMMARY.md", "reviewer/IDEA_GATE_REVIEW.json"]):
@@ -459,6 +672,8 @@ def lint(project: str, stage: str) -> dict[str, Any]:
                 missing.append("idea_track_seeds failed without structured missing output")
         items = track_seed_lint.get("warnings") if isinstance(track_seed_lint.get("warnings"), list) else []
         warnings.extend(f"idea_track_seeds: {item}" for item in items)
+        missing.extend(f"idea_decision_ledger: {item}" for item in idea_decision_missing)
+        warnings.extend(f"idea_decision_ledger: {item}" for item in idea_decision_warnings)
         if not innovation_story_lint.get("complete"):
             items = innovation_story_lint.get("missing") if isinstance(innovation_story_lint.get("missing"), list) else []
             missing.extend(f"innovation_story_lint: {item}" for item in items)
@@ -472,7 +687,14 @@ def lint(project: str, stage: str) -> dict[str, Any]:
             missing,
             "idea_gate_contract",
             warnings,
-            {"pre_idea_evidence_gate_lint": pre_idea_gate_lint, "idea_pool_lint": pool_lint, "idea_scorecard_lint": scorecard_lint, "idea_track_seeds": track_seed_lint, "innovation_story_lint": innovation_story_lint},
+            {
+                "pre_idea_evidence_gate_lint": pre_idea_gate_lint,
+                "idea_pool_lint": pool_lint,
+                "idea_scorecard_lint": scorecard_lint,
+                "idea_track_seeds": track_seed_lint,
+                "idea_decision_ledger": idea_decision_details,
+                "innovation_story_lint": innovation_story_lint,
+            },
         )
 
     if stage == "experiment_plan":
@@ -519,6 +741,12 @@ def lint(project: str, stage: str) -> dict[str, Any]:
                     missing.append(f"{name} failed without structured missing output")
             items = out.get("warnings") if isinstance(out.get("warnings"), list) else []
             warnings.extend(f"{name}: {item}" for item in items)
+        track_lifecycle_missing, track_lifecycle_warnings, track_lifecycle_details = validate_track_plan_lifecycle(base)
+        if track_lifecycle_missing:
+            complete = False
+            missing.extend(f"track_plan_lifecycle: {item}" for item in track_lifecycle_missing)
+        warnings.extend(f"track_plan_lifecycle: {item}" for item in track_lifecycle_warnings)
+        details["track_plan_lifecycle"] = track_lifecycle_details
         return result(stage, complete, missing, "experiment_plan_contract", warnings, details)
 
     if stage == "code":
@@ -620,6 +848,10 @@ def lint(project: str, stage: str) -> dict[str, Any]:
                 missing.append("promoted best_run or track_best_runs")
             if ledger.get("candidate_runs"):
                 warnings.append("candidate_supported runs are pilot evidence; run linked ablation/confirmation before analysis")
+            failure_missing, failure_warnings, failure_details = validate_experiment_failure_lineage(base, ledger)
+            missing.extend(f"experiment_failure_lineage: {item}" for item in failure_missing)
+            warnings.extend(f"experiment_failure_lineage: {item}" for item in failure_warnings)
+            details["experiment_failure_lineage"] = failure_details
         return result(stage, not missing, missing, "experiment_contract", warnings, details)
 
     if stage == "analysis":
@@ -649,7 +881,10 @@ def lint(project: str, stage: str) -> dict[str, Any]:
                 missing.append("innovation_story_lint failed without structured missing output")
         items = innovation_story_lint.get("warnings") if isinstance(innovation_story_lint.get("warnings"), list) else []
         warnings.extend(f"innovation_story_lint: {item}" for item in items)
-        return result(stage, not missing, missing, "analysis_contract", warnings, {"innovation_story_lint": innovation_story_lint, "analysis_lint": analysis_lint})
+        outcome_missing, outcome_warnings, outcome_details = validate_idea_outcome_summary(base)
+        missing.extend(f"idea_outcome_summary: {item}" for item in outcome_missing)
+        warnings.extend(f"idea_outcome_summary: {item}" for item in outcome_warnings)
+        return result(stage, not missing, missing, "analysis_contract", warnings, {"innovation_story_lint": innovation_story_lint, "analysis_lint": analysis_lint, "idea_outcome_summary": outcome_details})
 
     if stage == "review_pressure":
         skill_root = Path(__file__).resolve().parents[2]

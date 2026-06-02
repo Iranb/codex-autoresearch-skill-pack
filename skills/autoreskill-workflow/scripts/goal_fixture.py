@@ -212,7 +212,7 @@ def main() -> None:
 
     append_jsonl(
         base / "decision_log.jsonl",
-        {"ts": now(), "stage": "fixture", "action": "materialize_contract_fixture", "details": {"force_ready": args.force_ready}},
+        {"ts": now(), "stage": "contract_test_fixture", "action": "materialize_contract_fixture", "details": {"force_ready": args.force_ready}},
     )
     print(json.dumps({"ok": True, "fixture": True, "force_ready": args.force_ready}, indent=2, ensure_ascii=False))
 

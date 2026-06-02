@@ -25,3 +25,14 @@ Required fields:
 ```
 
 `blocking_reason` should be machine-readable. Human-facing explanation belongs in `decision_log.jsonl`.
+
+`autopilot_policy.json` also controls async wait cadence. Defaults:
+
+```json
+{
+  "async_poll_interval_minutes": 5,
+  "repair_retry_interval_minutes": 5
+}
+```
+
+For PaperNexus discovery/import waits, `async_poll_interval_minutes` is the heartbeat interval the parent Codex agent should use after `goal_tick.py` returns a `wakeup` recommendation.

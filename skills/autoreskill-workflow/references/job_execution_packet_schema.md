@@ -7,6 +7,7 @@ Purpose:
 - Connect repair/async queues to executable child-skill work.
 - Keep PaperNexus work explicit: Codex calls `papernexus-remote` MCP, then captures results with the PaperNexus helper scripts.
 - Give WorkflowGuard a stable artifact to resume after context loss.
+- For long-running PaperNexus discovery/import work, prefer async queue state plus Codex thread heartbeat wakeups over in-thread shell sleep polling.
 
 Required fields:
 
@@ -69,7 +70,14 @@ Required fields:
 }
 ```
 
-`goal_job_dispatch.py` refuses to render any job packet containing `literature_discovery(operation="search")` unless the search uses the broad configuration above. This applies to topic search, ideation lanes, and later targeted discovery repair packets; the topic may be narrow, but the discovery configuration must remain recall-oriented. Use `operation=submit` plus progress/report polling for broad or long-running discovery/import work. Use `operation=resolve`, `import`, `ingest`, or `import_and_process` only after screening selected papers, and then track graph visibility through `import_workflow`.
+`goal_job_dispatch.py` refuses to render any job packet containing `literature_discovery(operation="search")` unless the search uses the broad configuration above. This applies to ideation lanes and later targeted discovery repair packets; the topic may be narrow, but the discovery configuration must remain recall-oriented. For `topic_search`, the first executable packet must use `literature_discovery(operation="submit")` and capture `literature/LITERATURE_DISCOVERY_RUN.json` before any async wait is queued. Only after a run id exists may WorkflowGuard queue `poll_literature_discovery` and create a heartbeat. If the remote run is still active, update the async queue and let `goal_tick.py` return a `wakeup` recommendation for a Codex heartbeat, default 5 minutes; do not keep the current turn alive with shell sleep loops. Use `operation=resolve`, `import`, `ingest`, or `import_and_process` only after screening selected papers, and then track graph visibility through `import_workflow`.
+
+`topic_search` uses a state-aware route:
+
+1. No `literature/LITERATURE_DISCOVERY_RUN.json` and no `literature/LITERATURE_DISCOVERY_PACKET.json`: queue `submit_literature_discovery` as a repair job.
+2. `LITERATURE_DISCOVERY_RUN.json` exists but no report packet and the run is not terminal/report-ready: queue `poll_literature_discovery` as an async wait.
+3. The run is terminal/report-ready but no report packet exists: queue `capture_literature_discovery_report` as a repair job.
+4. A report packet exists but screening artifacts are missing: queue `screen_literature_discovery` as a repair job.
 
 Every packet containing `literature_discovery(operation="search")` must also close the post-discovery evidence loop in the serialized prompt:
 
@@ -78,7 +86,7 @@ Every packet containing `literature_discovery(operation="search")` must also clo
 3. Build `papernexus/GRAPH_IMPORT_PLAN.json` from selected usable papers.
 4. Use the plan to request PaperNexus import/supplement/material-view or split-reading work.
 5. Capture `papernexus/IMPORT_WORKFLOW_STATUS.json` from `import_workflow queue_progress/status/wait`, including selected task ids or batch ids.
-6. Wait until selected tasks report `status=completed`, `stage=completed`, and authoritative graph sync is complete or superseded. If they are pending, queue async wait instead of treating raw discovery as evidence.
+6. Wait until selected tasks report `status=completed`, `stage=completed`, and authoritative graph sync is complete or superseded. If they are pending, queue async wait and schedule a heartbeat from the tick `wakeup` recommendation instead of treating raw discovery as evidence.
 7. Capture `papernexus/SPLIT_READING_EVIDENCE_PACK.json` before using the papers as novelty, method, baseline, limitation, or citation evidence.
 
 Raw discovery results are search evidence only. They are not graph-grounded evidence.
