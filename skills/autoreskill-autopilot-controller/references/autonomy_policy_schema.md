@@ -13,12 +13,13 @@ Default policy is `full_auto_bounded`.
   "allow_remote_experiment_launch": true,
   "allow_claim_downgrade": true,
   "allow_negative_result_route": true,
-  "max_literature_imports_per_round": 8,
-  "max_provider_queries_per_round": 8,
+  "max_literature_imports_per_round": 24,
+  "max_provider_queries_per_round": 24,
+  "max_live_discovery_questions": 6,
   "max_experiment_walltime_hours": 12,
   "max_experiment_gpu_hours": 24,
-  "max_repair_attempts_per_blocker": 3,
-  "max_stage_iterations": 8
+  "max_repair_attempts_per_blocker": 5,
+  "max_stage_iterations": 16
 }
 ```
 

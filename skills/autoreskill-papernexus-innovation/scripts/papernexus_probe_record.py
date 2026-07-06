@@ -90,6 +90,7 @@ def main() -> None:
             "active_corpus": args.corpus or caps.get("active_corpus"),
             "agent_materials_operations": operations or caps.get("agent_materials_operations", []),
             "research_controller_available": research_controller,
+            "proposal_graph_session_available": "proposal_graph_session" in operations if operations else caps.get("proposal_graph_session_available"),
             "method_atlas_lookup_available": parse_bool(args.method_atlas),
             "updated_at": now(),
         }
@@ -123,6 +124,7 @@ def main() -> None:
             "active_corpus": caps.get("active_corpus"),
             "agent_materials_operations": caps.get("agent_materials_operations", []),
             "research_controller_available": caps.get("research_controller_available"),
+            "proposal_graph_session_available": caps.get("proposal_graph_session_available"),
             "method_atlas_lookup_available": caps.get("method_atlas_lookup_available"),
             "error": args.error or None,
         },

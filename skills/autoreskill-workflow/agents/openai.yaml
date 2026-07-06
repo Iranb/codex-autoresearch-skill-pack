@@ -1,3 +1,4 @@
-display_name: AutoResearch Workflow
-short_description: Drives $autoreskill and /goal state, stage gates, job packets, and recovery.
-default_prompt: Use $autoreskill or /goal to initialize, resume, advance, or debug a portable AutoResearch workflow with bounded autopilot.
+interface:
+  display_name: "AutoResearch Workflow"
+  short_description: "Runs AutoResearch workflows and gates."
+  default_prompt: "Use $autoreskill-workflow to run AutoResearch, plan resource-constrained DEHB experiments, audit writing, or run paper-integrity forensics."

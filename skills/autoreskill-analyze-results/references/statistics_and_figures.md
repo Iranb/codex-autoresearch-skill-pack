@@ -2,8 +2,8 @@
 
 Minimum expectations:
 
-- report mean/std when multi-seed exists
-- report seed count
+- report mean/std when bounded multi-seed exists
+- report seed count and confirm stability validation used at most three random seeds
 - distinguish pilot/smoke from full experiment
 - include confidence interval or rationale when appropriate
 - save tables and plots under `.autoreskill/analyzer/`

@@ -132,6 +132,21 @@ def lint(project: str, allow_degraded: bool = False, write_gate: bool = False) -
     details["lane_attempts"] = lane_details
 
     skill_root = Path(__file__).resolve().parents[2]
+    abstract_lint = run_json(
+        [
+            sys.executable,
+            str(skill_root / "autoreskill-papernexus-innovation/scripts/abstract_screening_audit_lint.py"),
+            "--project",
+            str(Path(project).expanduser().resolve()),
+        ]
+    )
+    details["abstract_screening_audit_lint"] = abstract_lint
+    if not abstract_lint.get("complete"):
+        for item in abstract_lint.get("missing", []) if isinstance(abstract_lint.get("missing"), list) else []:
+            missing.append(f"abstract_screening_audit_lint: {item}")
+    for item in abstract_lint.get("warnings", []) if isinstance(abstract_lint.get("warnings"), list) else []:
+        warnings.append(f"abstract_screening_audit_lint: {item}")
+
     paper_lint = run_json(
         [
             sys.executable,
@@ -225,7 +240,11 @@ def lint(project: str, allow_degraded: bool = False, write_gate: bool = False) -
                 "schema_version": 1,
                 "status": "passed" if complete else "blocked",
                 "lane_attempts_satisfied": all(count >= 1 for count in lane_details.values()),
-                "screening_completed": bool(paper_lint.get("complete")),
+                "screening_completed": bool(paper_lint.get("complete")) and bool(abstract_lint.get("complete")),
+                "abstract_screening_audit_path": "papernexus/ABSTRACT_SCREENING_AUDIT.json",
+                "abstract_screening_status": abstract_lint.get("status"),
+                "abstract_screening_row_count": abstract_lint.get("row_count"),
+                "abstract_screening_expected_count": abstract_lint.get("expected_candidate_count"),
                 "eligible_import_ratio": paper_lint.get("eligible_graph_or_material_ratio"),
                 "lane_coverage": lane_details,
                 "role_coverage": split_lint.get("role_counts"),

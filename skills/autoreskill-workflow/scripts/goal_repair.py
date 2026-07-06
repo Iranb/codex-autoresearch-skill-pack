@@ -85,7 +85,7 @@ def main() -> None:
         return
 
     reason = args.reason or "; ".join(str(item) for item in contract.get("missing", [])) or f"{stage} contract incomplete"
-    klass, recommended_action = classify(reason)
+    klass, recommended_action = classify(stage, reason, base)
     kind = "async" if klass == "async_wait" else "repair"
     policy = read_json(base / "autopilot_policy.json", {})
     blocker = {

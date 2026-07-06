@@ -9,10 +9,11 @@ For each run:
 5. Tail logs for early failures.
 6. Verify baseline alignment and protocol lock.
 7. Parse metrics.
-8. Write `REMOTE_RUN.json`.
-9. Refresh `REMOTE_RUN.json.monitoring` and `.autoreskill/automation_registry.json`.
-10. Append or refresh `EXPERIMENT_LEDGER.json` and `EXPERIMENT_INDEX.md`.
-11. Write decision: promoted, not_promoted, rollback_to_best, repair, stop, multi-seed, leap_idea, analyze.
+8. Sync remote training logs and lightweight result metadata to local storage under the experiment directory. Exclude checkpoints/model weights unless the user explicitly requested checkpoint backup.
+9. Write `REMOTE_RUN.json`.
+10. Refresh `REMOTE_RUN.json.monitoring` and `.autoreskill/automation_registry.json`.
+11. Append or refresh `EXPERIMENT_LEDGER.json` and `EXPERIMENT_INDEX.md`.
+12. Write decision: promoted, not_promoted, rollback_to_best, repair, stop, multi-seed, leap_idea, analyze. Multi-seed means at most three experiment random seeds for stability validation.
 
 Adaptive monitor cadence:
 
@@ -30,6 +31,15 @@ Adaptive monitor cadence:
 When Codex app automations are available, use the single monitor described by `.autoreskill/automation_registry.json`. Preserve its `automation_id` and update the same scheduled monitor as status/ETA changes; do not create one monitor per experiment run.
 
 Never launch blindly when a previous run is unreconciled.
+
+Log sync policy:
+
+- Sync remote logs after launch and on every reconcile for SSH, AutoDL, BJTU, and other remote backends.
+- Keep synced files under `.autoreskill/coder/experiments/<track-id>/<experiment-id>/logs/synced/`.
+- Record every sync attempt in `REMOTE_RUN.json.log_sync.items` and record local files in `REMOTE_RUN.json.local_log_paths`.
+- Include lightweight files such as `.log`, `.txt`, `.json`, `.jsonl`, `.csv`, `.tsv`, `.yaml`, `.yml`, `.out`, and `.err`.
+- Exclude checkpoint/model artifacts by default: `.pt`, `.pth`, `.ckpt`, `.safetensors`, `.bin`, `.onnx`, and any `checkpoint/` or `checkpoints/` path.
+- If checkpoint backup is needed, route it through an explicit backup/persistent-storage step and do not mix it with log sync.
 
 Baseline/protocol preflight:
 

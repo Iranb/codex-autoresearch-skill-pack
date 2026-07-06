@@ -76,6 +76,28 @@ def mentions_any(value: Any, markers: list[str]) -> list[str]:
     return [marker for marker in markers if marker in blob]
 
 
+def is_archived_infra_failure(entry: Any) -> bool:
+    """Ignore repaired setup failures that mention packages but are not method runs."""
+    if not isinstance(entry, dict):
+        return False
+    status_blob = " ".join(
+        str(entry.get(key) or "").strip().lower()
+        for key in ["status", "canonical_eval_status", "failure_class", "next_action"]
+    )
+    if entry.get("counts_as_method_result") is not False:
+        return False
+    if "failed_archived" not in status_blob and "archived" not in status_blob:
+        return False
+    infra_markers = [
+        "runtime_dependency_missing_before_training",
+        "dependency_repaired",
+        "full_protocol_relaunched",
+        "environment",
+        "dependency",
+    ]
+    return any(marker in status_blob for marker in infra_markers)
+
+
 def nested_get(mapping: Any, *keys: str) -> Any:
     current = mapping
     for key in keys:
@@ -110,6 +132,8 @@ def existing_off_protocol(base: Path) -> list[str]:
     hits: list[str] = []
     ledger = read_json(base / "coder/EXPERIMENT_LEDGER.json", {})
     for idx, entry in enumerate((ledger or {}).get("entries") or []):
+        if is_archived_infra_failure(entry):
+            continue
         blob = text_blob(entry)
         if "off_protocol" in blob or "off-protocol" in blob or mentions_any(entry, SMALL_MODEL_MARKERS):
             hits.append(f"coder/EXPERIMENT_LEDGER.json entries[{idx}]")
@@ -221,6 +245,7 @@ def lint(project: str, candidate_run: str | None) -> dict[str, Any]:
         validate_feature_protocol(feature_protocol, baseline_code, missing, warnings)
 
     candidate_aligned = False
+    candidate_run_used = candidate_run
     if candidate_run:
         candidate_path = Path(candidate_run).expanduser()
         candidate = read_json(candidate_path, None)
@@ -228,6 +253,22 @@ def lint(project: str, candidate_run: str | None) -> dict[str, Any]:
             missing.append(f"candidate_run invalid JSON: {candidate_run}")
         else:
             candidate_aligned = validate_candidate(candidate, review, baseline_code, feature_protocol, missing, warnings)
+    else:
+        for candidate_path in sorted(base.glob("coder/experiments/**/*CANDIDATE_RUN*.json")):
+            candidate = read_json(candidate_path, None)
+            if not isinstance(candidate, dict):
+                continue
+            trial_missing: list[str] = []
+            trial_warnings: list[str] = []
+            aligned = validate_candidate(candidate, review, baseline_code, feature_protocol, trial_missing, trial_warnings)
+            if aligned and not trial_missing:
+                candidate_aligned = True
+                try:
+                    candidate_run_used = str(candidate_path.relative_to(base))
+                except ValueError:
+                    candidate_run_used = str(candidate_path)
+                warnings.append(f"auto-detected corrective candidate_run: {candidate_run_used}")
+                break
 
     off_protocol_hits = existing_off_protocol(base)
     if off_protocol_hits and not candidate_aligned:
@@ -250,7 +291,7 @@ def lint(project: str, candidate_run: str | None) -> dict[str, Any]:
         "status": "complete" if not missing else "incomplete",
         "missing": missing,
         "warnings": warnings,
-        "candidate_run": candidate_run,
+        "candidate_run": candidate_run_used,
     }
 
 

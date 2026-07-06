@@ -8,6 +8,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+from hpo_policy_lint import validate_hpo_search_policy
+
 
 REQUIRED = [
     "track_id",
@@ -29,7 +31,10 @@ REQUIRED = [
     "baseline_eval_protocol",
     "evidence_import_gate",
     "compute_backend",
+    "dataset_requirement_inventory",
+    "dataset_runtime_plan",
     "path_mapping",
+    "stability_seed_policy",
     "evaluation_command",
     "dataset",
     "data_split",
@@ -57,7 +62,19 @@ PLACEHOLDER_VALUES = {
 BACKENDS = {"local_gpu", "autodl_gpu"}
 EVIDENCE_GATE_STATUSES = {"passed", "not_required", "async_wait", "blocked"}
 TRACK_LAUNCH_STATUSES = {"ready", "blocked", "diagnostic_only", "parked"}
-TRACK_EVIDENCE_READY = {"passed", "complete", "completed", "graph_closed", "source_backed"}
+TRACK_EVIDENCE_READY = {"passed", "complete", "completed", "graph_closed", "source_backed", "not_required"}
+DATASET_SCALE_CLASSES = {"small_multiclass", "medium_multiclass", "large_full_scale"}
+DATASET_SCALE_RANK = {"small_multiclass": 0, "medium_multiclass": 1, "large_full_scale": 2}
+LARGE_DATASET_EXCEPTION_REASONS = {"no_smaller_multiclass_proxy", "user_approved_start_large"}
+NON_SMALLEST_DATASET_EXCEPTION_REASONS = {
+    "user_approved_non_smallest",
+    "dataset_invalid_for_selected_claim",
+    "no_required_small_dataset_available",
+}
+DATASET_CLAIM_ROLES = {"method_validation", "ablation", "stress", "confirmation", "final_scale", "comparison_only"}
+DATASET_AVAILABILITY_STATUSES = {"available", "missing", "unknown", "invalid_for_claim"}
+DATASET_SELECTION_STATUSES = {"selected_first", "deferred", "rejected"}
+MAX_STABILITY_RANDOM_SEEDS = 3
 MECHANISM_TYPES = {"ALGO", "CODE", "PARAM"}
 PROMOTION_STAGES = {"candidate", "ablation", "confirmation"}
 VALID_METHOD_SOURCE_ROLES = {
@@ -69,6 +86,27 @@ VALID_METHOD_SOURCE_ROLES = {
     "target_domain_absence_proven",
 }
 TARGET_DOMAIN_ONLY_ROLES = {"target_domain", "current_field", "target_domain_only"}
+INNOVATION_BUNDLE_REQUIRED_KEYS = [
+    "name",
+    "role",
+    "source_role",
+    "source_evidence_refs",
+    "closest_prior_delta",
+    "paper_story_role",
+    "validation_plan",
+]
+PAPER_STORYLINE_REQUIRED_KEYS = [
+    "paper_thesis",
+    "opening_tension",
+    "hidden_cause",
+    "method_as_resolution",
+    "proof_ladder",
+    "reviewer_risk_and_defense",
+    "narrative_spine",
+]
+PROBLEM_PROTOCOL_ROLES = {"problem_definition", "protocol", "benchmark", "evaluation", "metric"}
+METHOD_ROLES = {"method_mechanism", "algorithm", "model", "architecture", "training_mechanism"}
+PROOF_INTEGRATION_ROLES = {"training_integration", "system_integration", "theory_analysis", "ablation", "validation", "analysis"}
 CLONE_SOURCE_TYPES = {
     "git_clone",
     "github_clone",
@@ -122,6 +160,21 @@ def present(value: Any) -> bool:
     return True
 
 
+def first_present(mapping: dict[str, Any], keys: list[str]) -> Any:
+    for key in keys:
+        if present(mapping.get(key)):
+            return mapping[key]
+    return None
+
+
+def as_list(value: Any) -> list[Any]:
+    if isinstance(value, list):
+        return value
+    if isinstance(value, tuple):
+        return list(value)
+    return []
+
+
 def placeholder(value: Any) -> bool:
     if not isinstance(value, str):
         return False
@@ -137,6 +190,17 @@ def normalized_role(value: Any) -> str:
     return str(value or "").strip().lower().replace("-", "_").replace(" ", "_")
 
 
+def story_step_count(value: Any) -> int:
+    if isinstance(value, list):
+        return len([item for item in value if present(item) and not placeholder(item)])
+    if not isinstance(value, str):
+        return 0
+    text = value.replace("\n", " ")
+    for sep in ["。", "；", ";", "->", "=>", "|"]:
+        text = text.replace(sep, ".")
+    return len([part for part in text.split(".") if part.strip()])
+
+
 def require_nested(mapping: Any, prefix: str, keys: list[str], missing: list[str]) -> None:
     if not isinstance(mapping, dict):
         missing.append(prefix)
@@ -145,6 +209,51 @@ def require_nested(mapping: Any, prefix: str, keys: list[str], missing: list[str
         value = mapping.get(key)
         if not present(value) or placeholder(value):
             missing.append(f"{prefix}.{key}")
+
+
+def int_value(value: Any) -> int | None:
+    if isinstance(value, bool):
+        return None
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed
+
+
+def validate_stability_seed_policy(packet: dict[str, Any], missing: list[str], warnings: list[str]) -> None:
+    policy = packet.get("stability_seed_policy")
+    prefix = "EXPERIMENT_REVIEW_PACKET.stability_seed_policy"
+    require_nested(policy, prefix, ["max_random_seeds", "planned_seed_count", "claim_rule"], missing)
+    if not isinstance(policy, dict):
+        return
+
+    max_seeds = int_value(policy.get("max_random_seeds"))
+    planned = int_value(policy.get("planned_seed_count"))
+    if max_seeds is None:
+        missing.append(f"{prefix}.max_random_seeds must be numeric")
+    elif max_seeds < 1 or max_seeds > MAX_STABILITY_RANDOM_SEEDS:
+        missing.append(f"{prefix}.max_random_seeds must be between 1 and {MAX_STABILITY_RANDOM_SEEDS}")
+    if planned is None:
+        missing.append(f"{prefix}.planned_seed_count must be numeric")
+    elif planned < 1 or planned > MAX_STABILITY_RANDOM_SEEDS:
+        missing.append(f"{prefix}.planned_seed_count must be between 1 and {MAX_STABILITY_RANDOM_SEEDS}")
+    if max_seeds is not None and planned is not None and planned > max_seeds:
+        missing.append(f"{prefix}.planned_seed_count must not exceed max_random_seeds")
+
+    for key in ["planned_random_seeds", "random_seeds", "stability_seeds"]:
+        value = policy.get(key)
+        if isinstance(value, list):
+            if len(value) > MAX_STABILITY_RANDOM_SEEDS:
+                missing.append(f"{prefix}.{key} must contain at most {MAX_STABILITY_RANDOM_SEEDS} seeds")
+            if value and planned is not None and len(value) != planned:
+                warnings.append(f"{prefix}.{key} length differs from planned_seed_count")
+
+    for key in ["seed_count", "random_seed_count", "planned_seed_count", "num_seeds", "n_seeds"]:
+        value = packet.get(key)
+        count = int_value(value)
+        if count is not None and count > MAX_STABILITY_RANDOM_SEEDS:
+            missing.append(f"EXPERIMENT_REVIEW_PACKET.{key} must be <= {MAX_STABILITY_RANDOM_SEEDS}")
 
 
 def validate_baseline_code(packet: dict[str, Any], missing: list[str]) -> None:
@@ -216,6 +325,220 @@ def validate_path_mapping(packet: dict[str, Any], missing: list[str]) -> None:
             missing.append("EXPERIMENT_REVIEW_PACKET.path_mapping.persistent_output_dir must be durable for AutoDL")
 
 
+def validate_dataset_runtime_plan(packet: dict[str, Any], missing: list[str], warnings: list[str]) -> None:
+    plan = packet.get("dataset_runtime_plan")
+    inventory = packet.get("dataset_requirement_inventory") if isinstance(packet.get("dataset_requirement_inventory"), dict) else {}
+    require_nested(
+        plan,
+        "EXPERIMENT_REVIEW_PACKET.dataset_runtime_plan",
+        [
+            "candidate_datasets",
+            "feasibility_first_dataset_id",
+            "first_run_scale_class",
+            "largest_dataset_id",
+            "largest_dataset_deferred",
+            "escalation_criteria",
+            "runtime_risk",
+        ],
+        missing,
+    )
+    if not isinstance(plan, dict):
+        return
+
+    candidates = plan.get("candidate_datasets")
+    if not isinstance(candidates, list) or not candidates:
+        missing.append("EXPERIMENT_REVIEW_PACKET.dataset_runtime_plan.candidate_datasets must be a non-empty list")
+        return
+
+    rows_by_id: dict[str, dict[str, Any]] = {}
+    largest_rows: list[dict[str, Any]] = []
+    for index, row in enumerate(candidates):
+        prefix = f"EXPERIMENT_REVIEW_PACKET.dataset_runtime_plan.candidate_datasets[{index}]"
+        if not isinstance(row, dict):
+            missing.append(f"{prefix} must be an object")
+            continue
+        for key in [
+            "dataset_id",
+            "scale_class",
+            "num_classes",
+            "train_samples",
+            "eval_samples",
+            "epochs_or_steps",
+            "estimated_minutes_per_epoch",
+            "estimated_walltime_hours",
+            "estimated_gpu_hours",
+            "estimation_basis",
+        ]:
+            if not present(row.get(key)) or placeholder(row.get(key)):
+                missing.append(f"{prefix}.{key}")
+        dataset_id = str(row.get("dataset_id") or "").strip()
+        if dataset_id:
+            rows_by_id[dataset_id] = row
+        scale_class = str(row.get("scale_class") or "").strip()
+        if scale_class and scale_class not in DATASET_SCALE_CLASSES:
+            missing.append(f"{prefix}.scale_class must be small_multiclass/medium_multiclass/large_full_scale")
+        if scale_class == "large_full_scale":
+            largest_rows.append(row)
+        if present(row.get("num_classes")):
+            try:
+                if int(row["num_classes"]) < 2:
+                    missing.append(f"{prefix}.num_classes must be >= 2 for multi-class feasibility")
+            except (TypeError, ValueError):
+                missing.append(f"{prefix}.num_classes must be numeric")
+        for numeric_key in ["estimated_minutes_per_epoch", "estimated_walltime_hours", "estimated_gpu_hours"]:
+            if present(row.get(numeric_key)):
+                try:
+                    if float(row[numeric_key]) <= 0:
+                        missing.append(f"{prefix}.{numeric_key} must be > 0")
+                except (TypeError, ValueError):
+                    missing.append(f"{prefix}.{numeric_key} must be numeric")
+
+    first_id = str(plan.get("feasibility_first_dataset_id") or "").strip()
+    first_row = rows_by_id.get(first_id)
+    if first_id and first_row is None:
+        missing.append("EXPERIMENT_REVIEW_PACKET.dataset_runtime_plan.feasibility_first_dataset_id must match candidate_datasets[].dataset_id")
+    first_scale = str(plan.get("first_run_scale_class") or "").strip()
+    if first_scale and first_scale not in DATASET_SCALE_CLASSES:
+        missing.append("EXPERIMENT_REVIEW_PACKET.dataset_runtime_plan.first_run_scale_class must be small_multiclass/medium_multiclass/large_full_scale")
+    if first_row:
+        row_scale = str(first_row.get("scale_class") or "").strip()
+        if first_scale and row_scale and first_scale != row_scale:
+            missing.append("EXPERIMENT_REVIEW_PACKET.dataset_runtime_plan.first_run_scale_class must match the feasibility-first dataset scale_class")
+        if row_scale == "large_full_scale":
+            reason = str(plan.get("large_first_exception_reason") or "").strip()
+            if reason not in LARGE_DATASET_EXCEPTION_REASONS:
+                missing.append("EXPERIMENT_REVIEW_PACKET.dataset_runtime_plan cannot start feasibility on large_full_scale without large_first_exception_reason=no_smaller_multiclass_proxy or user_approved_start_large")
+
+    largest_id = str(plan.get("largest_dataset_id") or "").strip()
+    if largest_id and largest_id not in rows_by_id:
+        missing.append("EXPERIMENT_REVIEW_PACKET.dataset_runtime_plan.largest_dataset_id must match candidate_datasets[].dataset_id")
+    if largest_rows and plan.get("largest_dataset_deferred") is not True:
+        reason = str(plan.get("large_first_exception_reason") or "").strip()
+        if reason not in LARGE_DATASET_EXCEPTION_REASONS:
+            missing.append("EXPERIMENT_REVIEW_PACKET.dataset_runtime_plan.largest_dataset_deferred must be true unless a large-first exception is recorded")
+
+    selected_dataset = str(packet.get("dataset") or "").strip()
+    if selected_dataset and first_id and selected_dataset != first_id:
+        warnings.append("EXPERIMENT_REVIEW_PACKET.dataset differs from dataset_runtime_plan.feasibility_first_dataset_id; ensure dataset is the intended first launch target")
+    inventory_first = str(inventory.get("method_validation_dataset_id") or "").strip()
+    if inventory_first and first_id and inventory_first != first_id:
+        reason = str(inventory.get("non_smallest_first_exception_reason") or "").strip()
+        if reason not in NON_SMALLEST_DATASET_EXCEPTION_REASONS:
+            missing.append("EXPERIMENT_REVIEW_PACKET.dataset_runtime_plan.feasibility_first_dataset_id must match dataset_requirement_inventory.method_validation_dataset_id unless a valid non_smallest_first_exception_reason is recorded")
+
+
+def validate_dataset_requirement_inventory(packet: dict[str, Any], missing: list[str], warnings: list[str]) -> None:
+    inventory = packet.get("dataset_requirement_inventory")
+    require_nested(
+        inventory,
+        "EXPERIMENT_REVIEW_PACKET.dataset_requirement_inventory",
+        [
+            "required_datasets",
+            "selection_rule",
+            "method_validation_dataset_id",
+            "smallest_available_required_dataset_id",
+        ],
+        missing,
+    )
+    if not isinstance(inventory, dict):
+        return
+
+    required = inventory.get("required_datasets")
+    if not isinstance(required, list) or not required:
+        missing.append("EXPERIMENT_REVIEW_PACKET.dataset_requirement_inventory.required_datasets must be a non-empty list")
+        return
+
+    rows_by_id: dict[str, dict[str, Any]] = {}
+    available_required: list[tuple[tuple[float, float, float], dict[str, Any]]] = []
+    for index, row in enumerate(required):
+        prefix = f"EXPERIMENT_REVIEW_PACKET.dataset_requirement_inventory.required_datasets[{index}]"
+        if not isinstance(row, dict):
+            missing.append(f"{prefix} must be an object")
+            continue
+        for key in [
+            "dataset_id",
+            "dataset_name",
+            "claim_role",
+            "reason_required",
+            "baseline_supported",
+            "availability",
+            "scale_class",
+            "num_classes",
+            "train_samples",
+            "eval_samples",
+            "native_protocol_ref",
+            "native_epochs_or_steps",
+            "native_warmup_or_schedule",
+            "data_root_or_probe",
+            "selection_status",
+        ]:
+            if not present(row.get(key)) or placeholder(row.get(key)):
+                missing.append(f"{prefix}.{key}")
+        dataset_id = str(row.get("dataset_id") or "").strip()
+        if dataset_id:
+            rows_by_id[dataset_id] = row
+        role = str(row.get("claim_role") or "").strip()
+        if role and role not in DATASET_CLAIM_ROLES:
+            missing.append(f"{prefix}.claim_role must be one of {sorted(DATASET_CLAIM_ROLES)}")
+        availability = str(row.get("availability") or "").strip()
+        if availability and availability not in DATASET_AVAILABILITY_STATUSES:
+            missing.append(f"{prefix}.availability must be one of {sorted(DATASET_AVAILABILITY_STATUSES)}")
+        if availability == "available" and not isinstance(row.get("baseline_supported"), bool):
+            missing.append(f"{prefix}.baseline_supported must be boolean when availability=available")
+        selection_status = str(row.get("selection_status") or "").strip()
+        if selection_status and selection_status not in DATASET_SELECTION_STATUSES:
+            missing.append(f"{prefix}.selection_status must be one of {sorted(DATASET_SELECTION_STATUSES)}")
+        if selection_status == "rejected" and not present(row.get("rejection_reason")):
+            missing.append(f"{prefix}.rejection_reason is required when selection_status=rejected")
+        scale = str(row.get("scale_class") or "").strip()
+        if scale and scale not in DATASET_SCALE_CLASSES:
+            missing.append(f"{prefix}.scale_class must be small_multiclass/medium_multiclass/large_full_scale")
+
+        if (
+            dataset_id
+            and role in {"method_validation", "ablation", "stress"}
+            and row.get("baseline_supported") is True
+            and availability == "available"
+            and selection_status != "rejected"
+        ):
+            try:
+                train_samples = float(row.get("train_samples"))
+            except (TypeError, ValueError):
+                train_samples = float("inf")
+            try:
+                gpu_hours = float(row.get("estimated_gpu_hours", float("inf")))
+            except (TypeError, ValueError):
+                gpu_hours = float("inf")
+            rank = (float(DATASET_SCALE_RANK.get(scale, 99)), train_samples, gpu_hours)
+            available_required.append((rank, row))
+
+    if not available_required:
+        reason = str(inventory.get("non_smallest_first_exception_reason") or "").strip()
+        if reason != "no_required_small_dataset_available":
+            missing.append("EXPERIMENT_REVIEW_PACKET.dataset_requirement_inventory must include at least one available baseline-supported required dataset or record non_smallest_first_exception_reason=no_required_small_dataset_available")
+        return
+
+    available_required.sort(key=lambda item: item[0])
+    smallest_id = str(available_required[0][1].get("dataset_id") or "").strip()
+    recorded_smallest = str(inventory.get("smallest_available_required_dataset_id") or "").strip()
+    selected_first = str(inventory.get("method_validation_dataset_id") or "").strip()
+    if recorded_smallest and recorded_smallest != smallest_id:
+        missing.append("EXPERIMENT_REVIEW_PACKET.dataset_requirement_inventory.smallest_available_required_dataset_id must be the smallest available baseline-supported required dataset")
+    if selected_first and selected_first not in rows_by_id:
+        missing.append("EXPERIMENT_REVIEW_PACKET.dataset_requirement_inventory.method_validation_dataset_id must match required_datasets[].dataset_id")
+    if selected_first and selected_first != smallest_id:
+        reason = str(inventory.get("non_smallest_first_exception_reason") or "").strip()
+        if reason not in NON_SMALLEST_DATASET_EXCEPTION_REASONS:
+            missing.append("EXPERIMENT_REVIEW_PACKET.dataset_requirement_inventory.method_validation_dataset_id must choose the smallest available baseline-supported required dataset unless a valid non_smallest_first_exception_reason is recorded")
+    selected_rows = [
+        str(row.get("dataset_id") or "").strip()
+        for row in required
+        if isinstance(row, dict) and row.get("selection_status") == "selected_first"
+    ]
+    if selected_first and selected_rows != [selected_first]:
+        missing.append("EXPERIMENT_REVIEW_PACKET.dataset_requirement_inventory must have exactly one selected_first row matching method_validation_dataset_id")
+
+
 def validate_innovation_contract(packet: dict[str, Any], missing: list[str]) -> None:
     contract = packet.get("innovation_search_contract")
     require_nested(
@@ -260,6 +583,59 @@ def validate_innovation_contract(packet: dict[str, Any], missing: list[str]) -> 
         missing.append("EXPERIMENT_REVIEW_PACKET.promotion_gate.stage must be candidate, ablation, or confirmation")
 
 
+def validate_paper_bundle(packet: dict[str, Any], missing: list[str]) -> None:
+    contract = packet.get("innovation_search_contract") if isinstance(packet.get("innovation_search_contract"), dict) else {}
+    bundle = first_present(packet, ["paper_innovation_bundle", "innovation_bundle", "three_innovation_bundle"])
+    if not present(bundle):
+        bundle = contract.get("paper_innovation_bundle") or contract.get("innovation_bundle")
+    points = as_list(bundle)
+    if len(points) < 3:
+        missing.append("EXPERIMENT_REVIEW_PACKET.paper_innovation_bundle must contain at least 3 paper-level innovation points")
+        return
+
+    roles: set[str] = set()
+    transfer_source_count = 0
+    for index, point in enumerate(points):
+        prefix = f"EXPERIMENT_REVIEW_PACKET.paper_innovation_bundle[{index}]"
+        if not isinstance(point, dict):
+            missing.append(f"{prefix} must be an object")
+            continue
+        for key in INNOVATION_BUNDLE_REQUIRED_KEYS:
+            value = point.get(key)
+            if not present(value) or placeholder(value):
+                missing.append(f"{prefix}.{key}")
+        role = normalized_role(point.get("role"))
+        source_role = normalized_role(point.get("source_role"))
+        if role:
+            roles.add(role)
+        if source_role in VALID_METHOD_SOURCE_ROLES:
+            transfer_source_count += 1
+        elif source_role in TARGET_DOMAIN_ONLY_ROLES and not present(point.get("current_field_absence_evidence")):
+            missing.append(f"{prefix}.current_field_absence_evidence required for target-domain-only innovation point")
+
+    if not roles & PROBLEM_PROTOCOL_ROLES:
+        missing.append("EXPERIMENT_REVIEW_PACKET.paper_innovation_bundle needs a problem/protocol/evaluation innovation point")
+    if not roles & METHOD_ROLES:
+        missing.append("EXPERIMENT_REVIEW_PACKET.paper_innovation_bundle needs a method/mechanism innovation point")
+    if not roles & PROOF_INTEGRATION_ROLES:
+        missing.append("EXPERIMENT_REVIEW_PACKET.paper_innovation_bundle needs a training/integration/analysis/validation innovation point")
+    if transfer_source_count < 1:
+        missing.append("EXPERIMENT_REVIEW_PACKET.paper_innovation_bundle needs at least one near/far/cross-lane or external transfer-backed point")
+
+    storyline = first_present(packet, ["paper_storyline", "storyline_contract", "storyline"])
+    if not present(storyline):
+        storyline = contract.get("paper_storyline") or contract.get("storyline")
+    if not isinstance(storyline, dict):
+        missing.append("EXPERIMENT_REVIEW_PACKET.paper_storyline")
+        return
+    for key in PAPER_STORYLINE_REQUIRED_KEYS:
+        value = storyline.get(key)
+        if not present(value) or placeholder(value):
+            missing.append(f"EXPERIMENT_REVIEW_PACKET.paper_storyline.{key}")
+    if story_step_count(storyline.get("narrative_spine")) < 5:
+        missing.append("EXPERIMENT_REVIEW_PACKET.paper_storyline.narrative_spine must contain 5-7 sequential story steps")
+
+
 def validate_evidence_import_gate(packet: dict[str, Any], missing: list[str]) -> None:
     gate = packet.get("evidence_import_gate")
     require_nested(
@@ -293,6 +669,22 @@ def validate_evidence_import_gate(packet: dict[str, Any], missing: list[str]) ->
             missing.append("EXPERIMENT_REVIEW_PACKET.evidence_import_gate.attempts")
 
 
+def degraded_gate_approved(gate: Any) -> bool:
+    if not isinstance(gate, dict):
+        return False
+    if str(gate.get("status") or "").strip().lower() != "degraded_requires_user_approval":
+        return False
+    approval = gate.get("degraded_approval") or gate.get("user_approval") or gate.get("approval")
+    if not isinstance(approval, dict) or approval.get("approved") is not True:
+        return False
+    return (
+        present(approval.get("approved_by"))
+        and present(approval.get("approved_at"))
+        and present(approval.get("reason"))
+        and present(gate.get("claim_limits") or approval.get("claim_limits"))
+    )
+
+
 def validate_pre_idea_refs(packet: dict[str, Any], project: str, missing: list[str]) -> None:
     for key in ["pre_idea_evidence_gate_path", "innovation_slot_map_path"]:
         value = packet.get(key)
@@ -304,7 +696,10 @@ def validate_pre_idea_refs(packet: dict[str, Any], project: str, missing: list[s
             missing.append(f"EXPERIMENT_REVIEW_PACKET.{key} not found: {value}")
         elif key == "pre_idea_evidence_gate_path":
             gate = read_json(path)
-            if not isinstance(gate, dict) or str(gate.get("status") or "").strip().lower() != "passed":
+            if not isinstance(gate, dict) or (
+                str(gate.get("status") or "").strip().lower() != "passed"
+                and not degraded_gate_approved(gate)
+            ):
                 missing.append("EXPERIMENT_REVIEW_PACKET.pre_idea_evidence_gate_path status passed")
     if not present(packet.get("consumed_innovation_slot_ids")):
         missing.append("EXPERIMENT_REVIEW_PACKET.consumed_innovation_slot_ids")
@@ -336,6 +731,7 @@ def validate_track_plan_matrix(project: str, missing: list[str], warnings: list[
             "idea_id",
             "baseline_code",
             "dataset",
+            "dataset_runtime_plan_ref",
             "split",
             "primary_metric",
             "metric_direction",
@@ -387,10 +783,15 @@ def lint(packet: dict[str, Any] | None, project: str) -> dict[str, Any]:
 
     validate_baseline_code(packet, missing)
     validate_innovation_contract(packet, missing)
+    validate_paper_bundle(packet, missing)
     validate_evidence_import_gate(packet, missing)
     validate_pre_idea_refs(packet, project, missing)
     validate_compute_backend(packet, missing)
+    validate_dataset_requirement_inventory(packet, missing, warnings)
+    validate_dataset_runtime_plan(packet, missing, warnings)
     validate_path_mapping(packet, missing)
+    validate_stability_seed_policy(packet, missing, warnings)
+    validate_hpo_search_policy(packet, "EXPERIMENT_REVIEW_PACKET", missing, warnings)
     validate_track_plan_matrix(project, missing, warnings)
 
     idea_pool_path = packet.get("idea_pool_path") or packet.get("candidate_library_path")

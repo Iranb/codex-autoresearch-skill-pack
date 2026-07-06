@@ -1,0 +1,4 @@
+interface:
+  display_name: "Papers.cool Validation Survey"
+  short_description: "Audit papers.cool surveys for fast ideas."
+  default_prompt: "Use this skill to harvest papers.cool pages, avoid same-field innovation leakage, audit code evidence, and create a fast validation queue for an AutoResearch project."

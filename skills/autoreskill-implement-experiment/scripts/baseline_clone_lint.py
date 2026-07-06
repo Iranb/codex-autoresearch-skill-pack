@@ -259,6 +259,8 @@ def lint(project: str) -> dict[str, Any]:
     base = ar(project)
     review = read_json(base / "planner/EXPERIMENT_REVIEW_PACKET.json", {}) or {}
     baseline_code = review.get("baseline_code") if isinstance(review.get("baseline_code"), dict) else {}
+    current_track_id = str(review.get("track_id") or "").strip()
+    current_idea_id = str(review.get("selected_idea_id") or review.get("selected_idea_fragment_id") or "").strip()
     missing: list[str] = []
     warnings: list[str] = []
 
@@ -270,8 +272,20 @@ def lint(project: str) -> dict[str, Any]:
     manifests = sorted(base.glob("coder/experiments/**/EXPERIMENT_MANIFEST.json"))
     if not manifests:
         missing.append("coder/experiments/**/EXPERIMENT_MANIFEST.json")
+    scoped_manifests: list[Path] = []
     for manifest_path in manifests:
         manifest = read_json(manifest_path, {}) or {}
+        manifest_track_id = str(manifest.get("track_id") or "").strip()
+        manifest_idea_id = str(manifest.get("selected_idea_id") or "").strip()
+        if current_track_id or current_idea_id:
+            is_current = (
+                bool(current_track_id and manifest_track_id == current_track_id)
+                or bool(current_idea_id and manifest_idea_id == current_idea_id)
+            )
+            if not is_current:
+                warnings.append(f"{rel(base, manifest_path)} skipped: historical manifest not selected by current review packet")
+                continue
+        scoped_manifests.append(manifest_path)
         exp_dir = manifest_path.parent
         audit_path = exp_dir / str(manifest.get("baseline_data_audit") or "BASELINE_DATA_AUDIT.json")
         audit = read_json(audit_path, {}) or {}
@@ -285,6 +299,12 @@ def lint(project: str) -> dict[str, Any]:
         ok, reason = command_uses_baseline_or_adapter(manifest, baseline_code)
         if not ok:
             missing.append(f"{rel(base, manifest_path)} {reason}")
+
+    if manifests and (current_track_id or current_idea_id) and not scoped_manifests:
+        missing.append(
+            "coder/experiments/**/EXPERIMENT_MANIFEST.json no manifest matches current review packet "
+            f"track_id={current_track_id or '<missing>'} selected_idea_id={current_idea_id or '<missing>'}"
+        )
 
     return {
         "complete": not missing,

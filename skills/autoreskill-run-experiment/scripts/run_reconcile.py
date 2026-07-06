@@ -6,6 +6,8 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
+import re
 import subprocess
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -45,6 +47,26 @@ def append_jsonl(path: Path, row: dict[str, Any]) -> None:
         handle.write(json.dumps(row, ensure_ascii=False) + "\n")
 
 
+LOG_SUFFIXES = {".log", ".txt", ".json", ".jsonl", ".csv", ".tsv", ".yaml", ".yml", ".out", ".err"}
+CHECKPOINT_SUFFIXES = {".pt", ".pth", ".ckpt", ".safetensors", ".bin", ".onnx"}
+CHECKPOINT_PARTS = {"checkpoint", "checkpoints"}
+
+
+def is_checkpoint_like(raw: str) -> bool:
+    text = raw.strip().lower()
+    parts = {part for part in re.split(r"[/\\]+", text) if part}
+    if parts & CHECKPOINT_PARTS:
+        return True
+    return Path(text).suffix in CHECKPOINT_SUFFIXES
+
+
+def is_lightweight_log(raw: str) -> bool:
+    if is_checkpoint_like(raw):
+        return False
+    suffix = Path(raw.strip()).suffix.lower()
+    return suffix in LOG_SUFFIXES
+
+
 def git_capture(project: str, args: list[str]) -> str | None:
     try:
         proc = subprocess.run(
@@ -60,6 +82,131 @@ def git_capture(project: str, args: list[str]) -> str | None:
     if proc.returncode != 0:
         return None
     return proc.stdout.strip()
+
+
+def shell_quote_single(value: str) -> str:
+    return "'" + value.replace("'", "'\"'\"'") + "'"
+
+
+def ssh_target(remote: dict[str, Any], manifest: dict[str, Any], args: argparse.Namespace) -> tuple[str | None, int | None]:
+    host = args.ssh_host or remote.get("ssh_host") or manifest.get("ssh_host")
+    port_value: Any = args.ssh_port or remote.get("ssh_port") or manifest.get("ssh_port")
+    user = args.ssh_user or remote.get("ssh_user") or manifest.get("ssh_user") or "root"
+    if not host:
+        raw_host = str(remote.get("host") or manifest.get("host") or "").strip()
+        if raw_host:
+            if raw_host.startswith("seetacloud:"):
+                port_value = port_value or raw_host.split(":", 1)[1]
+                host = (
+                    remote.get("seetacloud_ssh_host")
+                    or manifest.get("seetacloud_ssh_host")
+                    or os.environ.get("SEETACLOUD_SSH_HOST")
+                )
+            elif ":" in raw_host and not raw_host.count(":") > 1:
+                maybe_host, maybe_port = raw_host.rsplit(":", 1)
+                host = maybe_host
+                port_value = port_value or maybe_port
+            else:
+                host = raw_host
+    if not host:
+        return None, None
+    try:
+        port = int(port_value) if port_value else None
+    except (TypeError, ValueError):
+        port = None
+    return f"{user}@{host}", port
+
+
+def sync_one_log(target: str, port: int | None, remote_path: str, local_path: Path) -> dict[str, Any]:
+    local_path.parent.mkdir(parents=True, exist_ok=True)
+    remote_spec = f"{target}:{shell_quote_single(remote_path)}"
+    ssh_cmd = "ssh"
+    if port:
+        ssh_cmd += f" -p {port}"
+    rsync_cmd = ["rsync", "-az", "-e", ssh_cmd, remote_spec, str(local_path)]
+    try:
+        proc = subprocess.run(rsync_cmd, check=False, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    except OSError:
+        scp_cmd = ["scp"]
+        if port:
+            scp_cmd.extend(["-P", str(port)])
+        scp_cmd.extend([f"{target}:{remote_path}", str(local_path)])
+        try:
+            proc = subprocess.run(scp_cmd, check=False, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        except OSError as exc:
+            return {"remote": remote_path, "local": str(local_path), "status": "failed", "reason": str(exc)}
+    if proc.returncode == 0:
+        return {"remote": remote_path, "local": str(local_path), "status": "synced", "reason": ""}
+    return {"remote": remote_path, "local": str(local_path), "status": "failed", "reason": (proc.stderr or proc.stdout).strip()[-500:]}
+
+
+def collect_log_paths(remote: dict[str, Any], manifest: dict[str, Any]) -> list[str]:
+    candidates: list[str] = []
+    for key in ["log_paths", "result_paths"]:
+        value = remote.get(key) or manifest.get(key) or []
+        if isinstance(value, list):
+            candidates.extend(str(item) for item in value if item)
+    for component in remote.get("run_components") or manifest.get("run_components") or []:
+        if not isinstance(component, dict):
+            continue
+        for key in ["nohup_log", "train_log", "command_path", "metrics_path", "result_path"]:
+            if component.get(key):
+                candidates.append(str(component[key]))
+    seen: set[str] = set()
+    out: list[str] = []
+    for raw in candidates:
+        text = raw.strip()
+        if text and text not in seen:
+            seen.add(text)
+            out.append(text)
+    return out
+
+
+def sync_remote_logs(exp_dir: Path, remote: dict[str, Any], previous: dict[str, Any], manifest: dict[str, Any], args: argparse.Namespace) -> tuple[dict[str, Any], list[str]]:
+    policy = {
+        "status": "not_required",
+        "synced_at": now(),
+        "policy": "sync logs and lightweight text/metadata only; checkpoints excluded by default",
+        "included_suffixes": sorted(LOG_SUFFIXES),
+        "excluded_patterns": ["checkpoint/", "checkpoints/", "*.pt", "*.pth", "*.ckpt", "*.safetensors", "*.bin", "*.onnx"],
+        "items": [],
+    }
+    if not args.sync_logs or args.backend == "local":
+        policy["status"] = "skipped"
+        return policy, []
+    merged_remote = {**previous, **remote}
+    target, port = ssh_target(merged_remote, manifest, args)
+    if not target:
+        policy["status"] = "failed"
+        policy["items"].append({"remote": "", "local": "", "status": "failed", "reason": "missing ssh target"})
+        return policy, []
+    sync_root = exp_dir / "logs" / "synced"
+    items: list[dict[str, Any]] = []
+    local_paths: list[str] = []
+    for remote_path in collect_log_paths(merged_remote, manifest):
+        if is_checkpoint_like(remote_path):
+            items.append({"remote": remote_path, "local": "", "status": "skipped", "reason": "checkpoint/model artifact excluded"})
+            continue
+        if not is_lightweight_log(remote_path):
+            items.append({"remote": remote_path, "local": "", "status": "skipped", "reason": "not a recognized lightweight log suffix"})
+            continue
+        local_path = sync_root / Path(remote_path.replace("~", "HOME")).name
+        row = sync_one_log(target, port, remote_path, local_path)
+        items.append(row)
+        if row["status"] == "synced":
+            local_paths.append(str(local_path.relative_to(exp_dir)))
+    policy["items"] = items
+    synced = sum(1 for item in items if item.get("status") == "synced")
+    failed = sum(1 for item in items if item.get("status") == "failed")
+    if synced and not failed:
+        policy["status"] = "synced"
+    elif synced and failed:
+        policy["status"] = "partial"
+    elif failed:
+        policy["status"] = "failed"
+    else:
+        policy["status"] = "skipped"
+    return policy, local_paths
 
 
 def resolve_project_path(project: str, raw: str) -> Path:
@@ -407,6 +554,15 @@ def as_dict(value: Any) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
+def float_value(value: Any) -> float | None:
+    if isinstance(value, bool):
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def present(value: Any) -> bool:
     if value is None:
         return False
@@ -451,6 +607,13 @@ def run_identity(manifest: dict[str, Any], review: dict[str, Any], innovation: d
     innovation_contract = as_dict(innovation.get("innovation_search_contract"))
     contract = manifest_contract or review_contract or innovation_contract
     gate = as_dict(review.get("promotion_gate"))
+    hpo_search_policy = (
+        as_dict(manifest.get("hpo_search_policy"))
+        or as_dict(review.get("hpo_search_policy"))
+        or as_dict(innovation.get("hpo_search_policy"))
+        or as_dict(contract.get("hpo_search_policy"))
+    )
+    hpo_trial = as_dict(manifest.get("hpo_trial")) or as_dict(manifest.get("dehb_trial"))
     selected_idea_id = first_present(
         manifest.get("selected_idea_id"),
         manifest.get("selected_candidate_id"),
@@ -479,7 +642,22 @@ def run_identity(manifest: dict[str, Any], review: dict[str, Any], innovation: d
         "promotion_stage": stage,
         "ablation_of": first_present(manifest.get("ablation_of"), review.get("ablation_of"), innovation.get("ablation_of")),
         "confirmation_of": first_present(manifest.get("confirmation_of"), review.get("confirmation_of"), innovation.get("confirmation_of")),
+        "hpo_search_policy": hpo_search_policy,
+        "hpo_trial": hpo_trial,
     }
+
+
+def hpo_low_fidelity_scout(identity: dict[str, Any]) -> bool:
+    trial = as_dict(identity.get("hpo_trial"))
+    if not trial:
+        return False
+    role = str(trial.get("role") or trial.get("trial_role") or trial.get("stage") or "").strip().lower()
+    if role in {"scout", "dehb_scout", "low_fidelity"}:
+        return True
+    fraction = float_value(trial.get("resource_fraction") or trial.get("fidelity_fraction"))
+    if fraction is not None and fraction < 1.0:
+        return True
+    return False
 
 
 def promotion_decision(
@@ -498,6 +676,8 @@ def promotion_decision(
         return "not_promoted", "protected path hash changed"
     if not metrics:
         return "not_promoted", "metrics file not found"
+    if hpo_low_fidelity_scout(identity):
+        return "record_only", "low-fidelity HPO scout cannot support candidate or promoted evidence"
     if metric_info.get("improved") is True:
         stage = identity.get("promotion_stage") or "candidate"
         if stage == "candidate":
@@ -550,6 +730,10 @@ def main() -> None:
     parser.add_argument("--command")
     parser.add_argument("--session-id", default="")
     parser.add_argument("--remote-path", default="")
+    parser.add_argument("--ssh-host", default="")
+    parser.add_argument("--ssh-user", default="")
+    parser.add_argument("--ssh-port", type=int)
+    parser.add_argument("--sync-logs", action="store_true")
     parser.add_argument("--metric-direction", choices=["higher", "lower"])
     parser.add_argument("--fixture-result", action="store_true")
     parser.add_argument("--estimated-remaining-minutes", type=float)
@@ -598,9 +782,15 @@ def main() -> None:
             "promotion_stage": identity.get("promotion_stage"),
             "ablation_of": identity.get("ablation_of"),
             "confirmation_of": identity.get("confirmation_of"),
+            "hpo_search_policy": identity.get("hpo_search_policy"),
+            "hpo_trial": identity.get("hpo_trial"),
             "command": "fixture/manual reconcile" if args.fixture_result else command,
             "remote_path": args.remote_path,
             "session_id": args.session_id,
+            "host": previous_remote.get("host") if isinstance(previous_remote, dict) else manifest.get("host"),
+            "ssh_host": args.ssh_host or (previous_remote.get("ssh_host") if isinstance(previous_remote, dict) else None) or manifest.get("ssh_host"),
+            "ssh_user": args.ssh_user or (previous_remote.get("ssh_user") if isinstance(previous_remote, dict) else None) or manifest.get("ssh_user"),
+            "ssh_port": args.ssh_port or (previous_remote.get("ssh_port") if isinstance(previous_remote, dict) else None) or manifest.get("ssh_port"),
             "source_snapshot": source_snapshot,
             "protocol_locked": True,
             "metric": manifest.get("primary_metric"),
@@ -614,7 +804,23 @@ def main() -> None:
             "promotion_decision": decision,
             "promotion_reason": reason,
             "next_action": next_action(decision, identity),
+            "result_paths": (previous_remote.get("result_paths") if isinstance(previous_remote, dict) else None) or manifest.get("result_paths") or [],
+            "log_paths": (previous_remote.get("log_paths") if isinstance(previous_remote, dict) else None) or manifest.get("log_paths") or [],
         }
+        log_sync, local_log_paths = sync_remote_logs(
+            exp_dir=exp_dir,
+            remote=remote,
+            previous=previous_remote if isinstance(previous_remote, dict) else {},
+            manifest=manifest,
+            args=args,
+        )
+        previous_local_logs = previous_remote.get("local_log_paths") if isinstance(previous_remote, dict) else []
+        merged_local_logs: list[str] = []
+        for path in [*(previous_local_logs if isinstance(previous_local_logs, list) else []), *local_log_paths]:
+            if path not in merged_local_logs:
+                merged_local_logs.append(path)
+        remote["local_log_paths"] = merged_local_logs
+        remote["log_sync"] = log_sync
         estimated_remaining = inferred_remaining_minutes(
             args.estimated_remaining_minutes,
             previous_remote if isinstance(previous_remote, dict) else {},
@@ -655,9 +861,13 @@ def main() -> None:
             "promotion_stage": identity.get("promotion_stage"),
             "ablation_of": identity.get("ablation_of"),
             "confirmation_of": identity.get("confirmation_of"),
+            "hpo_search_policy": identity.get("hpo_search_policy"),
+            "hpo_trial": identity.get("hpo_trial"),
             "metrics": metric_info,
             "metric_value": metric_info.get("proposed"),
             "metric_source": metrics_rel,
+            "remote_run_log_sync_status": log_sync.get("status") if isinstance(log_sync, dict) else None,
+            "local_log_paths": merged_local_logs,
             "canonical_eval_status": "passed" if status == "completed" and metrics_rel else "missing_or_pending",
             "metrics_path": metrics_rel,
             "promotion_decision": decision,

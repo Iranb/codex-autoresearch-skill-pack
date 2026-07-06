@@ -187,6 +187,55 @@ def source_records(value: Any) -> list[dict[str, Any]]:
     return records
 
 
+def rows_from_payload(payload: Any) -> list[dict[str, Any]]:
+    if isinstance(payload, dict):
+        for key in ["migrations", "mechanisms", "rows", "items", "records"]:
+            if isinstance(payload.get(key), list):
+                return [row for row in payload[key] if isinstance(row, dict)]
+    if isinstance(payload, list):
+        return [row for row in payload if isinstance(row, dict)]
+    return []
+
+
+def code_transfer_support(base: Path, packet: dict[str, Any] | None, selected_id: str | None) -> dict[str, Any]:
+    if not selected_id or not isinstance(packet, dict):
+        return {"complete": False, "reason": "missing_packet_or_selected_id"}
+    support = packet.get("paper_code_transfer_support") or packet.get("source_code_transfer_support")
+    if not isinstance(support, dict):
+        return {"complete": False, "reason": "missing_paper_code_transfer_support"}
+    authority = str(support.get("authority") or support.get("source") or "").strip().lower()
+    if authority not in {"paper_code_transfer_lint", "paper_code_transfer", "code_migration_matrix"}:
+        return {"complete": False, "reason": "unsupported_authority"}
+
+    lint_rel = support.get("lint_result_path") or "survey/PAPER_CODE_TRANSFER_LINT_RESULT.json"
+    lint_path = resolve_artifact_path(base, lint_rel)
+    lint_payload = read_json(lint_path) if lint_path else None
+    lint_complete = isinstance(lint_payload, dict) and lint_payload.get("complete") is True
+
+    migration_refs = {str(item) for item in as_list(support.get("migration_refs") or support.get("migration_ids")) if present(item)}
+    mechanism_refs = {str(item) for item in as_list(support.get("mechanism_refs") or support.get("mechanism_ids")) if present(item)}
+    migration_payload = read_json(base / "ideation/INNOVATION_MIGRATION_MATRIX.json")
+    mechanism_payload = read_json(base / "survey/CODE_MECHANISM_MAP.json")
+    available_migrations = {str(row.get("migration_id")) for row in rows_from_payload(migration_payload) if present(row.get("migration_id"))}
+    available_mechanisms = {str(row.get("mechanism_id")) for row in rows_from_payload(mechanism_payload) if present(row.get("mechanism_id"))}
+    matched_migrations = sorted(migration_refs & available_migrations)
+    matched_mechanisms = sorted(mechanism_refs & available_mechanisms)
+
+    complete = lint_complete and bool(matched_migrations or matched_mechanisms)
+    return {
+        "complete": complete,
+        "authority": authority,
+        "selected_idea_fragment_id": selected_id,
+        "lint_result_path": relpath(base, lint_path) if lint_path else None,
+        "lint_complete": lint_complete,
+        "matched_migration_refs": matched_migrations,
+        "matched_mechanism_refs": matched_mechanisms,
+        "claim_scope": support.get("claim_scope") or "static_code_transfer_support_only",
+        "evidence_boundary": support.get("evidence_boundary")
+        or "Paper-code static evidence supports implementability/mechanism transfer only, not target-task effectiveness or PaperNexus graph support.",
+    }
+
+
 def span_values(value: Any) -> list[str]:
     spans = []
     if isinstance(value, dict):
@@ -208,6 +257,58 @@ def candidate_records(payload: Any, selected_id: str) -> list[dict[str, Any]]:
         if selected_id in record_ids(record):
             candidates.append(record)
     return candidates
+
+
+def proposal_manifest_ready(base: Path, packet: dict[str, Any] | None) -> tuple[bool, dict[str, Any] | None, list[str], list[str]]:
+    missing: list[str] = []
+    warnings: list[str] = []
+    if not isinstance(packet, dict):
+        return False, None, missing, warnings
+
+    manifest_value = first_present(
+        packet,
+        [
+            "proposal_graph_session_manifest_path",
+            "proposalSessionManifestPath",
+            "proposal_session_manifest_path",
+            "proposal_manifest_path",
+        ],
+    )
+    result_value = first_present(
+        packet,
+        [
+            "proposal_graph_session_path",
+            "proposalGraphSessionPath",
+            "proposal_session_path",
+            "proposal_graph_session_result_path",
+        ],
+    )
+    manifest_path = resolve_artifact_path(base, manifest_value) if manifest_value else None
+    result_path = resolve_artifact_path(base, result_value, "papernexus/proposal_graph_session.json")
+
+    manifest = read_json(manifest_path) if manifest_path else None
+    result = read_json(result_path) if result_path else None
+    if not isinstance(manifest, dict) and isinstance(result, dict) and isinstance(result.get("manifest"), dict):
+        manifest = result["manifest"]
+
+    if not isinstance(manifest, dict):
+        return False, None, missing, warnings
+
+    if str(manifest.get("final_status") or "").strip().lower() != "committed":
+        missing.append("proposal graph session final_status=committed")
+    if not present(manifest.get("committed_subgraph_id")):
+        missing.append("proposal graph session committed_subgraph_id")
+    proposal_paths = manifest.get("proposal_artifact_paths") if isinstance(manifest.get("proposal_artifact_paths"), dict) else {}
+    if not present(proposal_paths.get("proposal_json")):
+        missing.append("proposal graph session proposal_json")
+    if not present(proposal_paths.get("proposal_md")):
+        missing.append("proposal graph session proposal_md")
+    if not present(manifest.get("evidence_export_paths")):
+        missing.append("proposal graph session evidence_export_paths")
+    if not present(manifest.get("controller_trace_paths")):
+        missing.append("proposal graph session controller_trace_paths")
+
+    return not missing, manifest, missing, warnings
 
 
 def summarize_candidate(record: dict[str, Any], selected_id: str, root_has_provenance: bool) -> dict[str, Any]:
@@ -243,6 +344,7 @@ def lint_idea_support(
     missing: list[str] = []
     warnings: list[str] = []
     supported: list[dict[str, Any]] = []
+    proposal_support: dict[str, Any] | None = None
 
     if not isinstance(packet, dict):
         missing.append(relpath(base, packet_path))
@@ -255,36 +357,121 @@ def lint_idea_support(
         )
         if selected_id is not None:
             selected_id = str(selected_id)
+        proposal_ready, proposal_manifest, proposal_missing, proposal_warnings = proposal_manifest_ready(base, packet)
+        if proposal_manifest is not None:
+            proposal_support = {
+                "complete": proposal_ready,
+                "committed_subgraph_id": proposal_manifest.get("committed_subgraph_id"),
+                "missing": proposal_missing,
+            }
+            warnings.extend(proposal_warnings)
+
         evidence_path = evidence_export_path or resolve_artifact_path(
             base,
             first_present(
                 packet,
-                ["idea_evidence_export_path", "ideaEvidenceExportPath", "evidence_export_path", "evidenceExportPath"],
+                [
+                    "idea_evidence_export_path",
+                    "ideaEvidenceExportPath",
+                    "evidence_export_path",
+                    "evidenceExportPath",
+                    "proposal_evidence_export_path",
+                ],
             ),
             "papernexus/idea_catalyst_evidence_export.json",
         )
 
     if not selected_id:
         missing.append("INNOVATION_PACKET.selected_idea_fragment_id")
-    if evidence_path is None:
+    if evidence_path is None and not (proposal_support or {}).get("complete"):
         missing.append("INNOVATION_PACKET.idea_evidence_export_path")
         evidence_payload = None
     else:
-        evidence_payload = read_json(evidence_path)
-        if evidence_payload is None:
+        evidence_payload = read_json(evidence_path) if evidence_path else None
+        if evidence_payload is None and not (proposal_support or {}).get("complete"):
             missing.append(relpath(base, evidence_path))
+
+    if selected_id and evidence_payload is None and (proposal_support or {}).get("complete"):
+        supported.append(
+            {
+                "fragment_id": selected_id,
+                "complete": True,
+                "evidence_status": "proposal_graph_committed",
+                "raw_statuses": ["proposal_graph_committed"],
+                "source_count": 1,
+                "span_count": 1,
+                "papernexus_provenance": True,
+                "committed_subgraph_id": proposal_support.get("committed_subgraph_id"),
+            }
+        )
 
     if selected_id and evidence_payload is not None:
         root_has_provenance = has_papernexus_provenance(evidence_payload)
         candidates = candidate_records(evidence_payload, selected_id)
         if not candidates:
-            missing.append(f"source-backed evidence for selected idea fragment {selected_id}")
+            if (proposal_support or {}).get("complete"):
+                supported.append(
+                    {
+                        "fragment_id": selected_id,
+                        "complete": True,
+                        "evidence_status": "proposal_graph_committed",
+                        "raw_statuses": ["proposal_graph_committed"],
+                        "source_count": 1,
+                        "span_count": 1,
+                        "papernexus_provenance": True,
+                        "committed_subgraph_id": proposal_support.get("committed_subgraph_id"),
+                    }
+                )
+            else:
+                missing.append(f"source-backed evidence for selected idea fragment {selected_id}")
         else:
             supported = [summarize_candidate(candidate, selected_id, root_has_provenance) for candidate in candidates]
             if not any(row["complete"] for row in supported):
-                missing.append(f"selected idea fragment {selected_id} with PaperNexus provenance, source record, and source span")
+                if (proposal_support or {}).get("complete"):
+                    warnings.append("selected idea fragment support inferred from committed proposal graph session")
+                    supported.append(
+                        {
+                            "fragment_id": selected_id,
+                            "complete": True,
+                            "evidence_status": "proposal_graph_committed",
+                            "raw_statuses": ["proposal_graph_committed"],
+                            "source_count": 1,
+                            "span_count": 1,
+                            "papernexus_provenance": True,
+                            "committed_subgraph_id": proposal_support.get("committed_subgraph_id"),
+                        }
+                    )
+                else:
+                    missing.append(f"selected idea fragment {selected_id} with PaperNexus provenance, source record, and source span")
             if any(row["evidence_status"] == "source_backed" and not row["raw_statuses"] for row in supported):
                 warnings.append("evidence status inferred from PaperNexus provenance plus source/span records")
+
+    code_support = code_transfer_support(base, packet if isinstance(packet, dict) else None, selected_id)
+    if code_support.get("complete"):
+        missing = [
+            item
+            for item in missing
+            if item
+            not in {
+                f"source-backed evidence for selected idea fragment {selected_id}",
+                f"selected idea fragment {selected_id} with PaperNexus provenance, source record, and source span",
+            }
+        ]
+        supported.append(
+            {
+                "fragment_id": selected_id,
+                "complete": True,
+                "evidence_status": "paper_code_transfer_static_support",
+                "raw_statuses": ["paper_code_transfer_static_support"],
+                "source_count": len(code_support.get("matched_mechanism_refs") or []),
+                "span_count": len(code_support.get("matched_migration_refs") or []),
+                "papernexus_provenance": False,
+                "code_transfer_support": code_support,
+            }
+        )
+        warnings.append(
+            "selected idea fragment support uses paper-code static evidence; this is not PaperNexus graph-grounded novelty evidence"
+        )
 
     return {
         "schema_version": 1,
@@ -296,6 +483,7 @@ def lint_idea_support(
         "warnings": warnings,
         "packet_path": relpath(base, packet_path),
         "evidence_export_path": relpath(base, evidence_path) if evidence_path else None,
+        "proposal_graph_support": proposal_support,
         "supported_fragments": supported,
     }
 

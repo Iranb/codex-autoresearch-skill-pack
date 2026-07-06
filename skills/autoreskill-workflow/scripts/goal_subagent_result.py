@@ -9,6 +9,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from loop_trace import append_trace
+
 
 def now() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -94,6 +96,23 @@ def main() -> None:
             "stage": packet.get("stage"),
             "action": "subagent_result",
             "details": {**packet["subagent_result"], "job_id": args.job_id, "queue": queue_name},
+        },
+    )
+    append_trace(
+        base,
+        event="subagent_result",
+        stage=str(packet.get("stage") or ""),
+        job_id=args.job_id,
+        authority="scripts/goal_subagent_result.py",
+        decision=args.status,
+        evidence_refs=args.artifact,
+        reason=args.error or args.summary,
+        details={
+            "agent_id": args.agent_id,
+            "queue": queue_name,
+            "status": args.status,
+            "summary": args.summary,
+            "error": args.error or None,
         },
     )
     print(json.dumps({"ok": True, "packet": str(packet_path), "queue": queue_name}, indent=2, ensure_ascii=False))

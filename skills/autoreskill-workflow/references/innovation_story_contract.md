@@ -7,9 +7,10 @@ Every AutoResearch project maintains a project-bound user-facing innovation stor
   00_STORYLINE_DESIGN.md
   01_METHOD_INNOVATION_STORY.md
   02_CLAIM_EVIDENCE_MAP.md
+  03_CODE_TRANSFER_STORY.md      # optional, only when paper-code migration is in scope
 ```
 
-This directory is for the user. It is a derived explanation layer, not the source of truth for stage advancement. Machine-readable authorities remain `EXPERIMENT_IDEA_POOL.json`, `IDEA_NOVELTY_VENUE_SCORECARD.json`, `IDEA_DECISION_LEDGER.json`, `INNOVATION_PACKET.json`, `TRACK_PLAN_MATRIX.json`, `EXPERIMENT_REVIEW_PACKET.json`, `EXPERIMENT_LEDGER.json`, `IDEA_OUTCOME_SUMMARY.json`, `CLAIM_EVIDENCE_MATRIX.md`, and the review/package gates.
+This directory is for the user. It is a derived explanation layer, not the source of truth for stage advancement. Machine-readable authorities remain `EXPERIMENT_IDEA_POOL.json`, `IDEA_NOVELTY_VENUE_SCORECARD.json`, `IDEA_DECISION_LEDGER.json`, `INNOVATION_PACKET.json`, `TRACK_PLAN_MATRIX.json`, `EXPERIMENT_REVIEW_PACKET.json`, `EXPERIMENT_LEDGER.json`, `IDEA_OUTCOME_SUMMARY.json`, `CLAIM_EVIDENCE_MATRIX.md`, paper-code transfer JSON artifacts when in scope, and the review/package gates.
 
 ## 00_STORYLINE_DESIGN.md
 
@@ -62,12 +63,26 @@ Required sections:
 - `Experiment Mapping`: which result or ablation supports which storyline step.
 - `Revision Notes`: how later results or review pressure changed the story.
 
+## 03_CODE_TRANSFER_STORY.md
+
+Purpose: explain paper/code survey, source-code reading, innovation extraction, and target-task migration in user-facing prose when that workflow is in scope.
+
+Required sections:
+
+- `Survey Scope`: target task, source lanes, year/venue/search scope, and exclusions.
+- `Candidate Funnel`: raw paper-code candidates, no-code/source-limited cases, valid repositories, mismatches, thin repos, benchmark-only repos, and project pages.
+- `Source Mechanisms`: source paper, repository evidence ref, active code path, mechanism summary, and what static source evidence can and cannot prove.
+- `Transfer Decisions`: direct-transfer, needs-adaptation, diagnostic-only, parked, killed, and source-limited decisions from `INNOVATION_MIGRATION_MATRIX.json`.
+- `Target Adaptation`: required code/protocol changes, baseline/metric/dataset deltas, and implementation route.
+- `Evidence Boundaries`: novelty risk, overlap risk, claim limits, and why repository validity is not effectiveness evidence.
+- `Validation Route`: falsifier, ablation or confirmation plan, and the promotion gate needed before writing strong claims.
+
 ## Stage Expectations
 
 - `ideation`: create or update `00_STORYLINE_DESIGN.md` from the selected story direction and lane evidence.
 - `idea_gate`: revise `00_STORYLINE_DESIGN.md` after idea selection, explicitly recording reviewer risks and belief shift.
-- `experiment_plan`: produce all three files, aligned to the selected idea and `INNOVATION_PACKET.json`; the selected paper story must retain the three-or-more innovation bundle from ideation and explain why the paper would collapse if any one point were removed.
+- `experiment_plan`: produce all three core files, aligned to the selected idea and `INNOVATION_PACKET.json`; the selected paper story must retain the three-or-more innovation bundle from ideation and explain why the paper would collapse if any one point were removed. If paper-code migration is in scope, also create or update `03_CODE_TRANSFER_STORY.md` from `PAPER_CODE_CANDIDATES.json`, `REPO_STATIC_EVIDENCE.json`, `CODE_MECHANISM_MAP.json`, and `INNOVATION_MIGRATION_MATRIX.json`.
 - `analysis`: update all three files after results, especially proof ladder, claim limits, idea outcome summary, failed/negative ideas, and experiment mapping.
-- `review_pressure`, `writing`, and `submission_ready`: keep the story synchronized with reviewer repairs, manuscript claims, citation evidence, and claim downgrades. The story must never be stronger than `IDEA_OUTCOME_SUMMARY.json` and `PAPER_CLAIM_VERIFICATION.json`.
+- `review_pressure`, `writing`, and `submission_ready`: keep the story synchronized with reviewer repairs, manuscript claims, citation evidence, paper-forensics findings, and claim downgrades. The story must never be stronger than `IDEA_OUTCOME_SUMMARY.json`, `PAPER_CLAIM_VERIFICATION.json`, and `PAPER_FORENSICS_REPORT.json`.
 
 Use `scripts/innovation_story_lint.py --project <project-root> --stage <stage>` before marking a story-bearing stage complete. The linter rejects placeholder text, missing sections, too-short files, and bullet-dominant files.

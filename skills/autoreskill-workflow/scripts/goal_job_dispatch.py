@@ -9,6 +9,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from loop_trace import append_trace
+
 
 REQUIRED_SEARCH_EQUALS = {
     "depth": "deep",
@@ -24,6 +26,7 @@ REQUIRED_SEARCH_EQUALS = {
     "processImports": False,
     "returnPartial": True,
     "persist": True,
+    "asyncLifecycle": "submit_progress_report",
 }
 
 REQUIRED_SEARCH_MIN_VALUES = {
@@ -126,9 +129,15 @@ def update_queue(base: Path, packet: dict[str, Any], status: str) -> None:
     data = rows(path)
     for row in data:
         if row.get("job_id") == packet.get("job_id"):
+            previous_status = str(row.get("status") or "")
             row["status"] = status
             row["updated_at"] = now()
             row["dispatch_prompt"] = f".autoreskill/job_packets/{packet['job_id']}.prompt.md"
+            if status == "running" and previous_status != "running":
+                try:
+                    row["attempts"] = int(row.get("attempts", 0) or 0) + 1
+                except (TypeError, ValueError):
+                    row["attempts"] = 1
     write_rows(path, data)
 
 
@@ -138,12 +147,18 @@ def bullet(items: list[Any]) -> str:
     return "\n".join(f"- `{item}`" if isinstance(item, str) else f"- `{json.dumps(item, ensure_ascii=False)}`" for item in items)
 
 
+def json_block(value: Any) -> str:
+    if not value:
+        return "- none"
+    return "```json\n" + json.dumps(value, indent=2, ensure_ascii=False) + "\n```"
+
+
 def has_literature_search(calls: list[Any]) -> bool:
     for call in calls:
         if not isinstance(call, dict) or call.get("tool") != "literature_discovery":
             continue
         args = call.get("args")
-        if isinstance(args, dict) and args.get("operation") == "search":
+        if isinstance(args, dict) and args.get("operation") in {"submit", "search"}:
             return True
     return False
 
@@ -158,13 +173,14 @@ def render_prompt(project: str, packet: dict[str, Any], mode: str) -> str:
     constraints = packet.get("constraints") or []
     outputs = packet.get("outputs") or []
     acceptance = packet.get("acceptance_criteria") or []
+    acceptance_contract = packet.get("acceptance_contract") or {}
     inputs = packet.get("inputs") or []
     discovery_closure = ""
     if has_literature_search(mcp_calls):
         discovery_closure = """
 ## Post-Discovery Screening And Graph Reading
 
-For every useful `literature_discovery(operation="search")` result:
+For every useful broad `literature_discovery(operation="submit")` result, poll `progress` and capture the terminal `report`; for small targeted `search` results, capture the returned packet directly:
 
 1. Capture the raw discovery result.
 2. Run candidate triage and write `papernexus/PAPER_SELECTION_SCORECARD.json`.
@@ -245,6 +261,10 @@ Run capture commands only after the corresponding MCP or role-pass result exists
 
 {bullet(acceptance)}
 
+## Structured Acceptance Contract
+
+{json_block(acceptance_contract)}
+
 ## Completion Update
 
 After successful execution:
@@ -261,7 +281,7 @@ python <workflow-skill-root>/scripts/goal_job_update.py --project "{Path(project
 """
 
 
-def literature_discovery_search_violations(packet: dict[str, Any]) -> list[str]:
+def literature_discovery_discovery_violations(packet: dict[str, Any]) -> list[str]:
     violations: list[str] = []
     calls = packet.get("mcp_calls") or []
     if not isinstance(calls, list):
@@ -270,9 +290,19 @@ def literature_discovery_search_violations(packet: dict[str, Any]) -> list[str]:
         if not isinstance(call, dict) or call.get("tool") != "literature_discovery":
             continue
         args = call.get("args")
-        if not isinstance(args, dict) or args.get("operation") != "search":
+        if not isinstance(args, dict) or args.get("operation") not in {"submit", "search"}:
             continue
         label = f"mcp_calls[{index}].args"
+        if args.get("operation") == "search":
+            search_mode = str(args.get("searchMode") or args.get("mode") or "").lower()
+            max_candidates = args.get("maxCandidates")
+            bounded_targeted = (
+                args.get("targeted") is True
+                or args.get("targetedLookup") is True
+                or search_mode in {"targeted", "quick", "bounded"}
+            ) and (not isinstance(max_candidates, (int, float)) or max_candidates <= 1000)
+            if bounded_targeted:
+                continue
         for key, expected in REQUIRED_SEARCH_EQUALS.items():
             actual = args.get(key)
             if actual != expected:
@@ -297,10 +327,10 @@ def main() -> None:
     base = ar(args.project)
     packet_path = base / "job_packets" / f"{args.job_id}.json"
     packet = read_json(packet_path)
-    search_violations = literature_discovery_search_violations(packet)
+    search_violations = literature_discovery_discovery_violations(packet)
     if search_violations:
         raise SystemExit(
-            "refusing to dispatch narrow literature_discovery search job packet:\n"
+            "refusing to dispatch narrow literature_discovery job packet:\n"
             + "\n".join(f"- {item}" for item in search_violations)
         )
     prompt_path = base / "job_packets" / f"{args.job_id}.prompt.md"
@@ -345,6 +375,23 @@ def main() -> None:
                 "path": str(prompt_path),
                 "subagent_request": str(subagent_request) if subagent_request else None,
             },
+        },
+    )
+    append_trace(
+        base,
+        event="job_dispatch_prompt",
+        stage=str(packet.get("stage") or ""),
+        job_id=args.job_id,
+        authority="scripts/goal_job_dispatch.py",
+        decision="running" if args.mark_running else "prompt_ready",
+        evidence_refs=[str(prompt_path), str(packet_path), *([str(subagent_request)] if subagent_request else [])],
+        next_action=str(packet.get("goal") or ""),
+        details={
+            "mode": args.mode,
+            "role": packet.get("role"),
+            "skill": packet.get("skill"),
+            "mark_running": args.mark_running,
+            "has_acceptance_contract": bool(packet.get("acceptance_contract")),
         },
     )
     print(

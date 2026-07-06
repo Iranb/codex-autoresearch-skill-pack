@@ -29,6 +29,23 @@ PAPER_REQUIRED_KEYS = [
     "ablation_plan",
     "falsifier",
 ]
+INNOVATION_BUNDLE_REQUIRED_KEYS = [
+    "name",
+    "role",
+    "source_role",
+    "source_evidence_refs",
+    "closest_prior_delta",
+    "paper_story_role",
+    "validation_plan",
+]
+PAPER_STORYLINE_REQUIRED_KEYS = [
+    "opening_tension",
+    "hidden_cause",
+    "method_as_resolution",
+    "proof_ladder",
+    "reviewer_risk_and_defense",
+    "narrative_spine",
+]
 VALID_CONTRIBUTION_TYPES = {"method", "benchmark", "dataset", "evaluation", "analysis", "theory", "system", "engineering_method"}
 CODE_PAPER_TYPES = {"method", "benchmark", "dataset", "evaluation", "system", "engineering_method"}
 ENGINEERING_ONLY_TYPES = {"engineering_support", "infrastructure", "tooling", "dashboard", "script"}
@@ -43,6 +60,27 @@ VALID_METHOD_SOURCE_ROLES = {
 }
 TARGET_DOMAIN_ONLY_ROLES = {"target_domain", "current_field", "target_domain_only"}
 METHOD_BEARING_CONTRIBUTIONS = {"method", "engineering_method", "system"}
+INNOVATION_POINT_ROLES = {
+    "problem_definition",
+    "protocol",
+    "benchmark",
+    "evaluation",
+    "metric",
+    "method_mechanism",
+    "algorithm",
+    "model",
+    "architecture",
+    "training_mechanism",
+    "training_integration",
+    "system_integration",
+    "theory_analysis",
+    "ablation",
+    "validation",
+    "analysis",
+}
+PROBLEM_PROTOCOL_ROLES = {"problem_definition", "protocol", "benchmark", "evaluation", "metric"}
+METHOD_ROLES = {"method_mechanism", "algorithm", "model", "architecture", "training_mechanism"}
+PROOF_INTEGRATION_ROLES = {"training_integration", "system_integration", "theory_analysis", "ablation", "validation", "analysis"}
 GOE_REQUIRED_FIELDS = [
     "goe_path_refs",
     "closest_prior_delta",
@@ -142,6 +180,85 @@ def degraded_gate_approved(gate: dict[str, Any]) -> bool:
 
 def normalized_role(value: Any) -> str:
     return str(value or "").strip().lower().replace("-", "_").replace(" ", "_")
+
+
+def as_list(value: Any) -> list[Any]:
+    if isinstance(value, list):
+        return value
+    if isinstance(value, tuple):
+        return list(value)
+    return []
+
+
+def validate_paper_story_bundle(idea: dict[str, Any], prefix: str, missing: list[str]) -> bool:
+    paper = idea.get("paper_contribution") if isinstance(idea.get("paper_contribution"), dict) else {}
+    ok = True
+    bundle = idea.get("innovation_bundle") or paper.get("innovation_bundle") or paper.get("innovation_points")
+    points = as_list(bundle)
+    if len(points) < 3:
+        missing.append(f"{prefix}.paper_contribution.innovation_bundle must contain at least 3 paper-level innovation points")
+        ok = False
+
+    roles: set[str] = set()
+    source_roles: set[str] = set()
+    for point_index, point in enumerate(points):
+        point_prefix = f"{prefix}.paper_contribution.innovation_bundle[{point_index}]"
+        if not isinstance(point, dict):
+            missing.append(f"{point_prefix} must be an object")
+            ok = False
+            continue
+        for key in INNOVATION_BUNDLE_REQUIRED_KEYS:
+            if not present(point.get(key)):
+                missing.append(f"{point_prefix}.{key}")
+                ok = False
+        role = normalized_role(point.get("role"))
+        source_role = normalized_role(point.get("source_role"))
+        if role:
+            roles.add(role)
+            if role not in INNOVATION_POINT_ROLES:
+                missing.append(f"{point_prefix}.role must be one of {sorted(INNOVATION_POINT_ROLES)}")
+                ok = False
+        if source_role:
+            source_roles.add(source_role)
+            if source_role in TARGET_DOMAIN_ONLY_ROLES and not present(point.get("current_field_absence_evidence")):
+                missing.append(f"{point_prefix}.current_field_absence_evidence required for target-domain-only innovation point")
+                ok = False
+            elif source_role not in VALID_METHOD_SOURCE_ROLES and source_role not in TARGET_DOMAIN_ONLY_ROLES and source_role != "target_domain_anchor":
+                missing.append(f"{point_prefix}.source_role must identify target-domain anchor or near/far/cross-lane transfer evidence")
+                ok = False
+
+    if points:
+        if not roles & PROBLEM_PROTOCOL_ROLES:
+            missing.append(f"{prefix}.paper_contribution.innovation_bundle must include a problem/protocol/evaluation innovation point")
+            ok = False
+        if not roles & METHOD_ROLES:
+            missing.append(f"{prefix}.paper_contribution.innovation_bundle must include a method/mechanism innovation point")
+            ok = False
+        if not roles & PROOF_INTEGRATION_ROLES:
+            missing.append(f"{prefix}.paper_contribution.innovation_bundle must include a training/integration/analysis/validation innovation point")
+            ok = False
+        if not (source_roles & VALID_METHOD_SOURCE_ROLES):
+            missing.append(f"{prefix}.paper_contribution.innovation_bundle must include at least one near/far/cross-lane or external transfer source")
+            ok = False
+
+    storyline = idea.get("paper_storyline") or paper.get("storyline") or paper.get("paper_storyline")
+    if not isinstance(storyline, dict):
+        missing.append(f"{prefix}.paper_contribution.storyline")
+        return False
+    for key in PAPER_STORYLINE_REQUIRED_KEYS:
+        if not present(storyline.get(key)):
+            missing.append(f"{prefix}.paper_contribution.storyline.{key}")
+            ok = False
+    spine = storyline.get("narrative_spine")
+    if isinstance(spine, list):
+        if len([item for item in spine if present(item)]) < 5:
+            missing.append(f"{prefix}.paper_contribution.storyline.narrative_spine must contain 5-7 sequential story steps")
+            ok = False
+    elif isinstance(spine, str):
+        if len([part for part in spine.replace("\n", " ").split(".") if part.strip()]) < 5:
+            missing.append(f"{prefix}.paper_contribution.storyline.narrative_spine must contain 5-7 sequential story steps")
+            ok = False
+    return ok
 
 
 def lint(pool: Any, require_selected: bool, project: str | None = None) -> dict[str, Any]:
@@ -301,6 +418,8 @@ def lint(pool: Any, require_selected: bool, project: str | None = None) -> dict[
                     paper_ok = False
             if trueish(paper.get("standalone_engineering")):
                 missing.append(f"{prefix}.paper_contribution.standalone_engineering must be false")
+                paper_ok = False
+            if not validate_paper_story_bundle(idea, prefix, missing):
                 paper_ok = False
         if paper_ok:
             paper_ready_count += 1

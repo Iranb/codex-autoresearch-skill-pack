@@ -48,6 +48,28 @@ def normalized(value: Any) -> str:
     return str(value or "").strip().lower()
 
 
+def rows_from_payload(payload: Any) -> list[dict[str, Any]]:
+    if isinstance(payload, dict):
+        for key in ["tracks", "rows", "track_plans"]:
+            if isinstance(payload.get(key), list):
+                return [row for row in payload[key] if isinstance(row, dict)]
+    if isinstance(payload, list):
+        return [row for row in payload if isinstance(row, dict)]
+    return []
+
+
+def active_track_ids(base: Path) -> set[str]:
+    matrix = read_json(base / "orchestrator/TRACK_PLAN_MATRIX.json", {}) or {}
+    active: set[str] = set()
+    for row in rows_from_payload(matrix):
+        track_id = str(row.get("track_id") or "").strip()
+        launch_status = normalized(row.get("launch_status"))
+        selected = row.get("selected_for_review") is True
+        if track_id and (launch_status == "ready" or selected):
+            active.add(track_id)
+    return active
+
+
 def proof_status(remote: dict[str, Any]) -> str:
     for key in ["status", "smoke_status", "result_status", "run_status"]:
         status = normalized(remote.get(key))
@@ -69,12 +91,17 @@ def lint(project: str) -> dict[str, Any]:
     base = ar(project)
     missing: list[str] = []
     warnings: list[str] = []
+    active_tracks = active_track_ids(base)
     manifests = sorted(base.glob("coder/experiments/**/EXPERIMENT_MANIFEST.json"))
     if not manifests:
         missing.append("coder/experiments/**/EXPERIMENT_MANIFEST.json")
     for manifest_path in manifests:
         manifest = read_json(manifest_path, {}) or {}
         label = rel(base, manifest_path)
+        track_id = str(manifest.get("track_id") or manifest_path.parent.parent.name or "").strip()
+        if active_tracks and track_id and track_id not in active_tracks:
+            warnings.append(f"{label}: skipped inactive track {track_id}")
+            continue
         if manifest.get("fixture") is True:
             missing.append(f"{label} fixture must be false for code readiness")
         kind = proof_kind(manifest, {})

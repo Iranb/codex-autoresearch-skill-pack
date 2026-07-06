@@ -10,6 +10,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from loop_trace import append_trace
+
 
 STAGES = [
     "init",
@@ -64,6 +66,8 @@ NEXT_ACTIONS = {
 
 DEFAULT_CORPUS = os.environ.get("AUTORESEARCH_DEFAULT_CORPUS", "default-papernexus-corpus")
 DEFAULT_TARGET_VENUE = "unspecified_top_tier"
+DEFAULT_GOAL_TYPE = "paper_producing_top_tier"
+DEFAULT_CLAIM_MODE = "strong_paper_claims"
 
 
 def now() -> str:
@@ -104,6 +108,8 @@ def default_policy() -> dict[str, Any]:
     return {
         "schema_version": 1,
         "autonomy_level": "full_auto_bounded",
+        "goal_type": DEFAULT_GOAL_TYPE,
+        "claim_mode": DEFAULT_CLAIM_MODE,
         "allow_provider_evidence": True,
         "allow_live_discovery": True,
         "allow_literature_discovery": True,
@@ -119,6 +125,7 @@ def default_policy() -> dict[str, Any]:
         "max_repair_attempts_per_blocker": 5,
         "max_stage_iterations": 16,
         "async_poll_interval_minutes": 5,
+        "experiment_monitor_default_interval_minutes": 30,
         "repair_retry_interval_minutes": 5,
         "experiment_launch_requires_baseline_protocol_lint": True,
         "experiment_requires_baseline_clone_patch": True,
@@ -181,6 +188,9 @@ def initialize(args: argparse.Namespace) -> None:
         "next_action": NEXT_ACTIONS["init"],
         "blocking_reason": None,
         "autonomy_level": args.autonomy,
+        "goal_type": args.goal_type,
+        "claim_mode": args.claim_mode,
+        "project_agents_policy_hash": None,
         "iteration": 0,
         "updated_at": now(),
     }
@@ -202,6 +212,16 @@ def initialize(args: argparse.Namespace) -> None:
     if not memory.exists():
         memory.write_text(f"# AutoResearch Memory\n\nGoal: {args.goal}\n", encoding="utf-8")
     append_decision(base, "init", "initialized", {"goal": args.goal, "corpus": args.corpus})
+    append_trace(
+        base,
+        event="initialized",
+        stage="init",
+        authority="scripts/goal_state.py",
+        decision=NEXT_ACTIONS["init"],
+        next_action=NEXT_ACTIONS["init"],
+        reason=args.goal,
+        details={"corpus": args.corpus, "target_venue": args.venue, "goal_type": args.goal_type, "claim_mode": args.claim_mode},
+    )
     print(json.dumps(state, indent=2, ensure_ascii=False))
 
 
@@ -210,6 +230,55 @@ def append_decision(base: Path, stage: str, action: str, details: dict[str, Any]
         base / "decision_log.jsonl",
         {"ts": now(), "stage": stage, "action": action, "details": details},
     )
+
+
+def trace_details(details: dict[str, Any]) -> dict[str, Any]:
+    compact: dict[str, Any] = {}
+    for key in ["from", "to", "handoff", "job_packet", "wakeup"]:
+        if key in details:
+            compact[key] = details[key]
+
+    blocker = details.get("blocker")
+    if isinstance(blocker, dict):
+        compact["blocker"] = {
+            "stage": blocker.get("stage"),
+            "class": blocker.get("class"),
+            "recommended_action": blocker.get("recommended_action"),
+            "reason": blocker.get("reason"),
+        }
+
+    job = details.get("job")
+    if isinstance(job, dict):
+        compact["job"] = {
+            "job_id": job.get("job_id"),
+            "kind": job.get("kind"),
+            "stage": job.get("stage"),
+            "action": job.get("action"),
+            "status": job.get("status"),
+            "reused": bool(job.get("_reused")),
+        }
+
+    contract = details.get("contract")
+    if isinstance(contract, dict):
+        compact["contract"] = {
+            "stage": contract.get("stage"),
+            "complete": contract.get("complete"),
+            "contract_source": contract.get("contract_source"),
+            "missing_count": len(contract.get("missing") or []),
+            "warning_count": len(contract.get("warnings") or []),
+        }
+    return compact
+
+
+def trace_reason(details: dict[str, Any]) -> str | None:
+    blocker = details.get("blocker")
+    if isinstance(blocker, dict) and blocker.get("reason"):
+        return str(blocker.get("reason"))
+    contract = details.get("contract")
+    if isinstance(contract, dict) and contract.get("missing"):
+        return "; ".join(str(item) for item in contract.get("missing") or [])
+    reason = details.get("reason")
+    return str(reason) if reason else None
 
 
 def load_state(project: str) -> dict[str, Any]:
@@ -224,6 +293,16 @@ def save_state(project: str, state: dict[str, Any], action: str, details: dict[s
     state["iteration"] = int(state.get("iteration", 0)) + 1
     write_json(ar(project) / "goal_state.json", state)
     append_decision(ar(project), str(state.get("stage", "unknown")), action, details)
+    append_trace(
+        ar(project),
+        event=action,
+        stage=str(state.get("stage", "unknown")),
+        authority="scripts/goal_state.py",
+        decision=str(state.get("next_action") or action),
+        next_action=str(state.get("next_action") or ""),
+        reason=trace_reason(details),
+        details=trace_details(details),
+    )
 
 
 def status(args: argparse.Namespace) -> None:
@@ -283,6 +362,8 @@ def main() -> None:
     p.add_argument("--corpus", default=DEFAULT_CORPUS)
     p.add_argument("--venue", default=DEFAULT_TARGET_VENUE)
     p.add_argument("--autonomy", default="full_auto_bounded")
+    p.add_argument("--goal-type", default=DEFAULT_GOAL_TYPE)
+    p.add_argument("--claim-mode", default=DEFAULT_CLAIM_MODE)
     p.set_defaults(func=initialize)
 
     p = sub.add_parser("status")

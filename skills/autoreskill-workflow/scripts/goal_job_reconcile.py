@@ -9,6 +9,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
+from loop_trace import append_trace
+
 
 def now() -> datetime:
     return datetime.now(timezone.utc)
@@ -103,6 +105,20 @@ def main() -> None:
                 },
             },
         )
+        changed_count = len(results["repair"]) + len(results["async"])
+        if changed_count:
+            append_trace(
+                base,
+                event="job_reconcile",
+                stage="workflow_guard",
+                authority="scripts/goal_job_reconcile.py",
+                decision="stale_jobs_reconciled",
+                details={
+                    "stale_minutes": args.stale_minutes,
+                    "repair_changed": len(results["repair"]),
+                    "async_changed": len(results["async"]),
+                },
+            )
     print(json.dumps({"ok": True, "dry_run": args.dry_run, "changes": results}, indent=2, ensure_ascii=False))
 
 

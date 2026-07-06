@@ -13,7 +13,11 @@ This skill turns hard gates into bounded automatic actions. It does not weaken e
 
 - `auto_repairable`: missing fields, stale projection, malformed JSON, missing artifact index.
 - `degradable`: missing optional PaperNexus feature, sparse cost evidence, single-seed result, stale cached graph evidence.
-- `async_wait`: import queue, remote experiment, long review repair, queued sub-agent.
+- `async_wait`: only live external waits: PaperNexus literature discovery,
+  PaperNexus graph import or authoritative sync, and experiment runtime/resource
+  waits. Long review repair, queued sub-agent work, planning, writing, lint, and
+  ready local repair are `auto_repairable` or dispatch states, not heartbeat
+  waits.
 - `hard_stop`: no PaperNexus and no cached evidence, budget exceeded, license blocked, unsafe experiment, no viable claim.
 
 ## Scripts

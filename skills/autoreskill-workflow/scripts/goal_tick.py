@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import shlex
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -17,11 +18,60 @@ from goal_state import NEXT_ACTIONS, OWNERS, STAGES, ar, load_state, next_stage,
 
 SKILLS_ROOT = Path(__file__).resolve().parents[2]
 INNOVATION_STORY_STAGES = {"ideation", "idea_gate", "experiment_plan", "analysis", "review_pressure", "writing", "submission_ready"}
+PAPER_CODE_TRANSFER_STAGES = {"literature_review", "ideation", "idea_gate", "experiment_plan"}
+BASELINE_REPORT_ALIGNMENT_STAGES = {"experiment_plan", "code", "experiment", "analysis", "review_pressure", "writing", "submission_ready"}
+CRITICAL_EVALUATOR_STAGES = {"idea_gate", "experiment_plan", "analysis", "review_pressure", "writing", "submission_ready"}
 INNOVATION_STORY_FILES = [
     ".autoreskill/user_view/innovation_story/00_STORYLINE_DESIGN.md",
     ".autoreskill/user_view/innovation_story/01_METHOD_INNOVATION_STORY.md",
     ".autoreskill/user_view/innovation_story/02_CLAIM_EVIDENCE_MAP.md",
 ]
+PAPER_CODE_TRANSFER_FILES = [
+    ".autoreskill/survey/PAPER_CODE_SURVEY_PLAN.json",
+    ".autoreskill/survey/PAPER_CODE_CANDIDATES.json",
+    ".autoreskill/survey/REPO_STATIC_EVIDENCE.json",
+    ".autoreskill/survey/CODE_MECHANISM_MAP.json",
+    ".autoreskill/ideation/INNOVATION_MIGRATION_MATRIX.json",
+    ".autoreskill/user_view/innovation_story/03_CODE_TRANSFER_STORY.md",
+]
+PAPER_CODE_TRANSFER_ARTIFACTS = [
+    "survey/PAPER_CODE_SURVEY_PLAN.json",
+    "survey/PAPER_CODE_CANDIDATES.json",
+    "survey/REPO_STATIC_EVIDENCE.json",
+    "survey/CODE_MECHANISM_MAP.json",
+    "ideation/INNOVATION_MIGRATION_MATRIX.json",
+]
+PAPER_CODE_TOKENS = (
+    "paper_code_transfer_lint",
+    "paper-code",
+    "code survey",
+    "code analysis",
+    "source code",
+    "source-code",
+    "repository validation",
+    "repo",
+    "repos",
+    "repository",
+    "repositories",
+    "github",
+    "源码",
+    "代码",
+    "仓库",
+)
+PAPER_CODE_INTENT_TOKENS = (
+    "survey",
+    "analysis",
+    "analyze",
+    "validation",
+    "innovation",
+    "transfer",
+    "migration",
+    "调研",
+    "分析",
+    "验证",
+    "创新",
+    "迁移",
+)
 
 
 def script_cmd(skill: str, script: str, args: str = "") -> str:
@@ -37,9 +87,43 @@ def has_literature_search(calls: list[Any]) -> bool:
         if not isinstance(call, dict) or call.get("tool") != "literature_discovery":
             continue
         args = call.get("args")
-        if isinstance(args, dict) and args.get("operation") == "search":
+        if isinstance(args, dict) and args.get("operation") in {"search", "submit"}:
             return True
     return False
+
+
+def contains_trigger_token(text: str, token: str) -> bool:
+    if token.isascii():
+        return re.search(rf"(?<![a-z0-9_]){re.escape(token)}(?![a-z0-9_])", text) is not None
+    return token in text
+
+
+def has_paper_code_transfer_request(base: Path, state: dict[str, Any], job: dict[str, Any], contract: dict[str, Any]) -> bool:
+    if any((base / rel).exists() for rel in PAPER_CODE_TRANSFER_ARTIFACTS):
+        return True
+    text_parts = [
+        state.get("goal"),
+        state.get("objective"),
+        state.get("research_goal"),
+        state.get("topic"),
+        state.get("next_action"),
+        job.get("action"),
+        job.get("kind"),
+        job.get("reason"),
+        job.get("notes"),
+        contract.get("contract_source"),
+        contract.get("missing"),
+        contract.get("warnings"),
+    ]
+    text = " ".join(
+        json.dumps(part, ensure_ascii=False, default=str) if isinstance(part, (dict, list)) else str(part or "")
+        for part in text_parts
+    ).lower()
+    if "paper_code_transfer_lint" in text:
+        return True
+    return any(contains_trigger_token(text, token) for token in PAPER_CODE_TOKENS) and any(
+        contains_trigger_token(text, token) for token in PAPER_CODE_INTENT_TOKENS
+    )
 
 
 def append_unique(items: list[str], additions: list[str]) -> list[str]:
@@ -48,6 +132,56 @@ def append_unique(items: list[str], additions: list[str]) -> list[str]:
         if item not in out:
             out.append(item)
     return out
+
+
+def unique_strings(items: list[Any]) -> list[str]:
+    out: list[str] = []
+    for item in items:
+        text = str(item)
+        if text not in out:
+            out.append(text)
+    return out
+
+
+def acceptance_contract_for_packet(
+    stage: str,
+    outputs: list[Any],
+    capture_commands: list[Any],
+    constraints: list[str],
+    acceptance_criteria: list[str],
+    *,
+    literature_search: bool,
+    paper_code_transfer_requested: bool,
+) -> dict[str, Any]:
+    lint_command = script_cmd("autoreskill-workflow", "contract_lint.py", f"--project <project-root> --stage {stage}")
+    lint_commands = [lint_command]
+    lint_commands.extend(str(command) for command in capture_commands if "_lint.py" in str(command) or "contract_lint.py" in str(command))
+
+    claim_boundaries = [
+        "Claims must be bounded by captured citations, PaperNexus evidence, or matched experiment artifacts.",
+        "Unsupported claims must become explicit blockers, downgraded claims, or limitations.",
+    ]
+    if literature_search:
+        claim_boundaries.append("Raw discovery rows are recall evidence only until graph/material evidence is captured.")
+    if stage in {"code", "experiment", "analysis", "review_pressure", "writing", "submission_ready"}:
+        claim_boundaries.append("Candidate, smoke, or diagnostic runs cannot support effectiveness claims.")
+    if paper_code_transfer_requested:
+        claim_boundaries.append("Repository evidence can support mechanism feasibility only; performance claims require matched experiments.")
+
+    evaluator_commands: list[str] = []
+    if stage in CRITICAL_EVALUATOR_STAGES:
+        evaluator_commands.append(
+            "Before advancing after claim, selected-idea, promoted-result, or manuscript-readiness changes, prepare an Evaluator handoff with read-only inputs and evaluator-only write scope."
+        )
+
+    return {
+        "must_produce": unique_strings(outputs),
+        "must_pass": unique_strings(lint_commands),
+        "must_not_violate": unique_strings(constraints),
+        "claim_boundaries": unique_strings(claim_boundaries),
+        "evaluator_commands": evaluator_commands,
+        "done_when": unique_strings(acceptance_criteria),
+    }
 
 
 def now() -> datetime:
@@ -90,6 +224,48 @@ def write_rows(path: Path, data: list[dict[str, Any]]) -> None:
     path.write_text("".join(json.dumps(row, ensure_ascii=False) + "\n" for row in data), encoding="utf-8")
 
 
+def active_retry_override(base: Path, args: argparse.Namespace) -> dict[str, Any] | None:
+    if getattr(args, "force_due_repair", False):
+        return {
+            "schema_version": 1,
+            "enabled": True,
+            "kind": "repair",
+            "job_id": getattr(args, "force_job_id", None),
+            "reason": "cli_force_due_repair",
+            "source": "goal_tick_cli",
+        }
+
+    path = base / "control" / "ACTIVE_RETRY_OVERRIDE.json"
+    data = read_json(path, {})
+    if not isinstance(data, dict) or not data.get("enabled", False):
+        return None
+    expires_at = parse_iso_datetime(data.get("expires_at"))
+    if expires_at is not None and expires_at <= now():
+        return None
+    return data
+
+
+def retry_override_matches(job: dict[str, Any], override: dict[str, Any] | None, kind: str) -> bool:
+    if not override:
+        return False
+    override_kind = str(override.get("kind") or "repair")
+    if override_kind not in {"any", kind}:
+        return False
+    job_id = override.get("job_id")
+    if job_id and str(job.get("job_id")) != str(job_id):
+        return False
+    stage = override.get("stage")
+    if stage and str(job.get("stage")) != str(stage):
+        return False
+    action = override.get("action")
+    if action and str(job.get("action")) != str(action):
+        return False
+    reason_contains = override.get("reason_contains")
+    if reason_contains and str(reason_contains) not in str(job.get("reason") or ""):
+        return False
+    return True
+
+
 def bounded_minutes(value: Any, default: int, *, minimum: int = 1, maximum: int = 24 * 60) -> int:
     try:
         parsed = int(float(value))
@@ -102,6 +278,588 @@ def poll_delay_minutes(policy: dict[str, Any], kind: str) -> int:
     if kind == "async":
         return bounded_minutes(policy.get("async_poll_interval_minutes"), 5)
     return bounded_minutes(policy.get("repair_retry_interval_minutes"), 5)
+
+
+COMPLETE_STATES = {"complete", "completed", "ready", "succeeded", "success", "superseded", "not_required", "not-required", "none", "skipped"}
+FAILED_STATES = {"failed", "error", "errored", "cancelled", "canceled"}
+RUNNING_STATES = {"running", "processing", "in_progress", "fast-commit", "fast_commit", "semantic", "authoritative-sync", "authoritative_sync"}
+QUEUED_STATES = {"pending", "queued", "submitted", "waiting"}
+ASYNC_HEARTBEAT_ACTIONS = {"poll_literature_discovery", "poll_graph_import_sync", "poll_experiment_run"}
+EXPERIMENT_ACTIVE_STATUSES = {
+    "active",
+    "queued",
+    "pending",
+    "submitted",
+    "submitting",
+    "launching",
+    "starting",
+    "started",
+    "running",
+    "processing",
+    "in_progress",
+    "submitted_running",
+    "running_or_queued",
+    "bjtu_hpc_running_or_queued",
+    "waiting_for_gpu",
+    "waiting_for_gpu_idle",
+    "waiting_for_resource",
+    "guarded_waiting",
+    "resource_wait",
+    "active_resource_wait",
+    "active_experiment_monitor",
+    "external_live_wait",
+    "training",
+    "training_active",
+    "training_or_queued",
+    "parallel_training_active",
+    "parallel_training_or_queued",
+    "non_bjtu_parallel_training_active",
+    "non_bjtu_parallel_training_or_queued",
+    "bjtu_parallel_training_active",
+    "bjtu_parallel_training_or_queued",
+    "bjtu_parallel_retry_running_or_queued",
+}
+EXPERIMENT_IDLE_STATUSES = {
+    "idle",
+    "resource_idle",
+    "gpu_idle_launch_ready",
+    "launch_ready",
+    "ready_to_launch",
+    "ready_for_launch",
+    "repair_ready",
+    "no_active_run",
+    "no_active_runs",
+    "no_live_run",
+    "no_live_runs",
+    "no_active_task",
+    "no_active_tasks",
+    "no_active_training",
+    "all_runs_terminal",
+    "terminal_no_runtime_wait",
+    "terminal_no_next_heartbeat",
+}
+EXPERIMENT_IDLE_MARKERS = (
+    "no active run",
+    "no active runs",
+    "no live run",
+    "no live runs",
+    "no live track",
+    "no active training",
+    "no experiment process",
+    "no runtime process",
+    "all runs terminal",
+    "all experiments terminal",
+    "gpu idle and no active",
+    "resource idle and no active",
+)
+EXPERIMENT_BUSY_MARKERS = (
+    "remains active",
+    "remain active",
+    "runs remain active",
+    "active with",
+    "active in",
+    "running",
+    "training",
+    "queued",
+    "pending",
+    "submitted",
+    "launching",
+    "starting",
+    "waiting_for",
+    "waiting for",
+    "resource_wait",
+    "resource wait",
+    "external_live_wait",
+    "external live wait",
+)
+EXPERIMENT_TERMINAL_STATUSES = COMPLETE_STATES | FAILED_STATES | {
+    "terminal",
+    "done",
+    "finished",
+    "completed_terminal",
+    "completed_terminal_no_summary",
+    "completed_terminal_log_metrics_no_summary",
+    "completed_terminal_repair01_log_metrics_no_summary",
+    "completed_negative_v3_not_promoted",
+    "terminal_no_runtime_wait",
+    "terminal_no_next_heartbeat",
+    "failed_runtime_index_mapping_no_summary",
+    "failed_runtime_ulimit_no_summary",
+}
+EXPERIMENT_FAILURE_DECISIONS = {
+    "failed",
+    "failure",
+    "budget_stopped",
+    "not_promoted",
+    "rollback_to_best",
+    "repair",
+    "regressed",
+    "regression",
+}
+EXPERIMENT_REPAIR_ACTIONS = {
+    "repair_same_branch",
+    "repair",
+    "rerun_after_fix",
+    "run_ablation_or_confirmation",
+    "debug_fix",
+    "fix_and_rerun",
+}
+EXPERIMENT_REBUILD_ACTIONS = {
+    "switch_track",
+    "leap_idea",
+    "rebuild_idea",
+    "change_idea",
+    "change_innovation",
+    "negative_result_route",
+}
+MAX_FAILED_EXPERIMENT_REPAIRS = 2
+
+
+def parse_float(value: Any) -> float | None:
+    if isinstance(value, bool):
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def parse_int(value: Any) -> int | None:
+    parsed = parse_float(value)
+    if parsed is None:
+        return None
+    return int(parsed)
+
+
+def normalized_state(*values: Any) -> str:
+    for value in values:
+        text = str(value or "").strip().lower().replace("-", "_")
+        if text:
+            return text
+    return ""
+
+
+def import_task_id(row: dict[str, Any]) -> str:
+    return str(row.get("id") or row.get("taskId") or row.get("task_id") or "").strip()
+
+
+def import_task_status(row: dict[str, Any]) -> str:
+    progress = row.get("progress") if isinstance(row.get("progress"), dict) else {}
+    return normalized_state(row.get("status"), progress.get("status"))
+
+
+def import_task_stage(row: dict[str, Any]) -> str:
+    progress = row.get("progress") if isinstance(row.get("progress"), dict) else {}
+    return normalized_state(row.get("phase"), row.get("stage"), progress.get("stage"), progress.get("phase"))
+
+
+def import_task_percent(row: dict[str, Any]) -> float | None:
+    progress = row.get("progress") if isinstance(row.get("progress"), dict) else {}
+    for value in [row.get("percent"), row.get("stagePercent"), progress.get("percent"), progress.get("stagePercent")]:
+        parsed = parse_float(value)
+        if parsed is not None:
+            return parsed
+    return None
+
+
+def import_task_queue_position(row: dict[str, Any]) -> int | None:
+    progress = row.get("progress") if isinstance(row.get("progress"), dict) else {}
+    for value in [progress.get("queuePosition"), row.get("queuePosition")]:
+        parsed = parse_int(value)
+        if parsed is not None:
+            return parsed
+    return None
+
+
+def import_task_processed_rate_interval(row: dict[str, Any], default: int) -> tuple[int, str] | None:
+    progress = row.get("progress") if isinstance(row.get("progress"), dict) else {}
+    processed = parse_int(progress.get("processedUnits") or row.get("processedUnits"))
+    total = parse_int(progress.get("totalUnits") or row.get("totalUnits"))
+    percent = import_task_percent(row)
+    if total and processed is not None and total > 0:
+        remaining_units = max(0, total - processed)
+        if remaining_units == 0:
+            return bounded_minutes(default / 2, 1), f"selected task has processed {processed}/{total} units; next check follows the next stage boundary"
+        observed_units = max(1, processed)
+        interval = bounded_minutes((remaining_units / observed_units) * default, default)
+        return interval, f"selected task has processed {processed}/{total} units; interval estimated from remaining/processed unit ratio"
+    if percent is not None:
+        remaining_pct = max(0.0, 100.0 - percent)
+        if remaining_pct <= max(1.0, percent * 0.05):
+            return bounded_minutes(default / 2, 1), f"selected task is near a progress boundary at {percent:.1f}%; next check follows the boundary"
+        interval = bounded_minutes((remaining_pct / max(percent, 1.0)) * default, default)
+        return interval, f"selected task progress is {percent:.1f}%; interval estimated from remaining/progress ratio"
+    return None
+
+
+def import_queue_summary(payload: dict[str, Any]) -> dict[str, Any]:
+    for key in ["queueSnapshot", "queueSummary", "queue_summary", "summary"]:
+        value = payload.get(key)
+        if isinstance(value, dict):
+            return value
+    return {}
+
+
+def import_status_tasks(payload: dict[str, Any], key: str) -> list[dict[str, Any]]:
+    value = payload.get(key)
+    if isinstance(value, list):
+        return [row for row in value if isinstance(row, dict)]
+    if isinstance(value, dict):
+        return [value]
+    return []
+
+
+def raw_import_tasks(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    tasks: list[dict[str, Any]] = []
+    for key in ["targetTasks", "target_tasks", "selectedTasks", "selected_tasks", "relevantTasks", "relevant_tasks", "tasks", "task"]:
+        tasks.extend(import_status_tasks(payload, key))
+    for key in ["result", "data", "response", "payload"]:
+        value = payload.get(key)
+        if isinstance(value, dict):
+            tasks.extend(raw_import_tasks(value))
+    unique: dict[str, dict[str, Any]] = {}
+    anonymous: list[dict[str, Any]] = []
+    for row in tasks:
+        task_id = import_task_id(row)
+        if task_id:
+            unique[task_id] = row
+        else:
+            anonymous.append(row)
+    return [*unique.values(), *anonymous]
+
+
+def sync_complete(row: dict[str, Any]) -> bool:
+    status = normalized_state(row.get("authoritativeSyncStatus"), row.get("authoritativeSync"))
+    sync = row.get("authoritativeSync") or row.get("authoritative_sync")
+    if isinstance(sync, dict):
+        status = normalized_state(sync.get("status"), status)
+    result = row.get("result")
+    if isinstance(result, dict):
+        nested = result.get("authoritativeSync") or result.get("authoritative_sync")
+        if isinstance(nested, dict):
+            status = normalized_state(nested.get("status"), status)
+        status = normalized_state(result.get("authoritativeSyncStatus"), status)
+    return status in COMPLETE_STATES
+
+
+def graph_visible_complete(row: dict[str, Any]) -> bool:
+    return normalized_state(row.get("graphVisibilityStatus"), row.get("graphVisibility"), row.get("graph_visible")) in COMPLETE_STATES
+
+
+def semantic_complete(row: dict[str, Any]) -> bool:
+    return normalized_state(row.get("semanticStatus"), row.get("semantic"), row.get("semantic_status")) in COMPLETE_STATES
+
+
+def import_task_complete(row: dict[str, Any]) -> bool:
+    return import_task_status(row) in COMPLETE_STATES and import_task_stage(row) in COMPLETE_STATES
+
+
+def import_task_failed(row: dict[str, Any]) -> bool:
+    return import_task_status(row) in FAILED_STATES or import_task_stage(row) in FAILED_STATES
+
+
+def graph_import_poll_delay_minutes(base: Path, policy: dict[str, Any], stage: str, action: str, reason: str) -> tuple[int, str]:
+    default = bounded_minutes(policy.get("async_poll_interval_minutes"), 5)
+    if action != "poll_graph_import_sync" and "import_workflow" not in reason.lower() and "authoritative" not in reason.lower():
+        return default, f"default async poll interval from policy: {default} minutes"
+
+    payload = read_json(base / "papernexus/IMPORT_WORKFLOW_STATUS.json", {})
+    payload = unwrap_capture(payload)
+    if not isinstance(payload, dict) or not payload:
+        return default, f"graph import status artifact is missing; use default async poll interval {default} minutes"
+
+    artifact_interval = (
+        payload.get("selected_poll_interval_minutes")
+        or payload.get("poll_interval_minutes")
+        or payload.get("recommended_next_poll_minutes")
+    )
+    artifact_reason = (
+        payload.get("poll_interval_reason")
+        or payload.get("poll_interval_decision")
+        or payload.get("eta_basis")
+    )
+    if artifact_interval is not None:
+        interval = bounded_minutes(artifact_interval, default)
+        reason_text = str(artifact_reason or "dynamic interval recorded by the latest live import_workflow poll").strip()
+        return interval, f"latest live graph-import status selected a dynamic {interval}-minute heartbeat: {reason_text}"
+
+    target_tasks = import_status_tasks(payload, "targetTasks") or import_status_tasks(payload, "target_tasks")
+    tasks = target_tasks or raw_import_tasks(payload)
+    side_effect_tasks = import_status_tasks(payload, "nonSelectedSideEffectImports") + import_status_tasks(payload, "sideEffectImports")
+    summary = import_queue_summary(payload)
+    active_task_id = str(summary.get("activeTaskId") or summary.get("activeTask") or "").strip()
+    active_stage = normalized_state(summary.get("activeStage"), summary.get("activePhase"))
+    remaining = parse_int(summary.get("remaining"))
+    active_task = next((row for row in [*tasks, *side_effect_tasks] if import_task_id(row) == active_task_id), None)
+
+    if any(import_task_failed(row) for row in tasks):
+        return bounded_minutes(default / 2, 1), "selected graph import task failed or was cancelled; schedule the next check sooner than the policy default for repair routing"
+
+    if tasks and all(import_task_complete(row) and graph_visible_complete(row) and semantic_complete(row) and sync_complete(row) for row in tasks):
+        return bounded_minutes(default / 2, 1), "all selected graph import tasks appear complete and authoritative-synced; schedule the next check sooner than the policy default so WorkflowGuard can advance or reconcile stale artifacts"
+
+    unsynced = [
+        row
+        for row in tasks
+        if import_task_complete(row) and graph_visible_complete(row) and semantic_complete(row) and not sync_complete(row)
+    ]
+    if unsynced and len(unsynced) == len(tasks):
+        return bounded_minutes(default, 1), "selected tasks are graph-visible but authoritative sync is still pending; use the policy cadence until sync progress is observed"
+
+    running_targets = [
+        row
+        for row in tasks
+        if import_task_status(row) in RUNNING_STATES or import_task_stage(row) in RUNNING_STATES
+    ]
+    if running_targets:
+        stages = {import_task_stage(row) for row in running_targets}
+        estimates = [estimate for estimate in (import_task_processed_rate_interval(row, default) for row in running_targets) if estimate]
+        if estimates:
+            return min(estimates, key=lambda item: item[0])
+        if stages.intersection({"fast-commit", "authoritative-sync"}):
+            return bounded_minutes(default / 2, 1), "selected graph import task is in final commit/sync; schedule sooner than policy default until a progress-based ETA is available"
+        return default, f"selected graph import task is running but lacks unit/progress ETA; use policy default {default} minutes"
+
+    queued_targets = [
+        row
+        for row in tasks
+        if import_task_status(row) in QUEUED_STATES or import_task_stage(row) in QUEUED_STATES
+    ]
+    if queued_targets:
+        positions = [import_task_queue_position(row) for row in queued_targets]
+        positions = [position for position in positions if position is not None]
+        min_position = min(positions) if positions else None
+        running_workers = parse_int(summary.get("running")) or 0
+        if min_position is not None:
+            estimated_waves = min_position / max(1, running_workers)
+            interval = bounded_minutes(default * max(1.0, estimated_waves), default)
+            return interval, (
+                "selected graph import task is queued; interval estimated from "
+                f"queue_position={min_position}, running_workers={running_workers}, policy_default={default}"
+            )
+        if active_task and import_task_stage(active_task) in {"fast-commit", "authoritative-sync"}:
+            estimate = import_task_processed_rate_interval(active_task, default)
+            if estimate:
+                return estimate
+            return bounded_minutes(default / 2, 1), "active import ahead of the selected target is in final commit/sync; schedule sooner than policy default until a progress-based ETA is available"
+        return default, f"selected graph import task is queued but queue position is unavailable; use policy default {default} minutes and record the missing queue-position signal"
+
+    if active_task or active_stage:
+        if active_stage in {"fast-commit", "authoritative-sync"}:
+            if active_task:
+                estimate = import_task_processed_rate_interval(active_task, default)
+                if estimate:
+                    return estimate
+            return bounded_minutes(default / 2, 1), "active graph import is in final commit/sync; schedule sooner than policy default until a progress-based ETA is available"
+
+    if remaining is not None and remaining > 10:
+        running_workers = parse_int(summary.get("running")) or 0
+        interval = bounded_minutes(default * (remaining / max(1, running_workers)), default)
+        return interval, (
+            "PaperNexus import queue has remaining work and no selected near-terminal task; interval estimated from "
+            f"remaining={remaining}, running_workers={running_workers}, policy_default={default}"
+        )
+
+    return default, f"graph import state has no stronger signal; use policy default {default} minutes"
+
+
+def parse_iso_datetime(value: Any) -> datetime | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    text = value.strip()
+    if text.endswith("Z"):
+        text = f"{text[:-1]}+00:00"
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def interval_from_due_at(due_at: Any, default: int) -> int | None:
+    parsed = parse_iso_datetime(due_at)
+    if parsed is None:
+        return None
+    seconds = int((parsed - now()).total_seconds())
+    if seconds <= 0:
+        return None
+    return bounded_minutes((seconds + 59) // 60, default)
+
+
+def poll_decision_from_payload(payload: Any) -> dict[str, Any]:
+    payload = unwrap_capture(payload)
+    if not isinstance(payload, dict):
+        return {}
+    nested = payload.get("poll_interval_decision")
+    if isinstance(nested, dict):
+        merged = dict(nested)
+        for key in [
+            "selected_interval_minutes",
+            "interval_minutes",
+            "poll_interval_minutes",
+            "recommended_next_poll_minutes",
+            "desired_rrule",
+            "next_check_at",
+            "next_check_after",
+            "estimated_next_event_at",
+            "reason",
+            "interval_reason",
+            "eta_basis",
+            "estimated_remaining_minutes",
+            "expected_finish_at",
+            "created_at",
+            "updated_at",
+        ]:
+            if key in payload and key not in merged:
+                merged[key] = payload[key]
+        return merged
+    return payload
+
+
+def dynamic_interval_from_payload(payload: Any, default: int, source: str) -> tuple[int, str] | None:
+    decision = poll_decision_from_payload(payload)
+    if not decision:
+        return None
+    interval_value = (
+        decision.get("selected_interval_minutes")
+        or decision.get("interval_minutes")
+        or decision.get("poll_interval_minutes")
+        or decision.get("recommended_next_poll_minutes")
+    )
+    due_interval = interval_from_due_at(
+        decision.get("next_check_at")
+        or decision.get("next_check_after")
+        or decision.get("estimated_next_event_at"),
+        default,
+    )
+    if due_interval is not None:
+        interval = due_interval
+    elif interval_value is not None:
+        interval = bounded_minutes(interval_value, default)
+    else:
+        return None
+    reason_text = str(
+        decision.get("reason")
+        or decision.get("interval_reason")
+        or decision.get("eta_basis")
+        or "dynamic interval recorded by experiment monitor"
+    ).strip()
+    return interval, f"{source} selected a dynamic {interval}-minute experiment heartbeat: {reason_text}"
+
+
+def latest_experiment_poll_decision(base: Path) -> tuple[dict[str, Any], str] | None:
+    plan = read_json(base / "experiment/EXPERIMENT_MONITOR_PLAN.json", {})
+    if isinstance(plan, dict):
+        for rel_key in [
+            "latest_runtime_signal",
+            "latest_runtime_poll",
+            "latest_poll_decision",
+            "latest_status_artifact",
+        ]:
+            rel = plan.get(rel_key)
+            if isinstance(rel, str) and rel.strip():
+                payload = read_json(base / rel, {})
+                decision = poll_decision_from_payload(payload)
+                if isinstance(decision, dict) and decision:
+                    return decision, f"experiment monitor plan {rel_key}"
+        policy = plan.get("check_interval_policy") if isinstance(plan.get("check_interval_policy"), dict) else {}
+        if policy:
+            policy_payload = dict(policy)
+            if "next_check_at" not in policy_payload:
+                policy_payload["next_check_at"] = plan.get("next_check_at") or plan.get("next_check_after")
+            return policy_payload, "experiment monitor plan"
+        decision = plan.get("poll_interval_decision")
+        if isinstance(decision, dict):
+            return decision, "experiment monitor plan"
+
+    registry = read_json(base / "automation_registry.json", {})
+    if isinstance(registry, dict):
+        decision = registry.get("poll_interval_decision")
+        if isinstance(decision, dict):
+            return decision, "automation registry"
+        monitors = registry.get("monitors")
+        if isinstance(monitors, dict):
+            for row in monitors.values():
+                if isinstance(row, dict) and isinstance(row.get("poll_interval_decision"), dict):
+                    return row["poll_interval_decision"], "automation registry monitor"
+        for rel_key in ["latest_poll_decision", "latest_poll_wait"]:
+            rel = registry.get(rel_key)
+            if isinstance(rel, str) and rel.strip():
+                payload = read_json(base / rel, {})
+                if isinstance(payload, dict):
+                    return payload, f"automation registry {rel_key}"
+
+    candidates = sorted(
+        [*base.glob("coder/experiments/*/*/RUNTIME_POLL_DECISION_*.json"), *base.glob("coder/experiments/*/*/RUNTIME_POLL_WAIT_*.json")],
+        key=lambda path: path.stat().st_mtime if path.exists() else 0,
+        reverse=True,
+    )
+    for path in candidates[:5]:
+        payload = read_json(path, {})
+        if isinstance(payload, dict):
+            try:
+                rel = path.relative_to(base)
+            except ValueError:
+                rel = path
+            return payload, str(rel)
+    return None
+
+
+def experiment_poll_delay_minutes(base: Path, policy: dict[str, Any], stage: str, action: str, reason: str) -> tuple[int, str]:
+    default = bounded_minutes(policy.get("experiment_monitor_default_interval_minutes"), 30, minimum=5)
+    if stage != "experiment" or action != "poll_experiment_run":
+        return default, f"default async poll interval from policy: {default} minutes"
+    latest = latest_experiment_poll_decision(base)
+    if latest is None:
+        return default, f"experiment monitor artifact is missing; use experiment monitor fallback interval {default} minutes"
+    payload, source = latest
+    dynamic = dynamic_interval_from_payload(payload, default, source)
+    if dynamic is not None:
+        return dynamic
+    return default, f"latest experiment monitor artifact has no interval; use experiment monitor fallback interval {default} minutes"
+
+
+def latest_experiment_fixed_due_at(base: Path, stage: str, action: str) -> tuple[datetime | None, datetime | None, str | None]:
+    """Return the authoritative next_check_at from the latest experiment monitor.
+
+    Normal async queueing preserves an earlier due time so a poll is not delayed
+    accidentally. Experiment monitors are different: a newer live ETA artifact can
+    legitimately lengthen the heartbeat after startup risk clears. This helper
+    exposes that fixed due time plus the monitor decision timestamp so queue_job
+    can distinguish a stale short poll from an intentionally recomputed long wait.
+    """
+
+    if stage != "experiment" or action != "poll_experiment_run":
+        return None, None, None
+    latest = latest_experiment_poll_decision(base)
+    if latest is None:
+        return None, None, None
+    payload, source = latest
+    decision = poll_decision_from_payload(payload)
+    if not decision:
+        return None, None, source
+    due_at = None
+    for key in ["next_check_at", "next_check_after"]:
+        due_at = parse_iso_datetime(decision.get(key))
+        if due_at is not None:
+            break
+    updated_at = None
+    for key in ["updated_at", "created_at"]:
+        updated_at = parse_iso_datetime(decision.get(key))
+        if updated_at is not None:
+            break
+    return due_at, updated_at, source
+
+
+def async_poll_delay_minutes(base: Path, policy: dict[str, Any], stage: str, action: str, reason: str) -> tuple[int, str]:
+    if action == "poll_graph_import_sync" or ("import_workflow" in reason.lower() and "graph" in reason.lower()):
+        return graph_import_poll_delay_minutes(base, policy, stage, action, reason)
+    if stage == "experiment" or action == "poll_experiment_run":
+        return experiment_poll_delay_minutes(base, policy, stage, action, reason)
+    delay = bounded_minutes(policy.get("async_poll_interval_minutes"), 5)
+    return delay, f"default async poll interval from policy: {delay} minutes"
 
 
 def unwrap_capture(payload: Any) -> Any:
@@ -158,10 +916,518 @@ def classify_topic_search(base: Path) -> tuple[str, str]:
     return "auto_repairable", "screen_literature_discovery"
 
 
+def blocked_evidence_gate_is_local(base: Path) -> bool:
+    """Distinguish closed evidence failure from a still-running import/discovery wait."""
+    gate_paths = [
+        base / "orchestrator/INNOVATION_PACKET.json",
+        base / "planner/EXPERIMENT_REVIEW_PACKET.json",
+    ]
+    gates: list[dict[str, Any]] = []
+    for path in gate_paths:
+        packet = read_json(path, {})
+        gate = packet.get("evidence_import_gate") if isinstance(packet, dict) else None
+        if isinstance(gate, dict):
+            gates.append(gate)
+    if not gates:
+        return False
+    blocked_statuses = {"blocked", "failed", "not_closed", "blocked_for_launch", "failed_closed"}
+    for gate in gates:
+        status = str(gate.get("status") or "").strip().lower()
+        if status not in blocked_statuses:
+            return False
+        if gate.get("launch_blocked") is not True:
+            return False
+        if gate.get("import_submitted") is True:
+            return False
+    return True
+
+
+def active_backend_remap_request(base: Path) -> dict[str, Any] | None:
+    """Return the latest code-stage backend remap request that needs plan authority."""
+
+    candidates = sorted((base / "coder").glob("BACKEND_REMAP_REQUEST_*.json"))
+    for path in reversed(candidates):
+        request = read_json(path, {})
+        if not isinstance(request, dict):
+            continue
+        status = str(request.get("status") or "").strip().lower()
+        next_action = str(request.get("next_action") or "").strip().lower()
+        request_type = str(request.get("request_type") or "").strip().lower()
+        if (
+            request_type == "experiment_plan_backend_remap"
+            and "experiment_plan" in next_action
+            and status in {"requires_experiment_plan_authority", "pending", "open"}
+        ):
+            request["_path"] = str(path.relative_to(base))
+            return request
+
+    blocker = read_json(base / "coder/CODE_STAGE_BACKEND_BLOCKER_20260604T111500Z.json", {})
+    if isinstance(blocker, dict):
+        status = str(blocker.get("status") or "").strip().lower()
+        next_action = str(blocker.get("next_action") or "").strip().lower()
+        remap_request = str(blocker.get("backend_remap_request") or "").strip()
+        if "remap" in status and "experiment_plan" in next_action and remap_request:
+            request = read_json(base / remap_request, {})
+            if isinstance(request, dict):
+                request["_path"] = remap_request
+                return request
+    return None
+
+
+def experiment_ledger_entries(base: Path) -> list[dict[str, Any]]:
+    ledger = read_json(base / "coder/EXPERIMENT_LEDGER.json", {})
+    if not isinstance(ledger, dict):
+        return []
+    merged: list[dict[str, Any]] = []
+    seen: set[tuple[str, str, str, str, str]] = set()
+    for key in ["entries", "runs", "attempts"]:
+        rows_value = ledger.get(key)
+        if not isinstance(rows_value, list):
+            continue
+        for row in rows_value:
+            if not isinstance(row, dict):
+                continue
+            identity = (
+                str(row.get("run_id") or row.get("id") or ""),
+                str(row.get("status") or ""),
+                str(row.get("promotion_decision") or row.get("promotion_status") or ""),
+                str(row.get("finished_at") or ""),
+                str(row.get("updated_at") or row.get("created_at") or ""),
+            )
+            if identity in seen:
+                continue
+            seen.add(identity)
+            merged.append(row)
+    return merged
+
+
+def experiment_entry_status(entry: dict[str, Any]) -> str:
+    return normalized_state(
+        entry.get("promotion_decision"),
+        entry.get("promotion_status"),
+        entry.get("verdict"),
+        entry.get("status"),
+    )
+
+
+def experiment_entry_next_action(entry: dict[str, Any]) -> str:
+    return normalized_state(entry.get("next_action"), entry.get("recommended_next_action"), entry.get("route"))
+
+
+def experiment_next_action_kind(action: str) -> str:
+    """Classify free-form experiment next_action strings into guard routes."""
+
+    text = normalized_state(action)
+    if not text:
+        return ""
+    head = text.split(":", 1)[0]
+    if head in EXPERIMENT_REPAIR_ACTIONS:
+        return "repair"
+    if head in EXPERIMENT_REBUILD_ACTIONS:
+        return "rebuild"
+    rebuild_markers = (
+        "switch_track",
+        "track_switch",
+        "structural_positive_redesign",
+        "structural_redesign",
+        "positive_redesign",
+        "rebuild_idea",
+        "change_idea",
+        "change_innovation",
+        "leap_idea",
+        "negative_result_route",
+    )
+    if any(marker in head for marker in rebuild_markers):
+        return "rebuild"
+    repair_markers = ("repair", "relaunch", "rerun_after_fix", "fix_and_rerun", "debug_fix")
+    if any(marker in head for marker in repair_markers):
+        return "repair"
+    return ""
+
+
+def experiment_entry_failure_like(entry: dict[str, Any]) -> bool:
+    decision = normalized_state(entry.get("promotion_decision"), entry.get("promotion_status"), entry.get("verdict"))
+    status = normalized_state(entry.get("status"))
+    spec = normalized_state(entry.get("spec_violation_status"))
+    return (
+        decision in EXPERIMENT_FAILURE_DECISIONS
+        or decision.startswith("not_promoted")
+        or status in {"failed", "failure", "budget_stopped", "regressed", "regression", "not_promoted"}
+        or status.startswith("not_promoted")
+        or spec in {"flagged", "violation", "failed"}
+        or experiment_next_action_kind(experiment_entry_next_action(entry)) in {"repair", "rebuild"}
+    )
+
+
+def experiment_entry_promoted(entry: dict[str, Any]) -> bool:
+    return experiment_entry_status(entry) in {"promoted", "best", "track_best", "ready", "accepted", "success"}
+
+
+def experiment_entry_matches_active_selection(entry: dict[str, Any], active: dict[str, set[str]]) -> bool:
+    active_ideas = active.get("idea_ids") or set()
+    active_tracks = active.get("track_ids") or set()
+    idea_id, track_id = experiment_entry_identity(entry)
+    if active_ideas and idea_id and idea_id not in active_ideas:
+        return False
+    if active_tracks and track_id and track_id not in active_tracks:
+        return False
+    return True
+
+
+def latest_failed_experiment_entry(base: Path, active_selection: dict[str, set[str]] | None = None) -> dict[str, Any] | None:
+    entries = experiment_ledger_entries(base)
+    for entry in reversed(entries):
+        if active_selection is not None and not experiment_entry_matches_active_selection(entry, active_selection):
+            continue
+        if experiment_entry_failure_like(entry):
+            return entry
+    return None
+
+
+def experiment_entry_identity(entry: dict[str, Any]) -> tuple[str, str]:
+    idea_id = str(entry.get("selected_idea_id") or entry.get("idea_id") or "").strip()
+    track_id = str(entry.get("track_id") or entry.get("track") or "").strip()
+    return idea_id, track_id
+
+
+def experiment_repair_attempt_value(entry: dict[str, Any]) -> int:
+    for key in ["repair_attempt", "repair_attempt_index", "repair_iteration", "same_branch_repair_attempt"]:
+        parsed = parse_int(entry.get(key))
+        if parsed is not None:
+            return max(0, parsed)
+    return 0
+
+
+def experiment_repair_attempt_count(base: Path, latest: dict[str, Any]) -> int:
+    entries = experiment_ledger_entries(base)
+    idea_id, track_id = experiment_entry_identity(latest)
+    explicit_max = experiment_repair_attempt_value(latest)
+    tagged_repairs = 0
+    failure_like_same_route = 0
+    for entry in entries:
+        entry_idea, entry_track = experiment_entry_identity(entry)
+        if idea_id and entry_idea and entry_idea != idea_id:
+            continue
+        if track_id and entry_track and entry_track != track_id:
+            continue
+        explicit_max = max(explicit_max, experiment_repair_attempt_value(entry))
+        attempt_type = normalized_state(entry.get("attempt_type"), entry.get("run_type"), entry.get("role"))
+        if "repair" in attempt_type or entry.get("is_repair") is True:
+            tagged_repairs += 1
+        if experiment_entry_failure_like(entry):
+            failure_like_same_route += 1
+    # If the ledger does not explicitly mark repair attempts, treat repeated terminal
+    # failures on the same idea/track after the first failure as repair attempts.
+    inferred_repairs = max(0, failure_like_same_route - 1)
+    return max(explicit_max, tagged_repairs, inferred_repairs)
+
+
+def experiment_text_fields(payload: dict[str, Any]) -> list[str]:
+    fields: list[str] = []
+    for key in [
+        "state",
+        "status",
+        "run_status",
+        "decision",
+        "next_action",
+        "wait_condition",
+        "resource_state",
+        "resource_verdict",
+        "monitor_status",
+    ]:
+        value = payload.get(key)
+        if value is not None:
+            fields.append(str(value))
+    poll_decision = payload.get("poll_interval_decision")
+    if isinstance(poll_decision, dict):
+        fields.extend(experiment_text_fields(poll_decision))
+    policy = payload.get("check_interval_policy")
+    if isinstance(policy, dict):
+        fields.extend(experiment_text_fields(policy))
+    active_run = payload.get("active_run")
+    if isinstance(active_run, dict):
+        fields.extend(experiment_text_fields(active_run))
+    return fields
+
+
+def experiment_idle_signal(base: Path) -> dict[str, Any] | None:
+    """Return an explicit no-live-experiment signal from the latest monitor state.
+
+    This deliberately requires an overall monitor/status field to say no active
+    work exists. A single server/GPU being idle is not enough, because one
+    diagnostic endpoint can be idle while the evidence-producing run is active.
+    """
+
+    payload_sources: list[tuple[str, dict[str, Any]]] = []
+    latest = latest_experiment_poll_decision(base)
+    if latest is not None:
+        payload, source = latest
+        if isinstance(payload, dict):
+            payload_sources.append((source, payload))
+    plan = read_json(base / "experiment/EXPERIMENT_MONITOR_PLAN.json", {})
+    if isinstance(plan, dict) and plan:
+        payload_sources.append(("experiment/EXPERIMENT_MONITOR_PLAN.json", plan))
+    registry = read_json(base / "automation_registry.json", {})
+    if isinstance(registry, dict) and registry:
+        payload_sources.append(("automation_registry.json", registry))
+
+    for source, payload in payload_sources:
+        fields = experiment_text_fields(payload)
+        normalized_fields = [normalized_state(field) for field in fields]
+        text_fields = [str(field or "").lower().replace("_", " ") for field in fields]
+        if any(normalized in EXPERIMENT_ACTIVE_STATUSES for normalized in normalized_fields):
+            return None
+        if any(
+            marker.replace("_", " ") in text
+            for text in text_fields
+            for marker in EXPERIMENT_BUSY_MARKERS
+        ):
+            return None
+        for field in fields:
+            normalized = normalized_state(field)
+            if normalized in EXPERIMENT_IDLE_STATUSES:
+                return {
+                    "source": source,
+                    "field": field,
+                    "reason": f"{source} reports experiment monitor state {field!r}",
+                }
+            text = str(field or "").lower().replace("_", " ")
+            if any(marker in text for marker in EXPERIMENT_IDLE_MARKERS):
+                return {
+                    "source": source,
+                    "field": field,
+                    "reason": f"{source} reports no active experiment work: {field}",
+                }
+        active_run_count = payload.get("active_run_count")
+        if parse_int(active_run_count) == 0 and payload.get("all_runs_terminal") is True:
+            return {
+                "source": source,
+                "field": "active_run_count=0/all_runs_terminal=true",
+                "reason": f"{source} reports all experiment runs terminal and no active run count",
+            }
+    return None
+
+
+def active_experiment_run_exists(base: Path) -> bool:
+    def is_terminal_status(value: Any) -> bool:
+        status = normalized_state(value)
+        if not status:
+            return False
+        if status in EXPERIMENT_TERMINAL_STATUSES:
+            return True
+        terminal_prefixes = (
+            "complete",
+            "completed_",
+            "failed_",
+            "failure_",
+            "cancelled_",
+            "canceled_",
+            "superseded_",
+            "terminal_",
+            "not_promoted",
+        )
+        return status.startswith(terminal_prefixes)
+
+    def is_active_status(value: Any) -> bool:
+        status = normalized_state(value)
+        if is_terminal_status(status):
+            return False
+        if status in EXPERIMENT_ACTIVE_STATUSES:
+            return True
+        active_prefixes = (
+            "active_",
+            "queued_",
+            "pending_",
+            "submitted_",
+            "launching_",
+            "starting_",
+            "started_",
+            "running_",
+            "training_",
+            "parallel_training",
+            "non_bjtu_parallel_training",
+            "bjtu_parallel_training",
+            "waiting_for_",
+            "resource_wait",
+            "external_live_wait",
+        )
+        return status.startswith(active_prefixes)
+
+    if experiment_idle_signal(base):
+        return False
+
+    plan = read_json(base / "experiment/EXPERIMENT_MONITOR_PLAN.json", {})
+    if isinstance(plan, dict):
+        plan_state = normalized_state(plan.get("state"), plan.get("status"))
+        poll_decision = latest_experiment_poll_decision(base)
+        decision = poll_decision[0] if poll_decision else {}
+        decision_status = normalized_state(decision.get("status")) if isinstance(decision, dict) else ""
+        if is_terminal_status(plan_state) or is_terminal_status(decision_status):
+            return False
+        if is_active_status(plan_state):
+            return True
+        active_run = plan.get("active_run")
+        if isinstance(active_run, dict) and is_active_status(active_run.get("status") or active_run.get("run_status")):
+            return True
+        for task in plan.get("active_background_tasks") or []:
+            if isinstance(task, dict) and is_active_status(task.get("status") or task.get("run_status")):
+                return True
+
+    for remote_path in sorted(base.glob("coder/experiments/**/REMOTE_RUN.json")):
+        remote = read_json(remote_path, {})
+        if isinstance(remote, dict) and is_active_status(remote.get("status") or remote.get("run_status")):
+            return True
+    return False
+
+
+def write_experiment_negative_blocker(base: Path, payload: dict[str, Any]) -> None:
+    write_json(base / "coder/EXPERIMENT_NEGATIVE_BLOCKER.json", payload)
+
+
+def experiment_launch_candidate(base: Path) -> dict[str, Any] | None:
+    active_selection = current_active_selection(base)
+    candidates = sorted(base.glob("coder/experiments/**/*CANDIDATE_RUN*.json"))
+    for path in reversed(candidates):
+        payload = read_json(path, {})
+        if not isinstance(payload, dict):
+            continue
+        if not experiment_entry_matches_active_selection(payload, active_selection):
+            continue
+        protocol_status = normalized_state(payload.get("protocol_status"))
+        if protocol_status not in {"baseline_aligned", "pre_registered_feature_protocol"}:
+            continue
+        if payload.get("diagnostic_only") is True:
+            continue
+        status = normalized_state(payload.get("status"), payload.get("launch_status"))
+        if status in {"completed", "complete", "success", "succeeded", "failed", "cancelled", "canceled"}:
+            continue
+        result = dict(payload)
+        result["_path"] = str(path.relative_to(base))
+        return result
+    return None
+
+
+def experiment_failure_route(base: Path) -> dict[str, Any] | None:
+    active_selection = current_active_selection(base)
+    latest = latest_failed_experiment_entry(base, active_selection)
+    if not latest:
+        return None
+    next_action = experiment_entry_next_action(latest)
+    next_action_kind = experiment_next_action_kind(next_action)
+    repair_attempts = experiment_repair_attempt_count(base, latest)
+    idea_id, track_id = experiment_entry_identity(latest)
+    failure_class = str(latest.get("failure_class") or "").strip()
+    no_more_same_branch_repairs = repair_attempts >= MAX_FAILED_EXPERIMENT_REPAIRS
+    wants_rebuild = next_action_kind == "rebuild" or no_more_same_branch_repairs
+    if wants_rebuild:
+        if (
+            next_action in {"switch_track", "track_switch"}
+            or "switch_track" in next_action
+            or "track_switch" in next_action
+            or "structural" in next_action
+            or "positive_redesign" in next_action
+        ):
+            target_stage = "experiment_plan"
+        elif next_action in {"leap_idea", "rebuild_idea", "change_idea", "change_innovation"}:
+            target_stage = "ideation"
+        else:
+            target_stage = "idea_gate"
+        return {
+            "route_kind": "rollback",
+            "required_next_action": "change_idea_or_innovation",
+            "target_stage": target_stage,
+            "status": "change_idea_or_innovation_required",
+            "reason": (
+                "experiment produced terminal negative/regressed evidence and "
+                f"{repair_attempts} same-idea repair attempts did not yield promoted improvement"
+            ),
+            "repair_attempts": repair_attempts,
+            "max_same_idea_repairs": MAX_FAILED_EXPERIMENT_REPAIRS,
+            "selected_idea_id": idea_id,
+            "track_id": track_id,
+            "failure_class": failure_class,
+            "ledger_next_action": next_action,
+            "latest_failure_entry": latest,
+        }
+    return {
+        "route_kind": "repair",
+        "required_next_action": "repair_failed_experiment",
+        "status": "repair_required",
+        "reason": (
+            "experiment produced terminal negative/regressed evidence; analyze the failure cause and execute a bounded repair attempt "
+            f"{repair_attempts + 1}/{MAX_FAILED_EXPERIMENT_REPAIRS}"
+        ),
+        "repair_attempts": repair_attempts,
+        "max_same_idea_repairs": MAX_FAILED_EXPERIMENT_REPAIRS,
+        "selected_idea_id": idea_id,
+        "track_id": track_id,
+        "failure_class": failure_class,
+        "ledger_next_action": next_action or "repair_same_branch",
+        "latest_failure_entry": latest,
+    }
+
+
+def sync_experiment_negative_route_artifacts(base: Path, route: dict[str, Any]) -> None:
+    blocker = {
+        "schema_version": 1,
+        "status": route["status"],
+        "created_at": iso(now()),
+        "selected_idea_id": route.get("selected_idea_id"),
+        "track_id": route.get("track_id"),
+        "failure_class": route.get("failure_class"),
+        "repair_attempts": route.get("repair_attempts"),
+        "max_same_idea_repairs": route.get("max_same_idea_repairs"),
+        "required_next_action": route.get("required_next_action"),
+        "ledger_next_action": route.get("ledger_next_action"),
+        "reason": route.get("reason"),
+        "latest_failure_entry": route.get("latest_failure_entry"),
+    }
+    if route.get("route_kind") == "rollback":
+        blocker["target_stage"] = route.get("target_stage")
+        blocker["negative_result_manuscript_allowed"] = False
+    write_experiment_negative_blocker(base, blocker)
+    if route.get("route_kind") == "rollback":
+        target_stage = str(route.get("target_stage") or "idea_gate")
+        write_json(
+            base / "orchestrator/NEGATIVE_RESULT_ROUTE_DECISION.json",
+            {
+                "schema_version": 1,
+                "decision": "change_idea_or_innovation_after_two_repairs",
+                "created_at": iso(now()),
+                "reason": route.get("reason"),
+                "source": "coder/EXPERIMENT_LEDGER.json",
+                "selected_idea_id": route.get("selected_idea_id"),
+                "track_id": route.get("track_id"),
+                "repair_attempts": route.get("repair_attempts"),
+                "max_same_idea_repairs": route.get("max_same_idea_repairs"),
+                "required_replan": {
+                    "stage": target_stage,
+                    "next_action": NEXT_ACTIONS.get(target_stage),
+                    "requirements": [
+                        "Analyze failed/regressed experiment evidence and its failure_class.",
+                        "Do not run a third same-idea repair without changing the idea, innovation point, or selected track.",
+                        "Update IDEA_DECISION_LEDGER.json for the failed idea lifecycle.",
+                        "Select an alternate idea or rebuild the innovation bundle before returning to experiment_plan.",
+                    ],
+                },
+            },
+        )
+
+
 def classify(stage: str, reason: str, base: Path) -> tuple[str, str]:
     if stage == "topic_search":
         return classify_topic_search(base)
     text = reason.lower()
+    if stage == "code" and active_backend_remap_request(base):
+        return "hard_stop", "rollback_to_experiment_plan_backend_remap"
+    if "selected_negative_evidence:" in text:
+        if stage in {"experiment_plan", "code"}:
+            return "hard_stop", "rollback_to_idea_gate_after_selected_negative_evidence"
+        return "auto_repairable", "repair_idea_gate_or_return_to_ideation"
+    if "selected_projection_alignment:" in text:
+        if stage == "code":
+            return "hard_stop", "rollback_to_experiment_plan_projection_repair"
+        return "auto_repairable", "repair_selected_projection_alignment"
     if stage == "graph_build":
         if "unsubmitted graph_import papers" in text or "submitted graph_import" in text:
             return "auto_repairable", "submit_graph_import_tasks"
@@ -177,30 +1443,72 @@ def classify(stage: str, reason: str, base: Path) -> tuple[str, str]:
         if any(name in text for name in ["sota_matrix", "gap_synthesis", "citation_queue"]):
             return "auto_repairable", "write_literature_review"
     if stage in {"ideation", "idea_gate", "experiment_plan"}:
+        if "evidence_import_gate" in text and blocked_evidence_gate_is_local(base):
+            return "auto_repairable", "degrade_or_rollback_evidence_gate"
+        ideation_artifact_gap = any(
+            name in text
+            for name in [
+                "abstract_screening_audit",
+                "paper_selection_scorecard_lint",
+                "pre_idea_breadth_lint",
+                "idea_pool_lint",
+                "idea_scorecard_lint",
+                "split_reading_evidence_pack_lint",
+                "literature_discovery_triage.json discovery_attempted",
+            ]
+        )
+        if stage == "ideation" and ideation_artifact_gap:
+            return "auto_repairable", "run_papernexus_ideation"
+        if stage == "idea_gate" and ideation_artifact_gap:
+            return "auto_repairable", "repair_idea_gate_or_return_to_ideation"
         local_queue_artifact = any(name in text for name in ["citation_queue", "idea_track_seeds", "experiment_idea_pool"])
         if local_queue_artifact and not any(name in text for name in ["import_workflow", "remote", "async", "authoritative", "sync"]):
             return "auto_repairable", "schedule_repair"
     if stage == "experiment" and ("promoted best_run" in text or "ready_for_analysis" in text):
-        active_statuses = {
-            "queued",
-            "pending",
-            "submitted",
-            "launching",
-            "starting",
-            "running",
-            "submitted_running",
-        }
-        for remote_path in sorted(base.glob("coder/experiments/**/REMOTE_RUN.json")):
-            remote = read_json(remote_path, {})
-            status = str(remote.get("status") or "").strip().lower() if isinstance(remote, dict) else ""
-            if status in active_statuses:
-                return "async_wait", "poll_experiment_run"
+        if active_experiment_run_exists(base):
+            return "async_wait", "poll_experiment_run"
         negative_blocker = read_json(base / "coder/EXPERIMENT_NEGATIVE_BLOCKER.json", {})
         status = str(negative_blocker.get("status") or "").strip().lower() if isinstance(negative_blocker, dict) else ""
-        if status in {"blocked_without_promoted_evidence", "no_promoted_evidence", "negative_result_route"}:
+        if status in {
+            "blocked_without_promoted_evidence",
+            "no_promoted_evidence",
+            "negative_result_route",
+            "change_idea_or_innovation_required",
+            "two_repairs_without_improvement",
+        } and not route_stale_for_active_selection(negative_blocker, current_active_selection(base)):
             return "hard_stop", "rollback_or_negative_result_route"
-    if any(key in text for key in ["import", "import_workflow", "queue", "queued", "running", "remote", "async", "wait", "authoritative", "sync"]):
-        return "async_wait", "schedule_async_poll"
+        failure_route = experiment_failure_route(base)
+        if failure_route:
+            sync_experiment_negative_route_artifacts(base, failure_route)
+            if failure_route.get("route_kind") == "repair":
+                return "auto_repairable", "repair_failed_experiment"
+            return "hard_stop", "rollback_or_negative_result_route"
+        launch_candidate = experiment_launch_candidate(base)
+        negative_blocker = read_json(base / "coder/EXPERIMENT_NEGATIVE_BLOCKER.json", {})
+        status = str(negative_blocker.get("status") or "").strip().lower() if isinstance(negative_blocker, dict) else ""
+        if status in {
+            "blocked_without_promoted_evidence",
+            "no_promoted_evidence",
+            "negative_result_route",
+            "change_idea_or_innovation_required",
+            "two_repairs_without_improvement",
+        }:
+            if launch_candidate and not experiment_entry_matches_active_selection(
+                negative_blocker,
+                current_active_selection(base),
+            ):
+                return "auto_repairable", "launch_or_reconcile_experiment"
+            return "hard_stop", "rollback_or_negative_result_route"
+        if launch_candidate:
+            return "auto_repairable", "launch_or_reconcile_experiment"
+    if "literature_discovery" in text and discovery_run_id(base) and not discovery_report_ready(base):
+        return "async_wait", "poll_literature_discovery"
+    if any(key in text for key in ["import_workflow", "authoritative", "graph sync", "fast_commit", "fast-commit"]):
+        if any(wait_key in text for wait_key in ["pending", "queued", "running", "incomplete", "not complete", "sync"]):
+            return "async_wait", "poll_graph_import_sync"
+        return "auto_repairable", "schedule_repair"
+    if any(key in text for key in ["queue", "queued", "running", "remote", "async", "wait"]):
+        return "auto_repairable", "schedule_repair"
     if any(key in text for key in ["controller_unavailable", "single_seed", "cost_evidence", "provider", "sparse", "stale"]):
         return "degradable", "advance_with_downgrade_or_fallback"
     if any(key in text for key in ["budget", "license", "unsafe", "no_viable", "papernexus_unavailable_without_cached"]):
@@ -208,7 +1516,13 @@ def classify(stage: str, reason: str, base: Path) -> tuple[str, str]:
     return "auto_repairable", "schedule_repair"
 
 
-def next_due_job(queue: list[dict[str, Any]], *, include_running: bool = False) -> dict[str, Any] | None:
+def next_due_job(
+    queue: list[dict[str, Any]],
+    *,
+    include_running: bool = False,
+    kind: str = "repair",
+    retry_override: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
     current = now()
     eligible_statuses = {"pending", "retry"}
     if include_running:
@@ -216,6 +1530,13 @@ def next_due_job(queue: list[dict[str, Any]], *, include_running: bool = False) 
     for row in queue:
         if row.get("status") not in eligible_statuses:
             continue
+        if retry_override_matches(row, retry_override, kind):
+            overridden = dict(row)
+            overridden["_retry_override"] = {
+                "source": retry_override.get("source") or retry_override.get("reason") or "active_retry_override",
+                "reason": retry_override.get("reason") or retry_override.get("override_reason"),
+            }
+            return overridden
         retry_at = str(row.get("next_retry_at") or row.get("next_poll_at") or "")
         if not retry_at:
             return row
@@ -247,6 +1568,16 @@ def queue_job(base: Path, kind: str, stage: str, action: str, reason: str, polic
     queue_name = "async_jobs.jsonl" if kind == "async" else "repair_queue.jsonl"
     path = base / queue_name
     data = rows(path)
+    delay_key = "next_poll_at" if kind == "async" else "next_retry_at"
+    current = now()
+    if kind == "async":
+        delay_minutes, delay_reason = async_poll_delay_minutes(base, policy, stage, action, reason)
+    else:
+        delay_minutes = poll_delay_minutes(policy, kind)
+        delay_reason = (
+            "ready immediately for goal/full_auto_bounded local repair; "
+            f"retry interval from policy applies after failed attempts: {delay_minutes} minutes"
+        )
     for row in data:
         if (
             row.get("status") in {"pending", "retry", "running"}
@@ -254,11 +1585,65 @@ def queue_job(base: Path, kind: str, stage: str, action: str, reason: str, polic
             and row.get("action") == action
             and row.get("reason") == reason
         ):
+            if kind == "async":
+                existing_due_at = parse_iso_datetime(row.get(delay_key))
+                fixed_due_at, fixed_decision_at, fixed_source = latest_experiment_fixed_due_at(base, stage, action)
+                proposed_due_at = fixed_due_at or (current + timedelta(minutes=delay_minutes))
+                row_updated_at = parse_iso_datetime(row.get("updated_at"))
+                row_interval_changed = (
+                    bounded_minutes(row.get("poll_interval_minutes"), delay_minutes) != delay_minutes
+                    or str(row.get("poll_interval_reason") or "").strip() != delay_reason
+                )
+                row["poll_interval_minutes"] = delay_minutes
+                row["poll_interval_reason"] = delay_reason
+                row["updated_at"] = iso(current)
+                if existing_due_at is None or existing_due_at <= current:
+                    row[delay_key] = iso(proposed_due_at)
+                    row["poll_due_update_reason"] = "existing async poll was due or invalid; rescheduled from latest live interval"
+                elif proposed_due_at < existing_due_at:
+                    row[delay_key] = iso(proposed_due_at)
+                    row["poll_due_update_reason"] = "latest live interval advanced the async poll earlier"
+                elif (
+                    fixed_due_at is not None
+                    and fixed_due_at > existing_due_at
+                    and (
+                        fixed_decision_at is None
+                        or row_updated_at is None
+                        or fixed_decision_at > row_updated_at
+                        or row_interval_changed
+                    )
+                ):
+                    row[delay_key] = iso(fixed_due_at)
+                    row["poll_due_update_reason"] = (
+                        f"latest authoritative experiment monitor decision from {fixed_source or 'monitor plan'} "
+                        "moved the async poll later"
+                    )
+                else:
+                    row[delay_key] = iso(existing_due_at)
+                    row["poll_due_update_reason"] = "preserved existing future async poll; queued wait must not postpone due time"
+                write_rows(path, data)
+            elif row.get("status") == "pending" and int(row.get("attempts", 0) or 0) == 0:
+                row[delay_key] = iso(current)
+                row["retry_interval_minutes"] = delay_minutes
+                row["retry_interval_reason"] = delay_reason
+                row["updated_at"] = iso(current)
+                write_rows(path, data)
             existing = dict(row)
             existing["_reused"] = True
             return existing
-    delay_key = "next_poll_at" if kind == "async" else "next_retry_at"
-    delay_minutes = poll_delay_minutes(policy, kind)
+        if (
+            row.get("status") == "failed"
+            and row.get("stage") == stage
+            and row.get("action") == action
+            and row.get("reason") == reason
+        ):
+            retry_at = parse_iso_datetime(row.get(delay_key))
+            if retry_at is not None and retry_at > current:
+                existing = dict(row)
+                existing["_reused"] = True
+                existing["_reuse_reason"] = "matching failed job is in backoff; suppress duplicate immediate queue"
+                return existing
+    next_due_at = current + timedelta(minutes=delay_minutes) if kind == "async" else current
     row = {
         "schema_version": 1,
         "job_id": f"job_{uuid.uuid4().hex[:12]}",
@@ -269,14 +1654,16 @@ def queue_job(base: Path, kind: str, stage: str, action: str, reason: str, polic
         "status": "pending",
         "attempts": 0,
         "max_attempts": int(policy.get("max_repair_attempts_per_blocker", 3)),
-        "created_at": iso(now()),
-        delay_key: iso(now() + timedelta(minutes=delay_minutes)),
+        "created_at": iso(current),
+        delay_key: iso(next_due_at),
         "fallback_action": "degrade_or_rollback",
     }
     if kind == "async":
         row["poll_interval_minutes"] = delay_minutes
+        row["poll_interval_reason"] = delay_reason
     else:
         row["retry_interval_minutes"] = delay_minutes
+        row["retry_interval_reason"] = delay_reason
     data.append(row)
     write_rows(path, data)
     created = dict(row)
@@ -284,18 +1671,505 @@ def queue_job(base: Path, kind: str, stage: str, action: str, reason: str, polic
     return created
 
 
+def literature_discovery_wait_signal(base: Path) -> dict[str, str]:
+    if nonempty(base / "literature/LITERATURE_DISCOVERY_PACKET.json"):
+        return {
+            "state": "terminal",
+            "reason": "literature discovery packet already exists; capture/screening is local work",
+        }
+    run_id = discovery_run_id(base)
+    if not run_id:
+        return {
+            "state": "missing_source",
+            "reason": "literature discovery wait has no recorded run id",
+        }
+    if discovery_report_ready(base):
+        return {
+            "state": "terminal",
+            "reason": "literature discovery report is terminal/ready; capture the report locally",
+        }
+    return {
+        "state": "active",
+        "reason": f"PaperNexus literature discovery run {run_id} is still external",
+    }
+
+
+def import_count(payload: dict[str, Any], *names: str) -> int | None:
+    for name in names:
+        parsed = parse_int(payload.get(name))
+        if parsed is not None:
+            return parsed
+    return None
+
+
+def graph_import_wait_signal(base: Path) -> dict[str, str]:
+    payload = unwrap_capture(read_json(base / "papernexus/IMPORT_WORKFLOW_STATUS.json", {}))
+    if not isinstance(payload, dict) or not payload:
+        return {
+            "state": "missing_source",
+            "reason": "PaperNexus import_workflow status artifact is missing",
+        }
+
+    target_tasks = (
+        import_status_tasks(payload, "targetTasks")
+        or import_status_tasks(payload, "target_tasks")
+        or import_status_tasks(payload, "selectedTasks")
+        or import_status_tasks(payload, "selected_tasks")
+    )
+    tasks = target_tasks or raw_import_tasks(payload)
+    if tasks:
+        if any(import_task_failed(row) for row in tasks):
+            return {
+                "state": "local_actionable",
+                "reason": "selected PaperNexus graph import task failed or was cancelled; repair/degrade locally",
+            }
+        if all(import_task_complete(row) and graph_visible_complete(row) and semantic_complete(row) and sync_complete(row) for row in tasks):
+            return {
+                "state": "terminal",
+                "reason": "all selected PaperNexus graph import tasks are complete, graph-visible, semantic-ready, and authoritative-synced",
+            }
+        if any(
+            import_task_status(row) in RUNNING_STATES
+            or import_task_stage(row) in RUNNING_STATES
+            or import_task_status(row) in QUEUED_STATES
+            or import_task_stage(row) in QUEUED_STATES
+            for row in tasks
+        ):
+            return {
+                "state": "active",
+                "reason": "selected PaperNexus graph import task is queued or running",
+            }
+        if any(import_task_complete(row) and graph_visible_complete(row) and semantic_complete(row) and not sync_complete(row) for row in tasks):
+            return {
+                "state": "active",
+                "reason": "selected PaperNexus graph import task is waiting for authoritative sync",
+            }
+        if any(import_task_id(row) for row in tasks):
+            return {
+                "state": "active",
+                "reason": "selected PaperNexus graph import task ids exist but terminal status is not recorded yet",
+            }
+
+    planned = import_count(payload, "effective_planned_import_count", "effectivePlannedImportCount", "planned_import_count", "plannedImportCount")
+    submitted = import_count(payload, "submitted_import_count", "submittedImportCount")
+    completed = import_count(payload, "completed_import_count", "completedImportCount")
+    synced = import_count(payload, "authoritative_sync_completed_count", "authoritativeSyncCompletedCount")
+    if planned and submitted is not None and submitted < planned:
+        return {
+            "state": "local_actionable",
+            "reason": "PaperNexus graph import has planned papers that are not submitted yet",
+        }
+    if planned and completed is not None and completed < planned:
+        return {
+            "state": "active",
+            "reason": "PaperNexus graph import has submitted tasks that are not complete yet",
+        }
+    if planned and synced is not None and synced < planned:
+        return {
+            "state": "active",
+            "reason": "PaperNexus graph import is complete but authoritative sync is not complete yet",
+        }
+    if planned and completed == planned and (synced is None or synced == planned):
+        return {
+            "state": "terminal",
+            "reason": "PaperNexus graph import counts are terminal for the planned selected imports",
+        }
+
+    summary = import_queue_summary(payload)
+    summary_state = normalized_state(
+        summary.get("status"),
+        summary.get("state"),
+        summary.get("phase"),
+        summary.get("activeStage"),
+        summary.get("activePhase"),
+    )
+    payload_state = normalized_state(payload.get("status"), payload.get("state"), payload.get("verdict"))
+    combined_state = summary_state or payload_state
+    remaining = parse_int(summary.get("remaining"))
+    running = parse_int(summary.get("running"))
+    queued = parse_int(summary.get("queued") or summary.get("pending"))
+    if combined_state in RUNNING_STATES or combined_state in QUEUED_STATES:
+        return {
+            "state": "active",
+            "reason": f"PaperNexus import_workflow reports external state {combined_state}",
+        }
+    if any(value is not None and value > 0 for value in [remaining, running, queued]):
+        return {
+            "state": "active",
+            "reason": "PaperNexus import_workflow queue summary still has remaining, running, or queued work",
+        }
+    if combined_state in COMPLETE_STATES or payload.get("complete") is True:
+        return {
+            "state": "terminal",
+            "reason": "PaperNexus import_workflow status is terminal/complete",
+        }
+    if combined_state in FAILED_STATES:
+        return {
+            "state": "local_actionable",
+            "reason": f"PaperNexus import_workflow status is {combined_state}; repair/degrade locally",
+        }
+    return {
+        "state": "missing_source",
+        "reason": "PaperNexus import_workflow status has no selected live wait signal",
+    }
+
+
+def async_wait_gate(
+    base: Path,
+    stage: str,
+    action: str,
+    reason: str,
+    *,
+    job: dict[str, Any] | None = None,
+    current_stage: str | None = None,
+    contract: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    del contract
+    if action not in ASYNC_HEARTBEAT_ACTIONS:
+        return {
+            "allowed": False,
+            "wait_kind": "none",
+            "decision": "denied_not_external_wait",
+            "reason": f"{action or 'missing action'} is not an allowed heartbeat action",
+        }
+    job_stage = str(job.get("stage") or stage) if isinstance(job, dict) else stage
+    if current_stage and job_stage and job_stage != current_stage:
+        return {
+            "allowed": False,
+            "wait_kind": "none",
+            "decision": "superseded_no_longer_required",
+            "reason": f"async wait belongs to stage {job_stage}, but current stage is {current_stage}",
+        }
+    if action == "poll_literature_discovery":
+        signal = literature_discovery_wait_signal(base)
+        if signal["state"] == "active":
+            return {
+                "allowed": True,
+                "wait_kind": "papernexus_literature_discovery",
+                "decision": "allowed_external_wait",
+                "reason": signal["reason"],
+            }
+        decision = "superseded_terminal" if signal["state"] == "terminal" else "denied_local_actionable"
+        return {
+            "allowed": False,
+            "wait_kind": "papernexus_literature_discovery",
+            "decision": decision,
+            "reason": signal["reason"],
+        }
+    if action == "poll_graph_import_sync":
+        signal = graph_import_wait_signal(base)
+        if signal["state"] == "active":
+            return {
+                "allowed": True,
+                "wait_kind": "papernexus_graph_import_sync",
+                "decision": "allowed_external_wait",
+                "reason": signal["reason"],
+            }
+        decision = "superseded_terminal" if signal["state"] == "terminal" else "denied_local_actionable"
+        return {
+            "allowed": False,
+            "wait_kind": "papernexus_graph_import_sync",
+            "decision": decision,
+            "reason": signal["reason"],
+        }
+    if action == "poll_experiment_run":
+        if stage != "experiment":
+            return {
+                "allowed": False,
+                "wait_kind": "experiment_runtime_or_resource",
+                "decision": "superseded_no_longer_required",
+                "reason": "experiment runtime heartbeat is only valid in the experiment stage",
+            }
+        idle = experiment_idle_signal(base)
+        if idle:
+            return {
+                "allowed": False,
+                "wait_kind": "experiment_runtime_or_resource",
+                "decision": "superseded_terminal",
+                "reason": f"latest experiment monitor reports no active live experiment: {idle.get('reason')}",
+            }
+        if active_experiment_run_exists(base):
+            return {
+                "allowed": True,
+                "wait_kind": "experiment_runtime_or_resource",
+                "decision": "allowed_external_wait",
+                "reason": "active experiment runtime or resource wait exists",
+            }
+        return {
+            "allowed": False,
+            "wait_kind": "experiment_runtime_or_resource",
+            "decision": "denied_local_actionable",
+            "reason": "WorkflowGuard found no active experiment run; local launch, repair, or stage advancement can proceed",
+        }
+    return {
+        "allowed": False,
+        "wait_kind": "none",
+        "decision": "denied_not_external_wait",
+        "reason": "unknown async wait action",
+    }
+
+
+def async_wait_allowed(
+    stage: str,
+    action: str,
+    reason: str,
+    base: Path | None = None,
+    *,
+    job: dict[str, Any] | None = None,
+    current_stage: str | None = None,
+    contract: dict[str, Any] | None = None,
+) -> bool:
+    if base is not None:
+        return bool(
+            async_wait_gate(
+                base,
+                stage,
+                action,
+                reason,
+                job=job,
+                current_stage=current_stage,
+                contract=contract,
+            ).get("allowed")
+        )
+    if action not in ASYNC_HEARTBEAT_ACTIONS:
+        return False
+    if action == "poll_literature_discovery":
+        return True
+    if action == "poll_graph_import_sync":
+        return True
+    if action == "poll_experiment_run":
+        return stage == "experiment"
+    return False
+
+
+def supersede_async_job(base: Path, job: dict[str, Any], reason: str) -> None:
+    path = base / "async_jobs.jsonl"
+    data = rows(path)
+    for row in data:
+        if row.get("job_id") == job.get("job_id"):
+            row["status"] = "superseded"
+            row["updated_at"] = iso(now())
+            row["superseded_reason"] = reason
+    write_rows(path, data)
+    append_jsonl(
+        base / "decision_log.jsonl",
+        {
+            "ts": iso(now()),
+            "stage": job.get("stage"),
+            "action": "supersede_async_wait",
+            "details": {
+                "job_id": job.get("job_id"),
+                "job_action": job.get("action"),
+                "reason": reason,
+            },
+        },
+    )
+
+
+def supersede_matching_async_jobs(
+    base: Path,
+    stage: str,
+    action: str,
+    reason: str | None,
+    superseded_reason: str,
+) -> int:
+    path = base / "async_jobs.jsonl"
+    data = rows(path)
+    count = 0
+    current = now()
+    for row in data:
+        if (
+            row.get("status") in {"pending", "retry", "running"}
+            and row.get("stage") == stage
+            and row.get("action") == action
+            and (reason is None or row.get("reason") == reason)
+        ):
+            row["status"] = "superseded"
+            row["updated_at"] = iso(current)
+            row["superseded_reason"] = superseded_reason
+            count += 1
+    if count:
+        write_rows(path, data)
+        append_jsonl(
+            base / "decision_log.jsonl",
+            {
+                "ts": iso(current),
+                "stage": stage,
+                "action": "supersede_matching_async_waits",
+                "details": {
+                    "job_action": action,
+                    "matched_reason": reason,
+                    "count": count,
+                    "reason": superseded_reason,
+                },
+            },
+        )
+    return count
+
+
+def obsolete_async_wait_reason(
+    base: Path,
+    job: dict[str, Any],
+    *,
+    current_stage: str | None = None,
+    gate: dict[str, Any] | None = None,
+) -> str | None:
+    stage = str(job.get("stage") or "")
+    action = str(job.get("action") or "")
+    gate = gate or async_wait_gate(
+        base,
+        stage,
+        action,
+        str(job.get("reason") or ""),
+        job=job,
+        current_stage=current_stage,
+    )
+    if not gate.get("allowed"):
+        return (
+            "obsolete async wait superseded because it is not the current external blocker: "
+            f"{gate.get('reason')}"
+        )
+    if action != "poll_experiment_run":
+        return None
+    idle = experiment_idle_signal(base)
+    if idle:
+        return (
+            "obsolete experiment async wait superseded because latest monitor reports no active live experiment: "
+            f"{idle.get('reason')}"
+        )
+    if not active_experiment_run_exists(base):
+        return (
+            "obsolete experiment async wait superseded because WorkflowGuard found no active experiment run; "
+            "local launch, repair, or stage advancement can proceed without another poll heartbeat"
+        )
+    return None
+
+
+def supersede_repair_job(base: Path, job: dict[str, Any], reason: str) -> None:
+    path = base / "repair_queue.jsonl"
+    data = rows(path)
+    for row in data:
+        if row.get("job_id") == job.get("job_id"):
+            row["status"] = "superseded"
+            row["updated_at"] = iso(now())
+            row["superseded_reason"] = reason
+    write_rows(path, data)
+    append_jsonl(
+        base / "decision_log.jsonl",
+        {
+            "ts": iso(now()),
+            "stage": job.get("stage"),
+            "action": "supersede_repair_job",
+            "details": {
+                "job_id": job.get("job_id"),
+                "job_action": job.get("action"),
+                "reason": reason,
+            },
+        },
+    )
+
+
+def obsolete_experiment_repair_reason(base: Path, job: dict[str, Any]) -> str | None:
+    if str(job.get("stage") or "") != "experiment":
+        return None
+    action = str(job.get("action") or "")
+    negative_blocker = read_json(base / "coder/EXPERIMENT_NEGATIVE_BLOCKER.json", {})
+    blocker_status = (
+        str(negative_blocker.get("status") or "").strip().lower()
+        if isinstance(negative_blocker, dict)
+        else ""
+    )
+    if action in {"launch_or_reconcile_experiment", "repair_failed_experiment", "schedule_repair"} and blocker_status in {
+        "blocked_without_promoted_evidence",
+        "no_promoted_evidence",
+        "negative_result_route",
+        "change_idea_or_innovation_required",
+        "two_repairs_without_improvement",
+    } and not route_stale_for_active_selection(negative_blocker, current_active_selection(base)):
+        return (
+            "obsolete experiment repair superseded because coder/EXPERIMENT_NEGATIVE_BLOCKER.json "
+            f"already requests negative-result routing: status={blocker_status}"
+        )
+    if action != "launch_or_reconcile_experiment":
+        return None
+    if active_experiment_run_exists(base):
+        return None
+    failure_route = experiment_failure_route(base)
+    if not failure_route:
+        return None
+    sync_experiment_negative_route_artifacts(base, failure_route)
+    route_kind = str(failure_route.get("route_kind") or "")
+    required = str(failure_route.get("required_next_action") or "")
+    return (
+        "obsolete generic experiment launch repair superseded by latest terminal experiment triage: "
+        f"route_kind={route_kind}, required_next_action={required}"
+    )
+
+
+def contract_reason(contract: dict[str, Any], stage: str) -> str:
+    return "; ".join(str(item) for item in contract.get("missing", [])) or f"{stage} contract incomplete"
+
+
+def reason_snippet(value: Any, limit: int = 240) -> str:
+    text = " ".join(str(value or "").split())
+    if len(text) <= limit:
+        return text
+    return f"{text[: limit - 3]}..."
+
+
+def obsolete_repair_reason(project: str, base: Path, state: dict[str, Any], job: dict[str, Any]) -> str | None:
+    """Return why a queued repair should not be dispatched anymore.
+
+    Repairs are concrete packets for one observed contract failure. In
+    full_auto_bounded runs, a prior agent can repair the artifact state and
+    leave an older pending/running repair behind. Dispatching that stale packet
+    before re-reading the current contract makes the workflow appear stuck on a
+    previous idea/track. Prefer superseding the stale packet and letting the
+    normal contract triage below queue a fresh repair if one is still needed.
+    """
+
+    current_stage = str(state.get("stage") or "init")
+    job_stage = str(job.get("stage") or current_stage)
+    if job_stage != current_stage:
+        return (
+            f"obsolete repair for stage {job_stage} superseded because current workflow stage is "
+            f"{current_stage}"
+        )
+
+    contract = job_contract(project, job)
+    if contract.get("complete"):
+        return f"obsolete repair superseded because current {job_stage} contract is complete"
+
+    current_reason = contract_reason(contract, job_stage)
+    job_reason = str(job.get("reason") or "")
+    if job_reason and current_reason and job_reason != current_reason:
+        return (
+            "obsolete repair superseded because the live contract blocker changed; "
+            f"old={reason_snippet(job_reason)}; current={reason_snippet(current_reason)}"
+        )
+
+    return obsolete_experiment_repair_reason(base, job)
+
+
 def minutes_until(value: str, fallback: int) -> int:
     try:
         due_at = datetime.fromisoformat(value)
     except (TypeError, ValueError):
         return fallback
-    seconds = max(60, int((due_at - now()).total_seconds()))
+    seconds = int((due_at - now()).total_seconds())
+    if seconds <= 0:
+        # A due/overdue async wait can occur near a heartbeat boundary before
+        # goal_tick dispatches a packet. Do not collapse progress-dependent
+        # experiment monitors into 1-minute busy polling; preserve the live
+        # stage/ETA interval already stored on the job.
+        return bounded_minutes(fallback, fallback)
     return max(1, (seconds + 59) // 60)
 
 
 def async_wakeup_recommendation(project: str, job: dict[str, Any], reason: str) -> dict[str, Any]:
     due_at = str(job.get("next_poll_at") or "")
     interval_minutes = bounded_minutes(job.get("poll_interval_minutes"), 5)
+    interval_reason = str(job.get("poll_interval_reason") or "default async poll interval").strip()
     resume_minutes = minutes_until(due_at, interval_minutes)
     stage = str(job.get("stage") or "current")
     job_id = str(job.get("job_id") or "")
@@ -303,15 +2177,19 @@ def async_wakeup_recommendation(project: str, job: dict[str, Any], reason: str) 
         "Resume AutoResearch async polling for project "
         f"{project}. Run goal.py status, goal.py reconcile --stale-minutes 60, then goal.py tick. "
         "If tick dispatches this async poll job, execute the rendered packet through the named child skill, "
-        "capture PaperNexus progress/report artifacts, update the job, and run one follow-up tick. "
-        "If PaperNexus discovery/import is still running, do not sleep in-thread; record the status and create the next heartbeat from the new tick output. "
-        f"Target job_id={job_id}, stage={stage}, due_at={due_at}, blocker={reason}"
+        "capture PaperNexus progress/report artifacts, update the job, and then run the bounded continuation loop while progress is locally actionable. "
+        "If the external wait is terminal, superseded, or locally actionable and you delete the heartbeat, do not stop at cleanup; run status, reconcile, and tick again, then continue one bounded successor cycle if local work is exposed. "
+        "The loop budget is max_tick_actions=5 or about 10 minutes of active work; stop at hard_stop, queued_async_wait, repair_already_queued without a due packet, external live wait, terminal completion, user/budget/credential gate, or budget exhaustion. "
+        "If PaperNexus discovery/import is still running, do not sleep in-thread; record the status and create or update the next heartbeat from the new tick output. "
+        "For PaperNexus graph import waits, recompute the interval from live graph status: queued depth, active fast-commit percent, authoritative-sync state, terminal completion, and stale wait condition. "
+        f"Target job_id={job_id}, stage={stage}, due_at={due_at}, poll_interval_minutes={interval_minutes}, interval_reason={interval_reason}, blocker={reason}"
     )
     return {
         "recommended": True,
         "tool": "codex_app.automation_update",
         "kind": "heartbeat",
         "destination": "thread",
+        "heartbeat_scope": "external_async_wait",
         "interval_minutes": resume_minutes,
         "name": f"AutoResearch async poll: {stage}",
         "prompt": prompt,
@@ -326,15 +2204,17 @@ def continuation_wakeup_recommendation(project: str, from_stage: str, to_stage: 
         "Continue AutoResearch full_auto_bounded workflow for project "
         f"{project}. Run goal.py status, goal.py reconcile --stale-minutes 60, then goal.py tick. "
         "If tick returns a ready repair or async job, dispatch it through the named child skill, "
-        "write the required artifacts, update the job, and run one follow-up tick. "
+        "write the required artifacts, update the job, and then continue the bounded loop while progress is locally actionable. "
+        "If a stale heartbeat is deleted as cleanup, immediately run status, reconcile, and tick again before deciding to stop. "
+        "The loop budget is max_tick_actions=5 or about 10 minutes of active work; stop at hard_stop, queued_async_wait, repair_already_queued without a due packet, external live wait, terminal completion, user/budget/credential gate, or budget exhaustion. "
         "If tick returns queued_async_wait, create or update the async heartbeat from its wakeup recommendation. "
         "Do not sleep in-thread and do not treat raw literature discovery rows as graph-grounded evidence. "
         f"Continuation target: advanced from {from_stage} to {to_stage}."
     )
     return {
-        "recommended": True,
+        "recommended": False,
         "tool": "codex_app.automation_update",
-        "kind": "heartbeat",
+        "kind": "continuation_hint",
         "destination": "thread",
         "interval_minutes": 1,
         "name": f"AutoResearch continuation: {to_stage}",
@@ -386,6 +2266,7 @@ def execution_spec(stage: str, state: dict[str, Any], contract: dict[str, Any], 
         "processImports": False,
         "returnPartial": True,
         "persist": True,
+        "asyncLifecycle": "submit_progress_report",
     }
     lane_topics = {
         "target_domain": (
@@ -519,7 +2400,7 @@ def execution_spec(stage: str, state: dict[str, Any], contract: dict[str, Any], 
         "graph_build": {
             "skill": "autoreskill-papernexus-innovation",
             "role": "Researcher",
-            "goal": "Submit or poll PaperNexus import/material tasks for selected graph import plan papers. Every GRAPH_IMPORT_PLAN selected_papers row with import_action=import/supplement must receive a submitted import_workflow task and reach completed/stage=completed plus authoritative sync before graph_build can complete; split-reading/material evidence may satisfy material_view rows only.",
+            "goal": "Submit or poll PaperNexus import/material tasks for selected graph import plan papers. Every actionable GRAPH_IMPORT_PLAN selected_papers row with import_action=import/supplement must receive a submitted import_workflow task and reach completed/stage=completed plus authoritative sync before graph_build can complete. If exact source discovery, OA/index checks, and PaperNexus pdfUrl/sourcePath/serverFilePath attempts are exhausted for selected rows with no server-acceptable full text, record them as source_limited_exceptions and write GRAPH_BUILD_DECISION decision=advance_with_source_limited_exceptions with source_backed_graph_claim_scope=imported_only and claim_limits; those rows must not count as graph-grounded evidence. Split-reading/material evidence may satisfy material_view rows only.",
             "mcp_calls": [
                 {"tool": "list_corpora", "args": {}},
                 {"tool": "import_workflow", "args": {"operation": "queue_progress", "corpus": corpus, "limit": 20}},
@@ -528,7 +2409,20 @@ def execution_spec(stage: str, state: dict[str, Any], contract: dict[str, Any], 
                     "args": {
                         "operation": "submit",
                         "corpus": corpus,
-                        "identifiers": "<repeat for every remaining GRAPH_IMPORT_PLAN selected_papers import_action=import/supplement with DOI/arxivId/PMID/PMCID/ISBN/ISSN; continue progressive batches until submitted_import_count equals planned_import_count; capture taskIds and idempotency keys>",
+                        "identifiers": "<repeat for every remaining actionable GRAPH_IMPORT_PLAN selected_papers import_action=import/supplement with DOI/arxivId/PMID/PMCID/ISBN/ISSN; continue progressive batches until submitted_import_count equals effective_planned_import_count; capture taskIds and idempotency keys; route exhausted no-fulltext rows to source_limited_exceptions instead of retrying empty metadata-only imports>",
+                        "processingProfile": "fast-md-background-semantic",
+                        "completionPolicy": "graph-visible",
+                        "importExecutionMode": "dag",
+                        "preferMarkdown": True,
+                        "generateArxivMarkdownSources": True,
+                        "llmContextWindowTokens": 1000000,
+                        "llmExtractionStrategy": "long-context-first",
+                        "llmLongContextMaxPapersPerCall": 10,
+                        "llmBatchConcurrency": 2,
+                        "importBatchEnabled": True,
+                        "importBatchInitialTasks": 4,
+                        "importBatchMaxTasks": 16,
+                        "importBatchProgressive": True,
                         "trigger": "graph_build_selected_import_plan",
                     },
                 },
@@ -558,7 +2452,7 @@ def execution_spec(stage: str, state: dict[str, Any], contract: dict[str, Any], 
             "role": "Researcher",
             "goal": "Build frontier, gap, source-transfer, negative-evidence, and experiment norm materials from PaperNexus; trigger follow-up literature discovery when material packs leave missing gap/limitation/transfer roles.",
             "mcp_calls": [
-                {"tool": "literature_discovery", "args": {"operation": "search", "corpus": corpus, "topic": f"{goal_topic}\n\nSearch purpose: frontier mapping, limitations, failure modes, negative evidence, transfer sources, and experiment norms.", **broad_metadata_discovery}},
+                {"tool": "literature_discovery", "args": {"operation": "submit", "corpus": corpus, "topic": f"{goal_topic}\n\nSearch purpose: frontier mapping, limitations, failure modes, negative evidence, transfer sources, and experiment norms.", **broad_metadata_discovery}},
                 {"tool": "agent_materials", "args": {"operation": "research_material_pack", "corpus": corpus}},
                 {"tool": "agent_materials", "args": {"operation": "experiment_cost_materials", "corpus": corpus}},
                 {"tool": "research_lookup", "args": {"operation": "interdisciplinary_potential", "corpus": corpus}},
@@ -575,11 +2469,11 @@ def execution_spec(stage: str, state: dict[str, Any], contract: dict[str, Any], 
         "ideation": {
             "skill": "autoreskill-ideation-panel",
             "role": "Researcher",
-            "goal": "Generate a broad 12-15 item academic-paper-oriented experiment idea pool only after the pre-idea evidence gate passes. Trigger target-domain, near-neighbor, and far-neighbor discovery through papernexus-remote; use target-domain evidence to anchor problem/baseline/protocol and overlap risk, and use near/far-neighbor or cross-lane transfer as the preferred primary method source for top-tier ideas. Actively screen raw discovery; satisfy the venue-agnostic breadth lint, not just one attempt per lane; submit import/supplement work for roughly 60-80% of the high-signal eligible set through PaperNexus import_workflow with progressive batching, wait for completed task/stage plus authoritative sync before graph-grounded use, and split-read/materialize the selected evidence roles; build INNOVATION_SLOT_MAP.json; write PRE_IDEA_EVIDENCE_GATE.json status=passed; then generate ideas tied to innovation_slot_refs. Every paper idea must include at least three mutually necessary innovation points covering problem/protocol/evaluation, method/mechanism, and training/integration/analysis/validation, plus a coherent paper storyline; score every idea against target/near/far evidence before idea_gate selection.",
+            "goal": "Generate a broad 12-15 item academic-paper-oriented experiment idea pool only after the pre-idea evidence gate passes. Trigger target-domain, near-neighbor, and far-neighbor discovery through papernexus-remote; use target-domain evidence to anchor problem/baseline/protocol and overlap risk, and use near/far-neighbor or cross-lane transfer as the preferred primary method source for top-tier ideas. Actively screen raw discovery; satisfy the venue-agnostic breadth lint, not just one attempt per lane; submit actionable import/supplement work for roughly 60-80% of the high-signal eligible set through PaperNexus import_workflow with progressive batching, wait for completed task/stage plus authoritative sync before graph-grounded use, record source-limited exceptions plus claim limits for exhausted no-fulltext rows, and split-read/materialize the selected evidence roles; build INNOVATION_SLOT_MAP.json; write PRE_IDEA_EVIDENCE_GATE.json status=passed; then generate ideas tied to innovation_slot_refs. Every paper idea must include at least three mutually necessary innovation points covering problem/protocol/evaluation, method/mechanism, and training/integration/analysis/validation, plus a coherent paper storyline; score every idea against target/near/far evidence before idea_gate selection.",
             "mcp_calls": [
-                {"tool": "literature_discovery", "args": {"operation": "search", "corpus": corpus, "topic": lane_topics["target_domain"], **broad_metadata_discovery}},
-                {"tool": "literature_discovery", "args": {"operation": "search", "corpus": corpus, "topic": lane_topics["near_neighbor"], **broad_metadata_discovery}},
-                {"tool": "literature_discovery", "args": {"operation": "search", "corpus": corpus, "topic": lane_topics["far_neighbor"], **broad_metadata_discovery}},
+                {"tool": "literature_discovery", "args": {"operation": "submit", "corpus": corpus, "topic": lane_topics["target_domain"], **broad_metadata_discovery}},
+                {"tool": "literature_discovery", "args": {"operation": "submit", "corpus": corpus, "topic": lane_topics["near_neighbor"], **broad_metadata_discovery}},
+                {"tool": "literature_discovery", "args": {"operation": "submit", "corpus": corpus, "topic": lane_topics["far_neighbor"], **broad_metadata_discovery}},
             ],
             "capture": [
                 script_cmd(
@@ -649,7 +2543,6 @@ def execution_spec(stage: str, state: dict[str, Any], contract: dict[str, Any], 
                 ".autoreskill/papernexus/LITERATURE_DISCOVERY_TRIAGE.json",
                 ".autoreskill/papernexus/PAPER_SELECTION_SCORECARD.json",
                 ".autoreskill/papernexus/GRAPH_IMPORT_PLAN.json",
-                ".autoreskill/papernexus/GRAPH_IMPORT_STATUS.json",
                 ".autoreskill/papernexus/IMPORT_WORKFLOW_STATUS.json",
                 ".autoreskill/papernexus/SPLIT_READING_EVIDENCE_PACK.json",
                 ".autoreskill/ideation/INNOVATION_SLOT_MAP.json",
@@ -665,7 +2558,7 @@ def execution_spec(stage: str, state: dict[str, Any], contract: dict[str, Any], 
             "role": "Researcher",
             "goal": "Convert discovery and PaperNexus evidence into SOTA matrix, gap synthesis, and citation queue. If SOTA, baseline, dataset, metric, venue, or citation coverage is thin, trigger targeted PaperNexus literature discovery before declaring the review complete.",
             "mcp_calls": [
-                {"tool": "literature_discovery", "args": {"operation": "search", "corpus": corpus, "topic": f"{goal_topic}\n\nSearch purpose: SOTA matrix, related work, baseline/dataset/metric anchors, target-venue context, and citation queue closure.", **broad_metadata_discovery}},
+                {"tool": "literature_discovery", "args": {"operation": "submit", "corpus": corpus, "topic": f"{goal_topic}\n\nSearch purpose: SOTA matrix, related work, baseline/dataset/metric anchors, target-venue context, and citation queue closure.", **broad_metadata_discovery}},
                 {"tool": "research_briefing", "args": {"operation": "research_brief", "corpus": corpus}},
                 {"tool": "research_briefing", "args": {"operation": "evidence_chain", "corpus": corpus}},
             ],
@@ -681,7 +2574,7 @@ def execution_spec(stage: str, state: dict[str, Any], contract: dict[str, Any], 
             "role": "Reviewer",
             "goal": "Run Professor/Postdoc/PhDStudent/Critic gate after the post-idea novelty and venue scorecard exists, select one idea from the ideation-stage experiment idea pool, and assign every idea a lifecycle decision. Write IDEA_DECISION_LEDGER.json so selected, alternate, risk-repair, repair_needed, parked, killed, and degraded speculative ideas all have decision reasons, failure classes, claim scopes, and reentry conditions. Reject or repair ideas whose three-or-more innovation bundle does not form one paper storyline, even if one module looks promising. Trigger targeted PaperNexus discovery if top ideas still lack closest-prior comparison, overlap-risk closure, negative evidence, or a credible near/far-neighbor transfer bridge.",
             "mcp_calls": [
-                {"tool": "literature_discovery", "args": {"operation": "search", "corpus": corpus, "topic": f"{goal_topic}\n\nSearch purpose: selected/top idea novelty gate, closest priors, overlap risk, negative evidence, and transfer-bridge validation.", **broad_metadata_discovery}},
+                {"tool": "literature_discovery", "args": {"operation": "submit", "corpus": corpus, "topic": f"{goal_topic}\n\nSearch purpose: selected/top idea novelty gate, closest priors, overlap risk, negative evidence, and transfer-bridge validation.", **broad_metadata_discovery}},
                 {"tool": "agent_materials", "args": {"operation": "research_material_pack", "corpus": corpus}},
             ],
             "capture": [
@@ -709,9 +2602,9 @@ def execution_spec(stage: str, state: dict[str, Any], contract: dict[str, Any], 
         "experiment_plan": {
             "skill": "autoreskill-experiment-plan",
             "role": "Orchestrator",
-            "goal": "Materialize an INNOVATION_PACKET, TRACK_PLAN_MATRIX, and reviewed experiment plan from the selected ideation-stage optimization idea while preserving its three-or-more paper innovation bundle and complete storyline. Consume IDEA_DECISION_LEDGER.json and IDEA_TRACK_SEEDS.json so primary, alternate, and risk-repair tracks carry lifecycle refs, launch status, and bounded B/I/E search settings: B=branch budget, I=search iterations, E=versions per branch under the locked protocol. Before launch, trigger targeted PaperNexus discovery/material closure for selected-idea novelty, current-field overlap risk, baseline/protocol/metric norms, negative evidence, and target-domain absence evidence when required.",
+            "goal": "Materialize an INNOVATION_PACKET, TRACK_PLAN_MATRIX, and reviewed experiment plan from the selected ideation-stage optimization idea while preserving its three-or-more paper innovation bundle and complete storyline. Consume IDEA_DECISION_LEDGER.json and IDEA_TRACK_SEEDS.json so primary, alternate, and risk-repair tracks carry lifecycle refs, launch status, and bounded B/I/E search settings: B=branch budget, I=search iterations, E=versions per branch under the locked protocol. Record stability_seed_policy with max_random_seeds=3; IDEA_TRACK_SEEDS are track candidates, not experiment random seeds. Build dataset_runtime_plan with per-dataset runtime estimates and choose a small/medium multi-class feasibility-first dataset for innovation viability before any largest/full-scale dataset unless no smaller proxy exists or the user explicitly approves starting large. Before launch, trigger targeted PaperNexus discovery/material closure for selected-idea novelty, current-field overlap risk, baseline/protocol/metric norms, negative evidence, and target-domain absence evidence when required.",
             "mcp_calls": [
-                {"tool": "literature_discovery", "args": {"operation": "search", "corpus": corpus, "topic": f"{goal_topic}\n\nSearch purpose: selected idea experiment-plan closure, novelty risk, baseline/protocol/metric norms, negative evidence, and current-field absence evidence if the method is target-domain-only.", **broad_metadata_discovery}},
+                {"tool": "literature_discovery", "args": {"operation": "submit", "corpus": corpus, "topic": f"{goal_topic}\n\nSearch purpose: selected idea experiment-plan closure, novelty risk, baseline/protocol/metric norms, negative evidence, and current-field absence evidence if the method is target-domain-only.", **broad_metadata_discovery}},
                 {"tool": "agent_materials", "args": {"operation": "research_material_pack", "corpus": corpus}},
                 {"tool": "agent_materials", "args": {"operation": "closest_prior_materials", "corpus": corpus}},
             ],
@@ -719,6 +2612,7 @@ def execution_spec(stage: str, state: dict[str, Any], contract: dict[str, Any], 
                 script_cmd("autoreskill-experiment-plan", "track_plan_matrix.py", "--project <project-root> --check"),
                 script_cmd("autoreskill-experiment-plan", "prelaunch_lint.py", "--project <project-root>"),
                 script_cmd("autoreskill-experiment-plan", "innovation_lint.py", "--project <project-root>"),
+                script_cmd("autoreskill-workflow", "baseline_report_alignment_lint.py", "--project <project-root> --stage experiment_plan"),
                 script_cmd("autoreskill-workflow", "innovation_story_lint.py", "--project <project-root> --stage experiment_plan"),
             ],
             "outputs": [
@@ -736,6 +2630,7 @@ def execution_spec(stage: str, state: dict[str, Any], contract: dict[str, Any], 
             "capture": [
                 script_cmd("autoreskill-implement-experiment", "baseline_clone_lint.py", "--project <project-root>"),
                 script_cmd("autoreskill-implement-experiment", "experiment_drift_lint.py", "--project <project-root>"),
+                script_cmd("autoreskill-workflow", "baseline_report_alignment_lint.py", "--project <project-root> --stage code"),
                 script_cmd(
                     "autoreskill-implement-experiment",
                     "experiment_real_readiness_lint.py",
@@ -754,25 +2649,27 @@ def execution_spec(stage: str, state: dict[str, Any], contract: dict[str, Any], 
         "experiment": {
             "skill": "autoreskill-run-experiment",
             "role": "Coder",
-            "goal": "Launch or reconcile candidate, ablation, and confirmation runs only after baseline-protocol preflight passes. Preserve selected_idea_id, track_id, branch_id, search_iteration, and version_index lineage from TRACK_PLAN_MATRIX into every REMOTE_RUN and EXPERIMENT_LEDGER entry. Failed, regressed, budget-stopped, spec-violating, or diagnostic-only runs must record failure_class and next_action such as repair_same_branch, switch_track, leap_idea, negative_result_route, or hard_stop. Do not substitute a small model or unregistered feature pilot for the locked baseline; off-protocol probes must stop after one diagnostic run and stay not_promoted.",
+            "goal": "Launch or reconcile candidate, ablation, and confirmation runs only after baseline-protocol preflight passes. Preserve selected_idea_id, track_id, branch_id, search_iteration, and version_index lineage from TRACK_PLAN_MATRIX into every REMOTE_RUN and EXPERIMENT_LEDGER entry. For remote runs, sync non-checkpoint training logs and lightweight result metadata back to the local experiment directory on every reconcile, recording local_log_paths and log_sync while excluding checkpoints/model weights unless explicitly requested. Failed, regressed, budget-stopped, spec-violating, or diagnostic-only runs must record failure_class and next_action such as repair_same_branch, switch_track, leap_idea, negative_result_route, or hard_stop. Do not substitute a small model or unregistered feature pilot for the locked baseline; off-protocol probes must stop after one diagnostic run and stay not_promoted.",
             "mcp_calls": [],
             "capture": [
                 script_cmd("autoreskill-implement-experiment", "baseline_clone_lint.py", "--project <project-root>"),
                 script_cmd("autoreskill-run-experiment", "baseline_protocol_launch_lint.py", "--project <project-root>"),
+                script_cmd("autoreskill-workflow", "baseline_report_alignment_lint.py", "--project <project-root> --stage experiment"),
             ],
             "outputs": [".autoreskill/coder/EXPERIMENT_LEDGER.json", ".autoreskill/coder/TRACK_RANKING.json", ".autoreskill/coder/EXPERIMENT_INDEX.md"],
         },
         "analysis": {
             "skill": "autoreskill-analyze-results",
             "role": "Analyzer",
-            "goal": "Convert experiment proof into claim-evidence matrix, track verdicts, idea outcome summary, unsupported claims, and narrative report. Consume IDEA_DECISION_LEDGER, TRACK_PLAN_MATRIX, EXPERIMENT_LEDGER, BEST_RUN_SELECTION, SCORE_VERIFICATION, and SPEC_VIOLATION_AUDIT so every idea is classified as promoted evidence, candidate/pilot-only, failed/regressed negative evidence, parked, killed, or downgraded. Trigger targeted PaperNexus discovery when results contradict the expected mechanism, expose a hidden confound, or need source-backed negative evidence or limitation framing.",
+            "goal": "Convert experiment proof into claim-evidence matrix, track verdicts, idea outcome summary, unsupported claims, and narrative report. Consume IDEA_DECISION_LEDGER, TRACK_PLAN_MATRIX, EXPERIMENT_LEDGER, BEST_RUN_SELECTION, SCORE_VERIFICATION, and SPEC_VIOLATION_AUDIT so every idea is classified as promoted evidence, candidate/pilot-only, failed/regressed negative evidence, parked, killed, or downgraded. IDEA_OUTCOME_SUMMARY must enumerate effective_innovation_points with at least three accepted, evidence-backed, mutually necessary paper-story points covering problem/protocol/evaluation, method/mechanism, and training/integration/analysis/validation; parameter tuning, diagnostics, future work, and terminal negative ideas cannot count. After every analysis pass, IDEA_OUTCOME_SUMMARY must include post_analysis_self_audit.least_confident_point and post_analysis_self_audit.largest_possible_misunderstanding, answering where the current conclusion is least certain and what global misunderstanding or blind spot may remain. This self-audit is a claim-boundary guard and cannot upgrade weak evidence. Trigger targeted PaperNexus discovery when results contradict the expected mechanism, expose a hidden confound, or need source-backed negative evidence or limitation framing.",
             "mcp_calls": [
-                {"tool": "literature_discovery", "args": {"operation": "search", "corpus": corpus, "topic": f"{goal_topic}\n\nSearch purpose: post-result claim repair, contradictory evidence, negative results, limitations, failure modes, and mechanism diagnosis.", **broad_metadata_discovery}},
+                {"tool": "literature_discovery", "args": {"operation": "submit", "corpus": corpus, "topic": f"{goal_topic}\n\nSearch purpose: post-result claim repair, contradictory evidence, negative results, limitations, failure modes, and mechanism diagnosis.", **broad_metadata_discovery}},
                 {"tool": "agent_materials", "args": {"operation": "research_material_pack", "corpus": corpus}},
             ],
             "capture": [
                 script_cmd("autoreskill-analyze-results", "best_run_selector.py", "--project <project-root> --check"),
                 script_cmd("autoreskill-analyze-results", "analysis_lint.py", "--project <project-root>"),
+                script_cmd("autoreskill-workflow", "baseline_report_alignment_lint.py", "--project <project-root> --stage analysis"),
                 script_cmd("autoreskill-workflow", "innovation_story_lint.py", "--project <project-root> --stage analysis"),
             ],
             "outputs": [
@@ -783,51 +2680,73 @@ def execution_spec(stage: str, state: dict[str, Any], contract: dict[str, Any], 
                 ".autoreskill/analyzer/CLAIM_EVIDENCE_MATRIX.md",
                 ".autoreskill/analyzer/TRACK_VERDICTS.md",
                 ".autoreskill/analyzer/UNSUPPORTED_CLAIMS.md",
+                ".autoreskill/analyzer/NARRATIVE_REPORT.md",
                 *INNOVATION_STORY_FILES,
             ],
         },
         "review_pressure": {
             "skill": "autoreskill-review-gate",
             "role": "Reviewer",
-            "goal": "Run isolated review and close or downgrade blocking findings. Trigger targeted PaperNexus discovery for reviewer objections about novelty, related work, missing baselines, missing citations, protocol norms, threat models, or unsupported significance.",
+            "goal": "Run multi-round isolated review and close or downgrade blocking findings. Produce at least two complete review-repair cycles covering novelty, soundness/method, experiment/statistics, clarity/writing, and reproducibility/limitations. Write REVIEW_FINDINGS, REVIEW_REPAIR_LEDGER, and MULTI_ROUND_REVIEW_GATE; do not pass review_pressure while high/critical blockers remain open. Trigger targeted PaperNexus discovery for reviewer objections about novelty, related work, missing baselines, missing citations, protocol norms, threat models, or unsupported significance.",
             "mcp_calls": [
-                {"tool": "literature_discovery", "args": {"operation": "search", "corpus": corpus, "topic": f"{goal_topic}\n\nSearch purpose: reviewer-pressure repair for novelty, related work, missing baselines/citations, protocol norms, threat models, and significance claims.", **broad_metadata_discovery}},
+                {"tool": "literature_discovery", "args": {"operation": "submit", "corpus": corpus, "topic": f"{goal_topic}\n\nSearch purpose: reviewer-pressure repair for novelty, related work, missing baselines/citations, protocol norms, threat models, and significance claims.", **broad_metadata_discovery}},
                 {"tool": "research_briefing", "args": {"operation": "evidence_chain", "corpus": corpus}},
             ],
             "capture": [
                 script_cmd("autoreskill-review-gate", "review_lint.py", "--project <project-root>"),
                 script_cmd("autoreskill-review-gate", "citation_lint.py", "--project <project-root>"),
+                script_cmd("autoreskill-workflow", "baseline_report_alignment_lint.py", "--project <project-root> --stage review_pressure"),
                 script_cmd("autoreskill-workflow", "innovation_story_lint.py", "--project <project-root> --stage review_pressure"),
             ],
-            "outputs": [".autoreskill/reviewer/REVIEW_FINDINGS.json", *INNOVATION_STORY_FILES],
+            "outputs": [
+                ".autoreskill/reviewer/REVIEW_FINDINGS.json",
+                ".autoreskill/reviewer/REVIEW_REPAIR_LEDGER.json",
+                ".autoreskill/reviewer/MULTI_ROUND_REVIEW_GATE.json",
+                *INNOVATION_STORY_FILES,
+            ],
         },
         "writing": {
             "skill": "autoreskill-paper-write",
             "role": "Academic Writer",
-            "goal": "Write evidence-bound manuscript material from approved claims, literature, review guidance, and IDEA_OUTCOME_SUMMARY. Promoted runs may support strong improvement claims; failed, regressed, killed, or parked ideas may only appear as negative evidence, limitations, future work, or downgraded claims. Trigger targeted literature discovery when related-work contrast, must-cite papers, citation ids, or claim support are missing.",
+            "goal": "Write evidence-bound manuscript material from approved claims, literature, review guidance, and IDEA_OUTCOME_SUMMARY. The manuscript must preserve the three-effective-innovation storyline from IDEA_OUTCOME_SUMMARY.effective_innovation_points and may not promote parameter tuning, failed/regressed/killed/parked ideas, unsupported future work, or claim-downgraded material as a core contribution. Promoted runs may support strong improvement claims; failed, regressed, killed, or parked ideas may only appear as negative evidence, limitations, future work, or downgraded claims. Run final paper forensics so numeric/statistical inconsistencies and exact presentation residues are repaired before marking writing complete; AIS style impressions are zero-weight and are not authorship evidence. Trigger targeted literature discovery when related-work contrast, must-cite papers, citation ids, or claim support are missing.",
             "mcp_calls": [
-                {"tool": "literature_discovery", "args": {"operation": "search", "corpus": corpus, "topic": f"{goal_topic}\n\nSearch purpose: manuscript related-work and citation closure, closest-prior contrast, must-cite papers, and claim support.", **broad_metadata_discovery}},
+                {"tool": "literature_discovery", "args": {"operation": "submit", "corpus": corpus, "topic": f"{goal_topic}\n\nSearch purpose: manuscript related-work and citation closure, closest-prior contrast, must-cite papers, and claim support.", **broad_metadata_discovery}},
                 {"tool": "research_briefing", "args": {"operation": "research_brief", "corpus": corpus}},
             ],
-            "capture": [script_cmd("autoreskill-workflow", "innovation_story_lint.py", "--project <project-root> --stage writing")],
-            "outputs": [".autoreskill/paper/main.tex", ".autoreskill/paper/write_package.json", *INNOVATION_STORY_FILES],
+            "capture": [
+                script_cmd("autoreskill-workflow", "baseline_report_alignment_lint.py", "--project <project-root> --stage writing"),
+                script_cmd("autoreskill-workflow", "innovation_story_lint.py", "--project <project-root> --stage writing"),
+                script_cmd("autoreskill-workflow", "paper_forensics_lint.py", "--project <project-root> --stage writing"),
+            ],
+            "outputs": [
+                ".autoreskill/paper/main.tex",
+                ".autoreskill/paper/write_package.json",
+                ".autoreskill/paper/PAPER_FORENSICS_REPORT.json",
+                ".autoreskill/paper/PAPER_CLAIM_LEDGER.json",
+                *INNOVATION_STORY_FILES,
+            ],
         },
         "submission_ready": {
             "skill": "autoreskill-review-gate",
             "role": "WorkflowGuard",
-            "goal": "Verify final submission package, citation integrity, front matter, and target-venue readiness. Trigger final targeted discovery only for citation/source blockers that prevent readiness.",
+            "goal": "Verify final submission package, citation integrity, front matter, target-venue readiness, final paper forensics, the three-effective-innovation story gate, and the multi-round review gate. Do not mark submission_ready unless PAPER_CLAIM_VERIFICATION passes, PAPER_FORENSICS_REPORT has no blocking verdict-bearing findings, IDEA_OUTCOME_SUMMARY has at least three accepted effective innovation points, and MULTI_ROUND_REVIEW_GATE records at least two complete review-repair cycles with no unresolved blockers. Trigger final targeted discovery only for citation/source blockers that prevent readiness.",
             "mcp_calls": [
-                {"tool": "literature_discovery", "args": {"operation": "search", "corpus": corpus, "topic": f"{goal_topic}\n\nSearch purpose: final citation/source verification and unresolved bibliography blockers before submission.", **broad_metadata_discovery}},
+                {"tool": "literature_discovery", "args": {"operation": "submit", "corpus": corpus, "topic": f"{goal_topic}\n\nSearch purpose: final citation/source verification and unresolved bibliography blockers before submission.", **broad_metadata_discovery}},
             ],
             "capture": [
                 script_cmd("autoreskill-review-gate", "review_lint.py", "--project <project-root>"),
                 script_cmd("autoreskill-review-gate", "citation_lint.py", "--project <project-root>"),
+                script_cmd("autoreskill-workflow", "baseline_report_alignment_lint.py", "--project <project-root> --stage submission_ready"),
                 script_cmd("autoreskill-workflow", "innovation_story_lint.py", "--project <project-root> --stage submission_ready"),
+                script_cmd("autoreskill-workflow", "paper_forensics_lint.py", "--project <project-root> --stage submission_ready"),
             ],
             "outputs": [
                 ".autoreskill/paper/main.tex",
                 ".autoreskill/paper/main.pdf",
+                ".autoreskill/paper/PAPER_FORENSICS_REPORT.json",
                 ".autoreskill/submission_ready.json",
+                ".autoreskill/reviewer/MULTI_ROUND_REVIEW_GATE.json",
+                ".autoreskill/reviewer/REVIEW_REPAIR_LEDGER.json",
                 *INNOVATION_STORY_FILES,
             ],
         },
@@ -844,6 +2763,32 @@ def execution_spec(stage: str, state: dict[str, Any], contract: dict[str, Any], 
             "outputs": contract.get("missing", []),
         },
     )
+    if stage == "experiment" and job_action == "repair_failed_experiment":
+        spec = dict(spec)
+        spec["goal"] = (
+            "Analyze the latest failed/regressed/budget-stopped/spec-violating experiment before launching any new run. "
+            "Read EXPERIMENT_LEDGER, REMOTE_RUN metadata, synced logs, TRACK_PLAN_MATRIX, and the selected idea refs; write a concise failure analysis that names the root cause, failure_class, affected selected_idea_id/track_id/branch_id/version, and whether the issue is implementation, data/protocol, insufficient ablation/confirmation, or idea/mechanism failure. "
+            f"If fewer than {MAX_FAILED_EXPERIMENT_REPAIRS} same-idea repair attempts have been used, execute exactly one bounded repair run under the locked protocol, increment repair_attempt or repair_iteration in the ledger, and record next_action plus promotion decision. "
+            f"If {MAX_FAILED_EXPERIMENT_REPAIRS} same-idea repairs have already failed to produce promoted improvement, do not launch another same-idea repair; write coder/EXPERIMENT_NEGATIVE_BLOCKER.json with status=change_idea_or_innovation_required so WorkflowGuard can return to experiment_plan, idea_gate, or ideation."
+        )
+        spec["capture"] = append_unique(
+            list(spec.get("capture") or []),
+            [
+                script_cmd("autoreskill-run-experiment", "baseline_protocol_launch_lint.py", "--project <project-root>"),
+                script_cmd("autoreskill-implement-experiment", "baseline_clone_lint.py", "--project <project-root>"),
+            ],
+        )
+        spec["outputs"] = append_unique(
+            list(spec.get("outputs") or []),
+            [
+                ".autoreskill/coder/EXPERIMENT_FAILURE_ANALYSIS.json",
+                ".autoreskill/coder/EXPERIMENT_NEGATIVE_BLOCKER.json",
+                ".autoreskill/coder/EXPERIMENT_LEDGER.json",
+                ".autoreskill/coder/TRACK_RANKING.json",
+                ".autoreskill/coder/experiments/**/REMOTE_RUN.json",
+                ".autoreskill/coder/experiments/**/results/*",
+            ],
+        )
     spec.update(common)
     return spec
 
@@ -862,6 +2807,7 @@ def write_job_packet(
     capture_commands = list(spec["capture"])
     outputs = list(spec["outputs"])
     literature_search = has_literature_search(mcp_calls)
+    paper_code_transfer_requested = stage in PAPER_CODE_TRANSFER_STAGES and has_paper_code_transfer_request(base, state, job, contract)
     if literature_search:
         corpus = (state.get("paperNexus") or {}).get("corpus")
         if not any(isinstance(call, dict) and call.get("tool") == "import_workflow" for call in mcp_calls):
@@ -905,7 +2851,6 @@ def write_job_packet(
                 ".autoreskill/papernexus/LITERATURE_DISCOVERY_TRIAGE.json",
                 ".autoreskill/papernexus/PAPER_SELECTION_SCORECARD.json",
                 ".autoreskill/papernexus/GRAPH_IMPORT_PLAN.json",
-                ".autoreskill/papernexus/GRAPH_IMPORT_STATUS.json",
                 ".autoreskill/papernexus/IMPORT_WORKFLOW_STATUS.json",
                 ".autoreskill/papernexus/SPLIT_READING_EVIDENCE_PACK.json",
             ],
@@ -914,6 +2859,26 @@ def write_job_packet(
         outputs = append_unique(outputs, INNOVATION_STORY_FILES if stage not in {"ideation", "idea_gate"} else [INNOVATION_STORY_FILES[0]])
         if not any("innovation_story_lint.py" in command for command in capture_commands):
             capture_commands.append(script_cmd("autoreskill-workflow", "innovation_story_lint.py", f"--project <project-root> --stage {stage}"))
+    if paper_code_transfer_requested:
+        outputs = append_unique(outputs, PAPER_CODE_TRANSFER_FILES)
+        if not any("paper_code_transfer_lint.py" in command for command in capture_commands):
+            capture_commands.append(script_cmd("autoreskill-workflow", "paper_code_transfer_lint.py", "--project <project-root>"))
+    if stage in BASELINE_REPORT_ALIGNMENT_STAGES:
+        if not any("baseline_report_alignment_lint.py" in command for command in capture_commands):
+            capture_commands.append(script_cmd("autoreskill-workflow", "baseline_report_alignment_lint.py", f"--project <project-root> --stage {stage}"))
+    if stage in {"writing", "submission_ready"}:
+        if not any("paper_forensics_lint.py" in command for command in capture_commands):
+            capture_commands.append(script_cmd("autoreskill-workflow", "paper_forensics_lint.py", f"--project <project-root> --stage {stage}"))
+        outputs = append_unique(
+            outputs,
+            [
+                ".autoreskill/paper/PAPER_CLAIM_LEDGER.json",
+                ".autoreskill/paper/PAPER_FORENSICS_FINDINGS.json",
+                ".autoreskill/paper/PAPER_FORENSICS_REPORT.json",
+                ".autoreskill/paper/PAPER_FORENSICS_REPORT.md",
+                ".autoreskill/paper/AIS_STYLE_IMPRESSIONS.json",
+            ],
+        )
     constraints = [
         "Use PaperNexus live graph work only through papernexus-remote MCP.",
         "Do not use local PaperNexus CLI, raw HTTP, local graph files, local MCP, or SSH graph commands as substitutes.",
@@ -925,14 +2890,16 @@ def write_job_packet(
         "contract_lint.py or the stage linter reports complete",
         "decision_log.jsonl records the produced artifact or explicit blocker",
     ]
+    if stage in {"writing", "submission_ready"}:
+        acceptance_criteria.append("paper_forensics_lint.py reports complete with no blocking verdict-bearing findings; AIS impressions remain zero-weight")
     if literature_search:
         constraints.extend(
             [
-                "Treat literature_discovery search results as recall only, not graph-grounded evidence.",
+                "Treat literature_discovery submit/report or targeted search results as recall only, not graph-grounded evidence.",
                 "For broad or long-running discovery/import work, prefer literature_discovery operation=submit plus progress/report polling; do not lose server-side state to an MCP client timeout.",
                 "After every useful discovery result, screen candidates into papernexus/PAPER_SELECTION_SCORECARD.json and reject duplicates, weak relevance, unresolved sources, survey noise, and generic benchmark-only papers.",
                 "Build papernexus/GRAPH_IMPORT_PLAN.json from selected usable papers, then request PaperNexus import/supplement/material-view or split-reading evidence before using those papers for novelty, baseline, mechanism, limitation, or citation claims.",
-                "Use PaperNexus import_workflow queue_progress/status/wait for every GRAPH_IMPORT_PLAN selected_papers row with import_action=import/supplement; capture papernexus/IMPORT_WORKFLOW_STATUS.json and require submitted_import_count, completed_import_count, and authoritative_sync_completed_count to equal planned_import_count before treating graph_import papers as graph-visible.",
+                "Use PaperNexus import_workflow queue_progress/status/wait for every actionable GRAPH_IMPORT_PLAN selected_papers row with import_action=import/supplement; capture papernexus/IMPORT_WORKFLOW_STATUS.json and require submitted_import_count, completed_import_count, and authoritative_sync_completed_count to equal effective_planned_import_count before treating imported graph_import papers as graph-visible. If exact source discovery/OA checks/PaperNexus source attempts are exhausted, record source_limited_exception_keys and claim limits; those exception rows are not graph-grounded evidence and may only be metadata-screened background until later imported.",
                 "Do not use split-reading/material evidence to satisfy import_action=import/supplement rows. Split-reading/material evidence may satisfy material_view rows only.",
                 "Use progressive import batching defaults unless the server overrides them: importBatchEnabled=true, importBatchInitialTasks=4, importBatchMaxTasks=16, importBatchProgressive=true.",
                 "A fast commit with authoritativeSync pending is an async wait condition, not graph-grounded evidence closure.",
@@ -942,7 +2909,7 @@ def write_job_packet(
             [
                 "Raw discovery candidates are screened before any graph/material evidence claim",
                 "Selected usable papers have explicit graph_import, split_read_only, watchlist, or rejection decisions",
-                "IMPORT_WORKFLOW_STATUS.json records planned/submitted/completed/authoritative-sync counts, taskIds/batchIds, and missing unsubmitted/incomplete/unsynced keys for selected import tasks",
+                "IMPORT_WORKFLOW_STATUS.json records planned/effective-planned/submitted/completed/authoritative-sync counts, taskIds/batchIds, missing unsubmitted/incomplete/unsynced keys for actionable selected import tasks, and source_limited_exception_keys when no server-acceptable full text can be obtained",
                 "Graph/material import, authoritative-sync wait, or split-reading blockers are recorded instead of silently treating raw search rows as evidence",
             ]
         )
@@ -977,6 +2944,56 @@ def write_job_packet(
                 "The selected idea would not remain a coherent paper if any one innovation point were removed",
             ]
         )
+    if paper_code_transfer_requested:
+        constraints.extend(
+            [
+                "When the goal or packet requires code survey, preserve the three-layer audit trail: raw paper/code candidates, repository static evidence, and reviewed transfer decisions.",
+                "Do not treat repository existence, GitHub stars, project pages, benchmark-only repos, or README-level matches as innovation evidence.",
+                "Static source-code evidence can support feasibility, active-code-path, and mechanism-transfer claims only; performance claims require matched experiment artifacts.",
+                "Migrated code ideas must record source mechanism, target-task adaptation, required code/protocol changes, novelty/overlap risk, evidence boundary, and validation/falsification route before selection or launch planning.",
+            ]
+        )
+        acceptance_criteria.extend(
+            [
+                "paper_code_transfer_lint.py reports complete when paper-code survey is required",
+                "CODE_MECHANISM_MAP.json and INNOVATION_MIGRATION_MATRIX.json distinguish direct-transfer, needs-adaptation, diagnostic-only, parked, killed, and source-limited ideas",
+            ]
+        )
+    if stage in BASELINE_REPORT_ALIGNMENT_STAGES:
+        constraints.extend(
+            [
+                "Use paper-reported baseline metrics as the primary numerical authority when a paper-backed baseline exists.",
+                "Local or reproduced baseline metrics are diagnostic-only unless the project records an internal no-paper-report ablation boundary.",
+                "Do not mark a run promoted, ready for analysis, or manuscript-supporting unless baseline_report_alignment_lint.py passes for this stage.",
+            ]
+        )
+        acceptance_criteria.append("baseline_report_alignment_lint.py reports complete for the current stage")
+    if stage == "experiment" and str(job.get("action") or "") == "repair_failed_experiment":
+        constraints.extend(
+            [
+                "Analyze the failed or regressed run before launching a repair; do not blindly rerun the same command.",
+                "Write EXPERIMENT_FAILURE_ANALYSIS.json with root_cause, failure_class, selected_idea_id, track_id, branch/version lineage, evidence refs, and the chosen repair action.",
+                f"Run at most {MAX_FAILED_EXPERIMENT_REPAIRS} same-idea repair attempts. After that, write EXPERIMENT_NEGATIVE_BLOCKER.json status=change_idea_or_innovation_required instead of launching another same-idea run.",
+                "A repaired run must preserve the locked protocol unless the job routes back to experiment_plan with an explicit route decision.",
+                "Candidate-supported or diagnostic-only results are not promoted evidence; record them as pilot/negative evidence with next_action.",
+            ]
+        )
+        acceptance_criteria.extend(
+            [
+                "EXPERIMENT_FAILURE_ANALYSIS.json explains the failure cause and repair decision",
+                "EXPERIMENT_LEDGER.json records repair_attempt or repair_iteration, failure_class, next_action, selected_idea_id, and track_id",
+                "If two same-idea repairs have already failed, EXPERIMENT_NEGATIVE_BLOCKER.json requests change_idea_or_innovation_required and no third same-idea repair is launched",
+            ]
+        )
+    acceptance_contract = acceptance_contract_for_packet(
+        stage,
+        outputs,
+        capture_commands,
+        constraints,
+        acceptance_criteria,
+        literature_search=literature_search,
+        paper_code_transfer_requested=paper_code_transfer_requested,
+    )
     path = base / "job_packets" / f"{job['job_id']}.json"
     packet = {
         "schema_version": 1,
@@ -998,6 +3015,7 @@ def write_job_packet(
         "allowed_writes": stage_write_scopes(stage),
         "constraints": constraints,
         "outputs": outputs,
+        "acceptance_contract": acceptance_contract,
         "acceptance_criteria": acceptance_criteria,
     }
     write_json(path, packet)
@@ -1101,10 +3119,584 @@ def complete_current_stage(project: str, state: dict[str, Any], contract: dict[s
         }
     )
     save_state(project, state, "advance_after_contract", {"from": stage, "to": new_stage, "contract": contract})
-    out = {"action": "advanced", "from": stage, "to": new_stage, "contract": contract}
-    if str(state.get("autonomy_level") or "") == "full_auto_bounded":
-        out["wakeup"] = continuation_wakeup_recommendation(project, stage, new_stage)
+    return {
+        "action": "advanced",
+        "from": stage,
+        "to": new_stage,
+        "contract": contract,
+        "continue_now": str(state.get("autonomy_level") or "") == "full_auto_bounded",
+        "heartbeat_decision": "not_created_local_progress_available",
+    }
+
+
+def current_active_selection(base: Path) -> dict[str, set[str]]:
+    """Return active selected idea/track ids from current planning artifacts."""
+
+    idea_ids: set[str] = set()
+    track_ids: set[str] = set()
+    for rel in ["planner/EXPERIMENT_REVIEW_PACKET.json", "orchestrator/INNOVATION_PACKET.json"]:
+        payload = read_json(base / rel, {})
+        if not isinstance(payload, dict):
+            continue
+        for key in ["selected_idea_id", "selected_idea_fragment_id", "idea_id"]:
+            value = payload.get(key)
+            if value:
+                idea_ids.add(str(value))
+        value = payload.get("track_id")
+        if value:
+            track_ids.add(str(value))
+
+    matrix = read_json(base / "orchestrator/TRACK_PLAN_MATRIX.json", {})
+    for row in payload_rows(matrix):
+        if not isinstance(row, dict):
+            continue
+        launch_status = str(row.get("launch_status") or "").lower()
+        if launch_status != "ready" and row.get("selected_for_review") is not True:
+            continue
+        if row.get("idea_id"):
+            idea_ids.add(str(row["idea_id"]))
+        if row.get("track_id"):
+            track_ids.add(str(row["track_id"]))
+    return {"idea_ids": idea_ids, "track_ids": track_ids}
+
+
+def idea_gate_active_selection(base: Path) -> dict[str, set[str]]:
+    """Return the active idea/track selection from idea-gate authorities.
+
+    During a negative-result rollback to idea_gate, downstream experiment_plan/code
+    artifacts still describe the failed track until the next stage rewrites them.
+    The reentry repair gate must therefore read idea_gate authorities first.
+    """
+
+    idea_ids: set[str] = set()
+    track_ids: set[str] = set()
+    for rel in [
+        "ideation/IDEA_TRACK_SEEDS.json",
+        "ideation/IDEA_DECISION_LEDGER.json",
+        "ideation/IDEA_NOVELTY_VENUE_SCORECARD.json",
+        "ideation/EXPERIMENT_IDEA_POOL.json",
+    ]:
+        payload = read_json(base / rel, {})
+        if not isinstance(payload, dict):
+            continue
+        for key in ["selected_primary_idea_id", "selected_idea_id"]:
+            value = payload.get(key)
+            if value:
+                idea_ids.add(str(value))
+        tracks = payload.get("tracks")
+        if isinstance(tracks, list):
+            for row in tracks:
+                if not isinstance(row, dict):
+                    continue
+                if str(row.get("track_role") or "").strip().lower() == "primary":
+                    if row.get("idea_id"):
+                        idea_ids.add(str(row["idea_id"]))
+                    if row.get("track_id"):
+                        track_ids.add(str(row["track_id"]))
+    return {"idea_ids": idea_ids, "track_ids": track_ids}
+
+
+def payload_rows(payload: Any) -> list[dict[str, Any]]:
+    if isinstance(payload, dict):
+        for key in ["tracks", "rows", "track_plans"]:
+            value = payload.get(key)
+            if isinstance(value, list):
+                return [row for row in value if isinstance(row, dict)]
+    if isinstance(payload, list):
+        return [row for row in payload if isinstance(row, dict)]
+    return []
+
+
+def route_stale_for_active_selection(route: dict[str, Any], active: dict[str, set[str]]) -> bool:
+    """True when a negative-result route refers to a failed idea/track that is no longer active."""
+
+    active_ideas = active.get("idea_ids") or set()
+    active_tracks = active.get("track_ids") or set()
+    route_idea = route.get("selected_idea_id") or route.get("idea_id")
+    route_track = route.get("track_id")
+    if route_idea and active_ideas and str(route_idea) not in active_ideas:
+        return True
+    if route_track and active_tracks and str(route_track) not in active_tracks:
+        return True
+    return False
+
+
+def negative_result_rollback_target(base: Path) -> dict[str, Any] | None:
+    """Return an explicit rollback target from project route authority artifacts."""
+
+    active_selection = current_active_selection(base)
+    blocker = read_json(base / "coder/EXPERIMENT_NEGATIVE_BLOCKER.json", {})
+    if isinstance(blocker, dict) and str(blocker.get("status") or "").strip().lower() in {
+        "change_idea_or_innovation_required",
+        "two_repairs_without_improvement",
+    } and not route_stale_for_active_selection(blocker, active_selection):
+        target = str(blocker.get("target_stage") or "idea_gate")
+        if target not in STAGES:
+            target = "idea_gate"
+        return {
+            "target_stage": target,
+            "next_action": blocker.get("next_action") or NEXT_ACTIONS.get(target),
+            "source": "coder/EXPERIMENT_NEGATIVE_BLOCKER.json",
+            "decision": "change_idea_or_innovation_after_two_repairs",
+            "reason": blocker.get("reason") or "same-idea repair budget exhausted without promoted improvement",
+            "required_reentry_conditions": [
+                "Update IDEA_DECISION_LEDGER.json for the failed idea lifecycle.",
+                "Select an alternate idea or rebuild the innovation bundle before returning to experiment_plan.",
+                "Do not launch a third same-idea repair without changing the idea, innovation point, or track.",
+            ],
+        }
+
+    positive_routes = sorted(base.glob("orchestrator/POSITIVE_ONLY_STRUCTURAL_LEAP_ROUTE*.json"))
+    for path in reversed(positive_routes):
+        positive_route = read_json(path, {})
+        if isinstance(positive_route, dict) and positive_route.get("target_stage_after_decision") in STAGES:
+            target = str(positive_route["target_stage_after_decision"])
+            return {
+                "target_stage": target,
+                "next_action": positive_route.get("next_action") or NEXT_ACTIONS.get(target),
+                "source": str(path.relative_to(base)),
+                "decision": positive_route.get("decision"),
+                "reason": positive_route.get("reason"),
+                "required_reentry_conditions": positive_route.get("required_reentry_conditions", []),
+            }
+
+    evidence_route = read_json(base / "orchestrator/EVIDENCE_GATE_ROUTE_DECISION.json", {})
+    if isinstance(evidence_route, dict) and evidence_route.get("target_stage_after_decision") in STAGES:
+        target = str(evidence_route["target_stage_after_decision"])
+        return {
+            "target_stage": target,
+            "next_action": evidence_route.get("next_action") or evidence_route.get("workflowguard_action") or NEXT_ACTIONS.get(target),
+            "source": "orchestrator/EVIDENCE_GATE_ROUTE_DECISION.json",
+            "decision": evidence_route.get("decision"),
+            "reason": evidence_route.get("reason"),
+            "required_reentry_conditions": evidence_route.get("required_reentry_conditions", []),
+        }
+
+    negative_route = read_json(base / "orchestrator/NEGATIVE_RESULT_ROUTE_DECISION.json", {})
+    required_replan = negative_route.get("required_replan") if isinstance(negative_route, dict) else None
+    if (
+        isinstance(required_replan, dict)
+        and required_replan.get("stage") in STAGES
+        and not route_stale_for_active_selection(negative_route, active_selection)
+    ):
+        target = str(required_replan["stage"])
+        return {
+            "target_stage": target,
+            "next_action": required_replan.get("next_action") or NEXT_ACTIONS.get(target),
+            "source": "orchestrator/NEGATIVE_RESULT_ROUTE_DECISION.json",
+            "decision": negative_route.get("decision"),
+            "reason": negative_route.get("reason"),
+            "required_reentry_conditions": required_replan.get("requirements", []),
+        }
+
+    rollback_route = read_json(base / "orchestrator/TRACK_SWITCH_ROLLBACK_DECISION.json", {})
+    if isinstance(rollback_route, dict) and rollback_route.get("decision") == "rollback_to_experiment_plan":
+        target = "experiment_plan"
+        return {
+            "target_stage": target,
+            "next_action": NEXT_ACTIONS.get(target),
+            "source": "orchestrator/TRACK_SWITCH_ROLLBACK_DECISION.json",
+            "decision": rollback_route.get("decision"),
+            "reason": rollback_route.get("trigger_reason"),
+            "required_reentry_conditions": rollback_route.get("required_rewrite", []),
+        }
+
+    return None
+
+
+def negative_result_rollback_is_pending(base: Path, target: dict[str, Any]) -> bool:
+    guard = read_json(base / "orchestrator/NEGATIVE_ROUTE_ROLLBACK_APPLIED.json", {})
+    if not isinstance(guard, dict):
+        return False
+    if guard.get("status") != "awaiting_reentry_repair":
+        return False
+    route = guard.get("route")
+    if not isinstance(route, dict):
+        return True
+    return route.get("source") == target.get("source") and route.get("target_stage") == target.get("target_stage")
+
+
+def negative_reentry_repair_required(base: Path) -> dict[str, Any] | None:
+    """Return the active positive-only reentry gate when the failed idea/track is still selected."""
+
+    guard = read_json(base / "orchestrator/NEGATIVE_ROUTE_ROLLBACK_APPLIED.json", {})
+    if not isinstance(guard, dict) or guard.get("status") != "awaiting_reentry_repair":
+        return None
+    route = guard.get("route")
+    if not isinstance(route, dict):
+        return None
+    blocker = read_json(base / "coder/EXPERIMENT_NEGATIVE_BLOCKER.json", {})
+    if not isinstance(blocker, dict):
+        return None
+    if str(blocker.get("status") or "").strip().lower() not in {
+        "change_idea_or_innovation_required",
+        "two_repairs_without_improvement",
+    }:
+        return None
+    failed_idea = blocker.get("selected_idea_id") or blocker.get("idea_id")
+    failed_track = blocker.get("track_id")
+    target_stage = str(route.get("target_stage") or blocker.get("target_stage") or "idea_gate")
+    if target_stage not in STAGES:
+        target_stage = "idea_gate"
+    active_selection = current_active_selection(base)
+    if target_stage == "idea_gate":
+        gate_selection = idea_gate_active_selection(base)
+        gate_ideas = gate_selection.get("idea_ids") or set()
+        gate_tracks = gate_selection.get("track_ids") or set()
+        material_idea_change = bool(failed_idea and gate_ideas and str(failed_idea) not in gate_ideas)
+        material_track_change = bool(failed_track and gate_tracks and str(failed_track) not in gate_tracks)
+        if material_idea_change or material_track_change:
+            return None
+        if gate_ideas or gate_tracks:
+            active_selection = gate_selection
+    elif route_stale_for_active_selection(blocker, active_selection):
+        return None
+    return {
+        "schema_version": 1,
+        "status": "reentry_repair_required",
+        "target_stage": target_stage,
+        "source": route.get("source") or "orchestrator/NEGATIVE_ROUTE_ROLLBACK_APPLIED.json",
+        "failed_idea_id": failed_idea,
+        "failed_track_id": failed_track,
+        "active_idea_ids": sorted(active_selection.get("idea_ids") or []),
+        "active_track_ids": sorted(active_selection.get("track_ids") or []),
+        "reason": (
+            f"positive-only reentry has not materially changed the failed selection "
+            f"{failed_idea}/{failed_track}; select an alternate idea or rebuild the innovation bundle before continuing"
+        ),
+        "required_reentry_conditions": route.get("required_reentry_conditions")
+        or [
+            "Update IDEA_DECISION_LEDGER.json for the failed idea lifecycle.",
+            "Select an alternate idea or rebuild the innovation bundle before returning to experiment_plan.",
+        ],
+    }
+
+
+def apply_negative_reentry_gate(contract: dict[str, Any], reentry: dict[str, Any]) -> dict[str, Any]:
+    patched = dict(contract)
+    missing = list(patched.get("missing") or [])
+    missing.append(f"positive_only_reentry_gate: {reentry['reason']}")
+    patched["complete"] = False
+    patched["status"] = "incomplete"
+    patched["missing"] = missing
+    details = dict(patched.get("details") or {})
+    details["positive_only_reentry_gate"] = reentry
+    patched["details"] = details
+    return patched
+
+
+def positive_only_rollback_allowed(base: Path, policy: dict[str, Any], target: dict[str, Any] | None) -> bool:
+    """Allow rollback to an upstream positive route without enabling negative-result writing."""
+
+    if policy.get("allow_negative_result_route") is True:
+        return True
+    if not isinstance(target, dict) or target.get("target_stage") not in {"ideation", "idea_gate", "experiment_plan"}:
+        return False
+    if target.get("decision") == "change_idea_or_innovation_after_two_repairs":
+        return policy.get("disable_negative_result_rebuild") is not True
+
+    directive_paths = sorted(base.glob("orchestrator/USER_DIRECTIVE_POSITIVE_ONLY*.json"))
+    directives = [read_json(path, {}) for path in directive_paths]
+    has_positive_only_directive = any(
+        isinstance(row, dict)
+        and (
+            row.get("directive") == "negative_result_manuscript_forbidden"
+            or row.get("policy_effects", {}).get("writing_requires_promoted_positive_evidence") is True
+        )
+        for row in directives
+    )
+    if not has_positive_only_directive:
+        return False
+
+    blocker = read_json(base / "coder/EXPERIMENT_NEGATIVE_BLOCKER.json", {})
+    routing_paths = sorted(base.glob("coder/POSITIVE_ONLY_EXPERIMENT_ROUTING*.json"))
+    routing_docs = [read_json(path, {}) for path in routing_paths]
+    route_requires_positive_reentry = (
+        isinstance(blocker, dict)
+        and blocker.get("negative_result_manuscript_allowed") is False
+        and str(blocker.get("required_next_action") or "").startswith("rollback_to_")
+    ) or any(
+        isinstance(row, dict)
+        and row.get("policy", {}).get("negative_result_manuscript_allowed") is False
+        and row.get("positive_only_routing", {}).get("recommended_workflow_action")
+        == "rollback_to_ideation_or_experiment_plan_for_structural_leap_positive_only"
+        for row in routing_docs
+    )
+    return route_requires_positive_reentry
+
+
+def apply_negative_result_rollback(project: str, state: dict[str, Any], blocker: dict[str, Any], target: dict[str, Any]) -> dict[str, Any]:
+    previous_stage = str(state.get("stage", "unknown"))
+    new_stage = str(target["target_stage"])
+    state.update(
+        {
+            "stage": new_stage,
+            "owner": OWNERS.get(new_stage, state.get("owner")),
+            "next_action": target.get("next_action") or NEXT_ACTIONS.get(new_stage),
+            "blocking_reason": target.get("reason") or blocker.get("reason"),
+        }
+    )
+    details = {
+        "from": previous_stage,
+        "to": new_stage,
+        "blocker": blocker,
+        "route": target,
+    }
+    write_json(
+        ar(project) / "orchestrator/NEGATIVE_ROUTE_ROLLBACK_APPLIED.json",
+        {
+            "schema_version": 1,
+            "status": "awaiting_reentry_repair",
+            "applied_at": iso(now()),
+            "from": previous_stage,
+            "to": new_stage,
+            "route": target,
+            "reentry_policy": "Do not apply the same negative/evidence-gate rollback again until the selected evidence gate, replacement-prior plan, or track-switch plan is materially repaired.",
+        },
+    )
+    save_state(project, state, "rollback_after_negative_result_route", details)
+    out = {
+        "action": "rollback",
+        "from": previous_stage,
+        "to": new_stage,
+        "route": target,
+        "blocker": blocker,
+        "continue_now": str(state.get("autonomy_level") or "") == "full_auto_bounded",
+        "heartbeat_decision": "not_created_local_progress_available",
+    }
     return out
+
+
+def backend_remap_rollback_target(base: Path) -> dict[str, Any] | None:
+    request = active_backend_remap_request(base)
+    if not request:
+        return None
+    target = "experiment_plan"
+    candidate = request.get("candidate_backend") if isinstance(request.get("candidate_backend"), dict) else {}
+    selected = request.get("selected_backend") if isinstance(request.get("selected_backend"), dict) else {}
+    return {
+        "target_stage": target,
+        "next_action": NEXT_ACTIONS.get(target),
+        "source": request.get("_path") or "coder/BACKEND_REMAP_REQUEST.json",
+        "decision": "rollback_to_experiment_plan_backend_remap",
+        "reason": request.get("reason")
+        or "Selected code-stage backend is unreachable and implementation cannot change compute_backend/path_mapping.",
+        "required_reentry_conditions": request.get("required_plan_updates", []),
+        "selected_backend": selected,
+        "candidate_backend": candidate,
+    }
+
+
+def backend_remap_rollback_is_pending(base: Path, target: dict[str, Any]) -> bool:
+    guard = read_json(base / "orchestrator/BACKEND_REMAP_ROLLBACK_APPLIED.json", {})
+    if not isinstance(guard, dict):
+        return False
+    if guard.get("status") != "awaiting_experiment_plan_remap":
+        return False
+    route = guard.get("route")
+    if not isinstance(route, dict):
+        return True
+    return route.get("source") == target.get("source") and route.get("target_stage") == target.get("target_stage")
+
+
+def apply_backend_remap_rollback(project: str, state: dict[str, Any], blocker: dict[str, Any], target: dict[str, Any]) -> dict[str, Any]:
+    previous_stage = str(state.get("stage", "unknown"))
+    new_stage = str(target["target_stage"])
+    state.update(
+        {
+            "stage": new_stage,
+            "owner": OWNERS.get(new_stage, state.get("owner")),
+            "next_action": target.get("next_action") or NEXT_ACTIONS.get(new_stage),
+            "blocking_reason": target.get("reason") or blocker.get("reason"),
+        }
+    )
+    details = {
+        "from": previous_stage,
+        "to": new_stage,
+        "blocker": blocker,
+        "route": target,
+    }
+    write_json(
+        ar(project) / "orchestrator/BACKEND_REMAP_ROLLBACK_APPLIED.json",
+        {
+            "schema_version": 1,
+            "status": "awaiting_experiment_plan_remap",
+            "applied_at": iso(now()),
+            "from": previous_stage,
+            "to": new_stage,
+            "route": target,
+            "reentry_policy": "Do not return to code until EXPERIMENT_REVIEW_PACKET, INNOVATION_PACKET or path_mapping authority records the selected backend remap and code-stage REMOTE_UPLOAD/REMOTE_RUN targets are updated accordingly.",
+        },
+    )
+    save_state(project, state, "rollback_after_backend_remap_request", details)
+    out = {
+        "action": "rollback",
+        "from": previous_stage,
+        "to": new_stage,
+        "route": target,
+        "blocker": blocker,
+        "continue_now": str(state.get("autonomy_level") or "") == "full_auto_bounded",
+        "heartbeat_decision": "not_created_local_progress_available",
+    }
+    return out
+
+
+def selected_projection_rollback_target(base: Path) -> dict[str, Any]:
+    gate_selection = idea_gate_active_selection(base)
+    return {
+        "target_stage": "experiment_plan",
+        "next_action": NEXT_ACTIONS.get("experiment_plan"),
+        "source": "contract_lint:selected_projection_alignment",
+        "decision": "rollback_to_experiment_plan_projection_repair",
+        "reason": (
+            "Downstream planning/code authorities do not project the current idea-gate "
+            "selected primary idea/track."
+        ),
+        "active_idea_ids": sorted(gate_selection.get("idea_ids") or []),
+        "active_track_ids": sorted(gate_selection.get("track_ids") or []),
+        "required_reentry_conditions": [
+            "Rewrite INNOVATION_PACKET.json and EXPERIMENT_REVIEW_PACKET.json from the current IDEA_DECISION_LEDGER/IDEA_TRACK_SEEDS selection.",
+            "Regenerate TRACK_PLAN_MATRIX.json so launch-ready or selected-for-review rows match the current selected primary idea/track.",
+            "Keep historical failed/not-promoted REMOTE_RUN and ledger rows as audit evidence only; do not use them as active code readiness for the new selection.",
+        ],
+    }
+
+
+def projection_rollback_is_pending(base: Path, target: dict[str, Any]) -> bool:
+    guard = read_json(base / "orchestrator/SELECTED_PROJECTION_ROLLBACK_APPLIED.json", {})
+    if not isinstance(guard, dict):
+        return False
+    if guard.get("status") != "awaiting_experiment_plan_projection_repair":
+        return False
+    route = guard.get("route")
+    if not isinstance(route, dict):
+        return True
+    return route.get("decision") == target.get("decision") and route.get("target_stage") == target.get("target_stage")
+
+
+def apply_selected_projection_rollback(project: str, state: dict[str, Any], blocker: dict[str, Any], target: dict[str, Any]) -> dict[str, Any]:
+    previous_stage = str(state.get("stage", "unknown"))
+    new_stage = str(target["target_stage"])
+    state.update(
+        {
+            "stage": new_stage,
+            "owner": OWNERS.get(new_stage, state.get("owner")),
+            "next_action": target.get("next_action") or NEXT_ACTIONS.get(new_stage),
+            "blocking_reason": target.get("reason") or blocker.get("reason"),
+        }
+    )
+    details = {
+        "from": previous_stage,
+        "to": new_stage,
+        "blocker": blocker,
+        "route": target,
+    }
+    write_json(
+        ar(project) / "orchestrator/SELECTED_PROJECTION_ROLLBACK_APPLIED.json",
+        {
+            "schema_version": 1,
+            "status": "awaiting_experiment_plan_projection_repair",
+            "applied_at": iso(now()),
+            "from": previous_stage,
+            "to": new_stage,
+            "route": target,
+            "reentry_policy": (
+                "Do not return to code until INNOVATION_PACKET, EXPERIMENT_REVIEW_PACKET, "
+                "TRACK_PLAN_MATRIX, and active implementation/readiness rows align with "
+                "the current idea-gate selected primary idea/track."
+            ),
+        },
+    )
+    save_state(project, state, "rollback_after_selected_projection_drift", details)
+    return {
+        "action": "rollback",
+        "from": previous_stage,
+        "to": new_stage,
+        "route": target,
+        "blocker": blocker,
+        "continue_now": str(state.get("autonomy_level") or "") == "full_auto_bounded",
+        "heartbeat_decision": "not_created_local_progress_available",
+    }
+
+
+def selected_negative_evidence_rollback_target(base: Path) -> dict[str, Any]:
+    gate_selection = idea_gate_active_selection(base)
+    return {
+        "target_stage": "idea_gate",
+        "next_action": NEXT_ACTIONS.get("idea_gate"),
+        "source": "contract_lint:selected_negative_evidence",
+        "decision": "rollback_to_idea_gate_after_selected_negative_evidence",
+        "reason": (
+            "The current idea-gate selected primary idea/track already has terminal "
+            "not-promoted experiment evidence and lacks an explicit launch-blocked "
+            "non-equivalent reentry authority."
+        ),
+        "active_idea_ids": sorted(gate_selection.get("idea_ids") or []),
+        "active_track_ids": sorted(gate_selection.get("track_ids") or []),
+        "required_reentry_conditions": [
+            "Update IDEA_DECISION_LEDGER.json so the failed selected idea/track is parked or killed with failure_class and next_action.",
+            "Select a non-equivalent alternate idea/track or rebuild the innovation bundle from PaperNexus evidence.",
+            "Do not generate a negative-result manuscript.",
+            "Do not return to experiment_plan/code until the new selected idea has no unresolved same-track terminal negative evidence.",
+        ],
+    }
+
+
+def selected_negative_evidence_rollback_is_pending(base: Path, target: dict[str, Any]) -> bool:
+    guard = read_json(base / "orchestrator/SELECTED_NEGATIVE_EVIDENCE_ROLLBACK_APPLIED.json", {})
+    if not isinstance(guard, dict):
+        return False
+    if guard.get("status") != "awaiting_idea_gate_reselection":
+        return False
+    route = guard.get("route")
+    if not isinstance(route, dict):
+        return True
+    return route.get("decision") == target.get("decision") and route.get("target_stage") == target.get("target_stage")
+
+
+def apply_selected_negative_evidence_rollback(project: str, state: dict[str, Any], blocker: dict[str, Any], target: dict[str, Any]) -> dict[str, Any]:
+    previous_stage = str(state.get("stage", "unknown"))
+    new_stage = str(target["target_stage"])
+    state.update(
+        {
+            "stage": new_stage,
+            "owner": OWNERS.get(new_stage, state.get("owner")),
+            "next_action": target.get("next_action") or NEXT_ACTIONS.get(new_stage),
+            "blocking_reason": target.get("reason") or blocker.get("reason"),
+        }
+    )
+    details = {
+        "from": previous_stage,
+        "to": new_stage,
+        "blocker": blocker,
+        "route": target,
+    }
+    write_json(
+        ar(project) / "orchestrator/SELECTED_NEGATIVE_EVIDENCE_ROLLBACK_APPLIED.json",
+        {
+            "schema_version": 1,
+            "status": "awaiting_idea_gate_reselection",
+            "applied_at": iso(now()),
+            "from": previous_stage,
+            "to": new_stage,
+            "route": target,
+            "reentry_policy": (
+                "Do not return to experiment_plan until idea-gate authorities select a "
+                "non-equivalent idea/track or record explicit launch-blocked reentry "
+                "after the terminal negative evidence."
+            ),
+        },
+    )
+    save_state(project, state, "rollback_after_selected_negative_evidence", details)
+    return {
+        "action": "rollback",
+        "from": previous_stage,
+        "to": new_stage,
+        "route": target,
+        "blocker": blocker,
+        "continue_now": str(state.get("autonomy_level") or "") == "full_auto_bounded",
+        "heartbeat_decision": "not_created_local_progress_available",
+    }
 
 
 def run_tick(args: argparse.Namespace) -> None:
@@ -1113,16 +3705,38 @@ def run_tick(args: argparse.Namespace) -> None:
     policy = read_json(base / "autopilot_policy.json", {})
     repair_queue = rows(base / "repair_queue.jsonl")
     async_queue = rows(base / "async_jobs.jsonl")
+    retry_override = active_retry_override(base, args)
+    current_stage = str(state.get("stage", "init"))
 
-    due_async = next_due_job(async_queue, include_running=True)
-    if due_async:
-        mark_job_running(base, "async_jobs.jsonl", due_async)
-        packet = write_job_packet(base, state, due_async, job_contract(args.project, due_async), None, "async_jobs.jsonl")
-        save_state(args.project, state, "dispatch_async_poll", {"job": due_async, "job_packet": str(packet)})
-        print(json.dumps({"action": "dispatch_async_poll", "job": due_async, "job_packet": str(packet)}, indent=2, ensure_ascii=False))
-        return
+    due_async = next_due_job(async_queue, include_running=True, kind="async", retry_override=retry_override)
+    while due_async:
+        gate = async_wait_gate(
+            base,
+            str(due_async.get("stage") or ""),
+            str(due_async.get("action") or ""),
+            str(due_async.get("reason") or ""),
+            job=due_async,
+            current_stage=current_stage,
+        )
+        obsolete_reason = obsolete_async_wait_reason(base, due_async, current_stage=current_stage, gate=gate)
+        if obsolete_reason:
+            supersede_async_job(base, due_async, obsolete_reason)
+        else:
+            due_async["wait_kind"] = gate.get("wait_kind")
+            due_async["heartbeat_decision"] = gate.get("decision")
+            due_async["heartbeat_decision_reason"] = gate.get("reason")
+            break
+        async_queue = rows(base / "async_jobs.jsonl")
+        due_async = next_due_job(async_queue, include_running=True, kind="async", retry_override=retry_override)
 
-    due_repair = next_due_job(repair_queue)
+    due_repair = next_due_job(repair_queue, include_running=True, kind="repair", retry_override=retry_override)
+    while due_repair:
+        obsolete_reason = obsolete_repair_reason(args.project, base, state, due_repair)
+        if not obsolete_reason:
+            break
+        supersede_repair_job(base, due_repair, obsolete_reason)
+        repair_queue = rows(base / "repair_queue.jsonl")
+        due_repair = next_due_job(repair_queue, include_running=True, kind="repair", retry_override=retry_override)
     if due_repair:
         mark_job_running(base, "repair_queue.jsonl", due_repair)
         packet = write_job_packet(base, state, due_repair, job_contract(args.project, due_repair), None, "repair_queue.jsonl")
@@ -1130,13 +3744,16 @@ def run_tick(args: argparse.Namespace) -> None:
         print(json.dumps({"action": "dispatch_repair", "job": due_repair, "job_packet": str(packet)}, indent=2, ensure_ascii=False))
         return
 
-    stage = str(state.get("stage", "init"))
+    stage = current_stage
     contract = lint(args.project, stage)
+    reentry_repair = negative_reentry_repair_required(base)
+    if reentry_repair and stage == reentry_repair.get("target_stage"):
+        contract = apply_negative_reentry_gate(contract, reentry_repair)
     if contract["complete"]:
         print(json.dumps(complete_current_stage(args.project, state, contract), indent=2, ensure_ascii=False))
         return
 
-    reason = "; ".join(str(item) for item in contract.get("missing", [])) or f"{stage} contract incomplete"
+    reason = contract_reason(contract, stage)
     klass, recommended_action = classify(stage, reason, base)
     blocker = {
         "schema_version": 1,
@@ -1148,9 +3765,62 @@ def run_tick(args: argparse.Namespace) -> None:
         "contract": contract,
         "status": "triaged",
     }
+
+    async_gate: dict[str, Any] | None = None
+    if klass == "async_wait":
+        async_gate = async_wait_gate(base, stage, recommended_action, reason, current_stage=current_stage, contract=contract)
+        if async_gate.get("allowed"):
+            blocker["heartbeat_decision"] = async_gate.get("decision")
+            blocker["heartbeat_decision_reason"] = async_gate.get("reason")
+            blocker["wait_kind"] = async_gate.get("wait_kind")
+        else:
+            klass = "auto_repairable"
+            recommended_action = "schedule_repair"
+            blocker["class"] = klass
+            blocker["recommended_action"] = recommended_action
+            blocker["heartbeat_decision"] = "not_created_not_external_wait"
+            blocker["heartbeat_decision_reason"] = async_gate.get("reason")
+
+    if klass != "async_wait" and due_async:
+        due_stage = str(due_async.get("stage") or "")
+        due_action = str(due_async.get("action") or "")
+        if due_stage == stage and due_action in ASYNC_HEARTBEAT_ACTIONS:
+            due_async["heartbeat_decision"] = "not_dispatched_local_progress_available"
+            due_async["heartbeat_decision_reason"] = reason
+
     append_jsonl(base / "blocker_ledger.jsonl", blocker)
 
     if klass == "hard_stop":
+        if recommended_action == "rollback_to_experiment_plan_backend_remap" and stage == "code":
+            target = backend_remap_rollback_target(base)
+            if target and not backend_remap_rollback_is_pending(base, target):
+                print(json.dumps(apply_backend_remap_rollback(args.project, state, blocker, target), indent=2, ensure_ascii=False))
+                return
+        if recommended_action == "rollback_to_experiment_plan_projection_repair" and stage == "code":
+            target = selected_projection_rollback_target(base)
+            if target and not projection_rollback_is_pending(base, target):
+                print(json.dumps(apply_selected_projection_rollback(args.project, state, blocker, target), indent=2, ensure_ascii=False))
+                return
+        if recommended_action == "rollback_to_idea_gate_after_selected_negative_evidence" and stage in {"experiment_plan", "code"}:
+            target = selected_negative_evidence_rollback_target(base)
+            if target and not selected_negative_evidence_rollback_is_pending(base, target):
+                print(json.dumps(apply_selected_negative_evidence_rollback(args.project, state, blocker, target), indent=2, ensure_ascii=False))
+                return
+        if (
+            recommended_action == "rollback_or_negative_result_route"
+            and stage == "experiment"
+        ):
+            target = negative_result_rollback_target(base)
+            if (
+                target
+                and positive_only_rollback_allowed(base, policy, target)
+                and (
+                    not negative_result_rollback_is_pending(base, target)
+                    or negative_reentry_repair_required(base)
+                )
+            ):
+                print(json.dumps(apply_negative_result_rollback(args.project, state, blocker, target), indent=2, ensure_ascii=False))
+                return
         state["blocking_reason"] = reason
         state["next_action"] = recommended_action
         save_state(args.project, state, "hard_stop", blocker)
@@ -1158,7 +3828,32 @@ def run_tick(args: argparse.Namespace) -> None:
         return
 
     if klass == "async_wait":
+        if due_async and str(due_async.get("stage") or "") == stage and str(due_async.get("action") or "") == recommended_action:
+            mark_job_running(base, "async_jobs.jsonl", due_async)
+            packet = write_job_packet(base, state, due_async, job_contract(args.project, due_async), blocker, "async_jobs.jsonl")
+            save_state(args.project, state, "dispatch_async_poll", {"blocker": blocker, "job": due_async, "job_packet": str(packet)})
+            print(
+                json.dumps(
+                    {"action": "dispatch_async_poll", "blocker": blocker, "job": due_async, "job_packet": str(packet)},
+                    indent=2,
+                    ensure_ascii=False,
+                )
+            )
+            return
+        if due_async:
+            supersede_async_job(
+                base,
+                due_async,
+                (
+                    "async wait superseded because the current contract selected a different external blocker: "
+                    f"{recommended_action}"
+                ),
+            )
         job = queue_job(base, "async", stage, recommended_action, reason, policy)
+        if async_gate is not None:
+            job["wait_kind"] = async_gate.get("wait_kind")
+            job["heartbeat_decision"] = async_gate.get("decision")
+            job["heartbeat_decision_reason"] = async_gate.get("reason")
         packet = None if job.get("_reused") else write_job_packet(base, state, job, contract, blocker, "async_jobs.jsonl")
         wakeup = async_wakeup_recommendation(args.project, job, reason)
         state["blocking_reason"] = reason
@@ -1183,6 +3878,22 @@ def run_tick(args: argparse.Namespace) -> None:
             )
         )
         return
+
+    if (
+        stage == "experiment"
+        and recommended_action in {"launch_or_reconcile_experiment", "repair_failed_experiment", "schedule_repair"}
+        and not active_experiment_run_exists(base)
+    ):
+        supersede_matching_async_jobs(
+            base,
+            stage,
+            "poll_experiment_run",
+            None,
+            (
+                "experiment async poll superseded because no active experiment runtime remains; "
+                "WorkflowGuard can use local evidence to launch, repair, or advance instead of waiting for heartbeat"
+            ),
+        )
 
     job = queue_job(base, "repair", stage, recommended_action, reason, policy)
     handoff = None if job.get("_reused") else handoff_for_stage(base, state, contract)
@@ -1214,6 +3925,15 @@ def run_tick(args: argparse.Namespace) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--project", required=True)
+    parser.add_argument(
+        "--force-due-repair",
+        action="store_true",
+        help="dispatch a matching pending/retry repair immediately, bypassing next_retry_at after a human/resource update",
+    )
+    parser.add_argument(
+        "--force-job-id",
+        help="limit --force-due-repair or ACTIVE_RETRY_OVERRIDE dispatch to one job id",
+    )
     args = parser.parse_args()
     run_tick(args)
 

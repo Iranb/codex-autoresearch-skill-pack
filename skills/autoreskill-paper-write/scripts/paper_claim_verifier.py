@@ -94,6 +94,7 @@ def build(project: str) -> dict[str, Any]:
     grounded = read_json(base / "paper/GROUNDED_WRITE_PACKAGE.json", {})
     score = read_json(base / "analyzer/SCORE_VERIFICATION.json", {})
     best = read_json(base / "analyzer/BEST_RUN_SELECTION.json", {})
+    forensics = read_json(base / "paper/PAPER_FORENSICS_REPORT.json", {})
     blocking: list[dict[str, Any]] = []
     warnings: list[dict[str, Any]] = []
     if not tex.strip():
@@ -111,6 +112,26 @@ def build(project: str) -> dict[str, Any]:
             warnings.append({"kind": "strong_qualitative_term", "term": phrase, "action": "ensure representation evidence supports this wording"})
     if grounded.get("ground_status") != "passed":
         blocking.append({"kind": "grounded_write_package_not_passed"})
+    if isinstance(forensics, dict) and forensics:
+        forensic_blocks = forensics.get("blocking_findings")
+        if not isinstance(forensic_blocks, list):
+            forensic_blocks = []
+        if forensics.get("complete") is not True or forensic_blocks:
+            blocking.append(
+                {
+                    "kind": "paper_forensics_not_clear",
+                    "status": forensics.get("status"),
+                    "overall_verdict": forensics.get("overall_verdict"),
+                    "blocking_finding_count": len(forensic_blocks),
+                }
+            )
+    else:
+        warnings.append(
+            {
+                "kind": "paper_forensics_report_missing",
+                "action": "contract_lint.py runs the authoritative paper_forensics_lint gate before writing/submission_ready can pass",
+            }
+        )
     claims = representation.get("claim_evidence_tags") if isinstance(representation, dict) else []
     if not claims:
         warnings.append({"kind": "no_research_representation_claims"})
@@ -127,6 +148,9 @@ def build(project: str) -> dict[str, Any]:
             "ground_status": grounded.get("ground_status"),
             "score_verification_status": score.get("status"),
             "best_run_status": best.get("final_promotion_status"),
+            "paper_forensics_status": forensics.get("status") if isinstance(forensics, dict) else None,
+            "paper_forensics_verdict": forensics.get("overall_verdict") if isinstance(forensics, dict) else None,
+            "paper_forensics_blocking_count": len(forensics.get("blocking_findings") or []) if isinstance(forensics, dict) else 0,
         },
     }
 

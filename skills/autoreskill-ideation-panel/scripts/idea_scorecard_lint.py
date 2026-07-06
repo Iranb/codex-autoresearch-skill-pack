@@ -26,6 +26,12 @@ PAPER_COMPARISON_KEYS = [
     "overlap_risk",
     "differentiation_claim",
 ]
+PAPER_STORY_ASSESSMENT_KEYS = [
+    "three_innovation_verdict",
+    "storyline_coherence",
+    "weakest_bundle_link",
+    "required_story_repair",
+]
 VALID_METHOD_SOURCE_ROLES = {
     "near_neighbor",
     "far_neighbor",
@@ -35,6 +41,9 @@ VALID_METHOD_SOURCE_ROLES = {
     "target_domain_absence_proven",
 }
 TARGET_DOMAIN_ONLY_ROLES = {"target_domain", "current_field", "target_domain_only"}
+PROBLEM_PROTOCOL_ROLES = {"problem_definition", "protocol", "benchmark", "evaluation", "metric"}
+METHOD_ROLES = {"method_mechanism", "algorithm", "model", "architecture", "training_mechanism"}
+PROOF_INTEGRATION_ROLES = {"training_integration", "system_integration", "theory_analysis", "ablation", "validation", "analysis"}
 
 
 def project_root(project: str) -> Path:
@@ -91,6 +100,37 @@ def positive_int(value: Any) -> bool:
 
 def normalized_role(value: Any) -> str:
     return str(value or "").strip().lower().replace("-", "_").replace(" ", "_")
+
+
+def as_list(value: Any) -> list[Any]:
+    if isinstance(value, list):
+        return value
+    if isinstance(value, tuple):
+        return list(value)
+    return []
+
+
+def innovation_bundle_from_idea(idea: dict[str, Any]) -> list[Any]:
+    paper = idea.get("paper_contribution") if isinstance(idea.get("paper_contribution"), dict) else {}
+    return as_list(idea.get("innovation_bundle") or paper.get("innovation_bundle") or paper.get("innovation_points"))
+
+
+def validate_idea_bundle_shape(idea: dict[str, Any], prefix: str, missing: list[str]) -> None:
+    bundle = innovation_bundle_from_idea(idea)
+    if len(bundle) < 3:
+        missing.append(f"{prefix}.paper_contribution.innovation_bundle must contain at least 3 innovation points")
+        return
+    roles = {
+        normalized_role(point.get("role"))
+        for point in bundle
+        if isinstance(point, dict) and present(point.get("role"))
+    }
+    if not roles & PROBLEM_PROTOCOL_ROLES:
+        missing.append(f"{prefix}.paper_contribution.innovation_bundle needs problem/protocol/evaluation point")
+    if not roles & METHOD_ROLES:
+        missing.append(f"{prefix}.paper_contribution.innovation_bundle needs method/mechanism point")
+    if not roles & PROOF_INTEGRATION_ROLES:
+        missing.append(f"{prefix}.paper_contribution.innovation_bundle needs training/integration/analysis/validation point")
 
 
 def degraded_gate_approved(gate: dict[str, Any]) -> bool:
@@ -197,7 +237,8 @@ def lint(project: str, scorecard_rel: str, pool_rel: str) -> dict[str, Any]:
     if proposal_graph_available and not pre_idea_degraded and not proposal_declared:
         missing.append("proposal_graph_session_path or proposal_graph_session_manifest_path")
 
-    idea_ids = {str(row.get("id") or "").strip() for row in ideas if str(row.get("id") or "").strip()}
+    idea_by_id = {str(row.get("id") or "").strip(): row for row in ideas if str(row.get("id") or "").strip()}
+    idea_ids = set(idea_by_id)
     row_by_id: dict[str, dict[str, Any]] = {}
     for row in rows:
         idea_id = str(row.get("id") or row.get("idea_id") or "").strip()
@@ -213,6 +254,7 @@ def lint(project: str, scorecard_rel: str, pool_rel: str) -> dict[str, Any]:
 
     for idea_id in sorted(idea_ids & set(row_by_id)):
         row = row_by_id[idea_id]
+        validate_idea_bundle_shape(idea_by_id[idea_id], f"idea_pool[{idea_id}]", missing)
         prefix = f"scorecard[{idea_id}]"
         scores = row.get("scores") if isinstance(row.get("scores"), dict) else row
         if not positive_int(row.get("rank")):
@@ -226,6 +268,10 @@ def lint(project: str, scorecard_rel: str, pool_rel: str) -> dict[str, Any]:
         for key in PAPER_COMPARISON_KEYS:
             if not present(comparison.get(key)):
                 missing.append(f"{prefix}.paper_comparison.{key}")
+        story_assessment = row.get("paper_story_assessment") if isinstance(row.get("paper_story_assessment"), dict) else {}
+        for key in PAPER_STORY_ASSESSMENT_KEYS:
+            if not present(story_assessment.get(key)):
+                missing.append(f"{prefix}.paper_story_assessment.{key}")
         for key in [
             "closest_prior_pressure",
             "novelty_separation_needed",

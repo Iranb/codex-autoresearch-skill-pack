@@ -90,6 +90,25 @@ Required shape:
         "minimum_experiment_table": "",
         "ablation_plan": "",
         "falsifier": "",
+        "innovation_bundle": [
+          {
+            "name": "",
+            "role": "problem_definition|protocol|benchmark|evaluation|metric|method_mechanism|algorithm|model|architecture|training_mechanism|training_integration|system_integration|theory_analysis|ablation|validation|analysis",
+            "source_role": "target_domain_anchor|near_neighbor|far_neighbor|cross_lane_recombination|proposal_graph_transfer|external_domain_transfer|target_domain_absence_proven",
+            "source_evidence_refs": [],
+            "closest_prior_delta": "",
+            "paper_story_role": "",
+            "validation_plan": ""
+          }
+        ],
+        "storyline": {
+          "opening_tension": "",
+          "hidden_cause": "",
+          "method_as_resolution": "",
+          "proof_ladder": [],
+          "reviewer_risk_and_defense": "",
+          "narrative_spine": []
+        },
         "performance_claim": "",
         "standalone_engineering": false
       },
@@ -115,6 +134,8 @@ Selection rules:
 - Generate `EVIDENCE_GRAPH_PROJECTION.json`, `IDEA_BUILD_BRIEF.json/md`, and `GOE_IDEA_AUDIT.json` before final ranking. Generate `IDEA_TRACK_SEEDS.json` during `idea_gate` for the primary plus 2-3 alternate tracks.
 - Use the scorecard to front-load novelty comparison and top-tier-paper support analysis. Do not select an idea for experiment planning until every idea has been ranked, compared with closest priors, and assigned an `advance`, `advance_with_constraints`, `park`, or `kill` recommendation.
 - Each item must be writable as a paper thesis. If an item would appear only in an implementation checklist, move it to `SUPPORTING_ARTIFACTS.json`.
+- Each item must contain `paper_contribution.innovation_bundle` with at least three mutually necessary paper-level innovation points. The bundle must cover at least one problem/protocol/evaluation role, one method/mechanism role, and one training/integration/analysis/validation role, with at least one point sourced from near-neighbor, far-neighbor, cross-lane, proposal-graph, or external-domain transfer evidence. Three module names are not enough.
+- Each item must contain `paper_contribution.storyline` with opening tension, hidden cause, method-as-resolution, proof ladder, reviewer risk/defense, and a 5-7 step narrative spine. The storyline must explain why the three-or-more innovation points form one paper rather than a loose checklist.
 - Prefer Tier 1 `ALGO` method/cross-paper/architecture ideas. Require at least 8 `ALGO` ideas by default.
 - `CODE` ideas are allowed only as performance-bearing engineering-method contributions or benchmark/evaluation/dataset/system paper contributions, not as tooling chores. Keep `CODE` ideas to 4 or fewer. A performance-bearing `CODE` idea must include `paper_contribution.performance_claim`, expected metric impact, a baseline comparison, and an ablation plan.
 - Keep Tier 3 `PARAM`-only ideas to 2 or fewer; use them only when they define a paper-level hypothesis rather than a tuning sweep.

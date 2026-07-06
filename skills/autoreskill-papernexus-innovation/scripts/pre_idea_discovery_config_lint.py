@@ -13,7 +13,7 @@ LANES = {"target_domain", "near_neighbor", "far_neighbor"}
 PLAN_REL = "literature/PRE_IDEA_DISCOVERY_PLAN.json"
 
 REQUIRED_EQUALS = {
-    "operation": "search",
+    "operation": "submit",
     "depth": "deep",
     "searchMode": "deep",
     "planningMode": "llm_augmented",
@@ -25,6 +25,7 @@ REQUIRED_EQUALS = {
     "processImports": False,
     "returnPartial": True,
     "persist": True,
+    "asyncLifecycle": "submit_progress_report",
 }
 
 MIN_VALUES = {
@@ -110,7 +111,7 @@ def latest_ideation_job(base: Path) -> dict[str, Any] | None:
     return payload
 
 
-def job_search_configs(job: dict[str, Any]) -> list[dict[str, Any]]:
+def job_discovery_configs(job: dict[str, Any]) -> list[dict[str, Any]]:
     configs: list[dict[str, Any]] = []
     calls = job.get("mcp_calls")
     if not isinstance(calls, list):
@@ -119,7 +120,7 @@ def job_search_configs(job: dict[str, Any]) -> list[dict[str, Any]]:
         if not isinstance(call, dict) or call.get("tool") != "literature_discovery":
             continue
         args = call.get("args")
-        if isinstance(args, dict) and args.get("operation") == "search":
+        if isinstance(args, dict) and args.get("operation") in {"submit", "search"}:
             configs.append(args)
     return configs
 
@@ -166,12 +167,12 @@ def lint(project: str, require_job_packet: bool = False) -> dict[str, Any]:
             missing.append("latest ideation job packet with broad literature_discovery calls")
     else:
         details["latest_ideation_job_packet"] = job.get("_path")
-        configs = job_search_configs(job)
-        details["latest_ideation_job_search_call_count"] = len(configs)
+        configs = job_discovery_configs(job)
+        details["latest_ideation_job_discovery_call_count"] = len(configs)
         if len(configs) < 3:
-            missing.append("latest ideation job packet has fewer than three literature_discovery search calls")
+            missing.append("latest ideation job packet has fewer than three literature_discovery submit calls")
         for idx, config in enumerate(configs[:3], start=1):
-            job_missing = check_config(config, f"latest_ideation_job.search_call_{idx}")
+            job_missing = check_config(config, f"latest_ideation_job.discovery_call_{idx}")
             if job_missing:
                 missing.extend(job_missing)
 

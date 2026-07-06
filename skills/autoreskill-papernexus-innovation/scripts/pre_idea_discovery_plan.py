@@ -38,7 +38,7 @@ LANES = {
 }
 
 BROAD_METADATA_DISCOVERY = {
-    "operation": "search",
+    "operation": "submit",
     "depth": "deep",
     "searchMode": "deep",
     "planningMode": "llm_augmented",
@@ -71,6 +71,7 @@ BROAD_METADATA_DISCOVERY = {
     "processImports": False,
     "returnPartial": True,
     "persist": True,
+    "asyncLifecycle": "submit_progress_report",
 }
 
 

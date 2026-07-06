@@ -7,11 +7,13 @@ metadata:
 
 # Ideation Panel
 
-Use after the topic/problem is clear and after the pre-idea evidence expansion gate has passed. PaperNexus materials are no longer only optional seeds before brainstorming: target-domain, near-neighbor, and far-neighbor discovery must each be attempted, actively screened, converted into split-reading evidence and innovation slots, and when available matured through `agent_materials(operation="proposal_graph_session")` before generating the experiment idea pool.
+Use after the topic/problem is clear and after the pre-idea evidence expansion gate has passed. PaperNexus materials are no longer only optional seeds before brainstorming: target-domain, near-neighbor, and far-neighbor discovery must each be attempted, audited at abstract/metadata-fallback level, actively screened, converted into split-reading evidence and innovation slots, and when available matured through `agent_materials(operation="proposal_graph_session")` before generating the experiment idea pool.
 
 The 12-15 experiment ideas are created here, during idea construction. Immediately after creating the idea pool, score every idea for novelty against existing papers and for top-conference/journal support before selecting one for experiments. Do not defer idea generation or idea-level scoring to `autoreskill-experiment-plan`; experiment planning consumes a selected idea and closes the selected idea's evidence gaps.
 
 Every item in `EXPERIMENT_IDEA_POOL.json` must be a plausible academic paper idea, not a standalone engineering task. Treat a valid idea as a paper thesis with a novelty claim, baseline pressure, minimum experiment table, ablation plan, and falsifier. These fields may be provisional during brainstorming, but they must be specific enough to show how the idea could become a paper. Tooling, metric guards, dashboards, split scripts, and harnesses are supporting artifacts unless they are framed as a benchmark, evaluation, dataset, or systems paper with its own research claim.
+
+Every paper idea must also include a three-or-more innovation bundle and a complete story line. The bundle is not a list of modules. It must include at least one innovation point about problem/protocol/evaluation framing, at least one about the method/mechanism, and at least one about training/integration/analysis/validation. At least one point should be sourced from near-neighbor, far-neighbor, proposal-graph, external-domain, or cross-lane transfer evidence. The `paper_contribution.storyline` must explain opening tension, hidden cause, method-as-resolution, proof ladder, reviewer risk/defense, and a 5-7 step narrative spine. Park or repair any idea that cannot satisfy this bundle.
 
 Also maintain `.autoreskill/user_view/innovation_story/00_STORYLINE_DESIGN.md` for the user. This file is not another idea list. It should explain the paper storyline: what belief the reader starts with, what tension breaks that belief, what hidden cause the method resolves, why near-neighbor/far-neighbor or cross-lane transfer supplies the main method mechanism, what evidence ladder would persuade a reviewer, and what figure sequence should carry the argument. Update it after idea-gate selection so the selected idea has a coherent narrative spine before experiment planning.
 
@@ -23,9 +25,10 @@ Before writing `ideation/EXPERIMENT_IDEA_POOL.json`, require:
 - `.autoreskill/literature/TARGET_DOMAIN_DISCOVERY_PACKET.json`
 - `.autoreskill/literature/NEAR_NEIGHBOR_DISCOVERY_PACKET.json`
 - `.autoreskill/literature/FAR_NEIGHBOR_DISCOVERY_PACKET.json`
+- `.autoreskill/papernexus/ABSTRACT_SCREENING_AUDIT.json`
 - `.autoreskill/papernexus/PAPER_SELECTION_SCORECARD.json`
 - `.autoreskill/papernexus/GRAPH_IMPORT_PLAN.json` or an explicit unresolved blocker
-- `.autoreskill/papernexus/GRAPH_IMPORT_STATUS.json` when imports/material jobs were submitted
+- `.autoreskill/papernexus/IMPORT_WORKFLOW_STATUS.json` when imports/material jobs were submitted (`GRAPH_IMPORT_STATUS.json` is legacy compatibility only)
 - `.autoreskill/papernexus/SPLIT_READING_EVIDENCE_PACK.json`
 - `.autoreskill/papernexus/proposal_graph_session.json` and/or `.autoreskill/papernexus/proposal_graph_sessions/<run_id>/proposal-session-manifest.json` when PaperNexus exposes `proposal_graph_session`
 - `.autoreskill/ideation/INNOVATION_SLOT_MAP.json`
@@ -41,7 +44,7 @@ The three required discovery lanes are:
 
 For top-tier method ideas, target-domain evidence is primarily the anchor and adversary: it defines the task, closest priors, baseline pressure, protocol, and overlap risk. The main method mechanism should primarily come from `near_neighbor`, `far_neighbor`, `cross_lane_recombination`, or `proposal_graph_transfer`. A target-domain-only method variant should be moved to baseline/ablation unless the idea includes source-backed proof that the mechanism is absent from the current field and records `current_field_absence_evidence`.
 
-Do not mechanically import raw discovery results. Raw discovery often contains duplicates, weakly related papers, unresolved full-text sources, survey noise, and generic benchmark papers. Codex must actively screen candidates and select about 60-80% of the high-signal eligible set for graph import, material view, or split-reading, not 60-80% of raw search results.
+Do not mechanically import raw discovery results. Raw discovery often contains duplicates, weakly related papers, unresolved full-text sources, survey noise, and generic benchmark papers. Before high-signal selection, Codex must produce `ABSTRACT_SCREENING_AUDIT.json` with one row per merged discovery candidate, recording abstract text plus `abstract_read=true` or an explicit `abstract_missing=true` metadata fallback, decision, and rationale. Codex must actively screen candidates and select about 60-80% of the high-signal eligible set for graph import, material view, or split-reading, not 60-80% of raw search results.
 
 In addition to one-attempt lane coverage, run the general breadth gate. By default, the screened scorecard must include at least target-domain raw/eligible/selected counts of 10/6/4, near-neighbor counts of 12/8/5, far-neighbor counts of 10/7/4, at least 21 eligible candidates total, and at least 13 graph-import or split-read selections total. The near/far-neighbor evidence budget is intentionally heavier because it is the preferred source of top-tier method mechanisms. A sparse niche topic may pass only with an explicit `breadth_exception_approval` or degraded gate that records attempted expansion and claim limits.
 
@@ -96,6 +99,7 @@ The JSON scorecard must include:
 - Per-idea 1-5 scores for `significance`, `novelty_separation`, `experiment_defensibility`, `feasibility`, `evidence_maturity`, and `risk_control`.
 - `weighted_total`, rank, `closest_prior_pressure`, `novelty_separation_needed`, `venue_support_verdict`, `top_tier_support_judgment`, `evidence_debt`, `next_evidence_closure`, and `promotion_recommendation` (`advance`, `advance_with_constraints`, `park`, or `kill`).
 - Per-idea `paper_comparison` with `closest_prior_papers`, `innovation_comparison`, `overlap_risk`, and `differentiation_claim`; this is the front-loaded comparison against the local survey, PaperNexus discovery metadata, graph/material hints, and known closest priors.
+- Per-idea `paper_story_assessment` with `three_innovation_verdict`, `storyline_coherence`, `weakest_bundle_link`, and `required_story_repair`. A score row cannot advance an idea if the three innovation points do not form one defensible paper story.
 - Per-idea `innovation_slot_refs`, `near_neighbor_pressure`, and `far_neighbor_transfer_rationale`.
 - Per-idea `primary_method_source_role`, `target_domain_anchor`, `neighbor_transfer_mechanism`, and `target_domain_method_overlap_risk`; top-ranked method ideas should not be target-domain-only unless they carry explicit current-field absence evidence.
 - Per-idea `proposal_graph_basis` when the idea uses the committed proposal graph, including `run_id`, `committed_subgraph_id`, `proposal_artifact_path`, and which claim/method/risk/eval nodes were reused or changed.
@@ -113,12 +117,13 @@ The first successful discovery pass is not automatically sufficient. If the scor
 
 Required MCP call when `papernexus-remote` is callable:
 
-- `literature_discovery(operation="search", depth="deep", searchMode="deep", planningMode="llm_augmented", llmQueryPlanner=true, citationExpansion=true, openAlexRelatedExpansion=true, maxCandidates>=10000, maxQueries>=48, maxQueriesPerProvider>=8, maxResultsPerQuery>=150, maxLlmQueries>=16, maxCitationSeeds>=24, maxCitationsPerSeed>=50, maxRelatedPerSeed>=50, maxEntityQueries>=48, maxExtractedEntities>=160, maxSeedEntities>=100, maxSeedPapers>=50, maxSeedQueries>=40, papersCoolMaxQueries>=48, pasaMaxQueries>=20, providerConcurrency>=4, timeoutMs>=300000, searchBudgetMs>=300000, retryCount>=5, importResolved=false, processImports=false, allowDownloads=false, returnPartial=true, persist=true)`
+- `literature_discovery(operation="submit", depth="deep", searchMode="deep", planningMode="llm_augmented", llmQueryPlanner=true, citationExpansion=true, openAlexRelatedExpansion=true, maxCandidates>=10000, maxQueries>=48, maxQueriesPerProvider>=8, maxResultsPerQuery>=150, maxLlmQueries>=16, maxCitationSeeds>=24, maxCitationsPerSeed>=50, maxRelatedPerSeed>=50, maxEntityQueries>=48, maxExtractedEntities>=160, maxSeedEntities>=100, maxSeedPapers>=50, maxSeedQueries>=40, papersCoolMaxQueries>=48, pasaMaxQueries>=20, providerConcurrency>=4, timeoutMs>=300000, searchBudgetMs>=300000, retryCount>=5, importResolved=false, processImports=false, allowDownloads=false, returnPartial=true, persist=true)`, followed by `progress` and `report`; synchronous `search` is reserved for small targeted follow-ups.
 
 Required artifacts:
 
 - `literature/LITERATURE_DISCOVERY_PACKET.json`: raw metadata-only discovery packet.
 - `papernexus/LITERATURE_DISCOVERY_TRIAGE.json`: candidate triage with `import_recommended`, `watchlist`, and `reject_irrelevant` decisions.
+- `papernexus/ABSTRACT_SCREENING_AUDIT.json`: one-row-per-merged-candidate audit proving abstract-level reading or explicit no-abstract metadata fallback.
 - `papernexus/PAPER_SELECTION_SCORECARD.json`: lane-aware active screening with `graph_import`, `split_read_only`, `watchlist`, and explicit `reject_*` decisions.
 - `ideation/PRE_IDEA_EVIDENCE_GATE.json`: hard authority for whether idea generation can start.
 - `papernexus/proposal_graph_session.json`: preferred PaperNexus idea-generation result when supported.
@@ -165,6 +170,8 @@ Outputs:
 - `paper_contribution.minimum_experiment_table`
 - `paper_contribution.ablation_plan`
 - `paper_contribution.falsifier`
+- `paper_contribution.innovation_bundle` with at least three mutually necessary innovation points covering problem/protocol/evaluation, method/mechanism, and training/integration/analysis/validation
+- `paper_contribution.storyline` with opening tension, hidden cause, method-as-resolution, proof ladder, reviewer risk/defense, and a 5-7 step narrative spine
 - `paper_contribution.performance_claim` for every `CODE` idea that claims a performance-bearing engineering contribution
 - red-line audit fields for metric/eval/dataset/data-leakage/prediction-cheating/training-budget drift
 - evidence maturity and follow-up evidence fields listed above
@@ -188,6 +195,7 @@ python scripts/idea_track_seeds.py --project <project-root>
 python scripts/idea_track_seeds.py --project <project-root> --check
 python ../autoreskill-papernexus-innovation/scripts/pre_idea_discovery_plan.py --project <project-root> --topic "<topic>" --target-domain "<domain>"
 python ../autoreskill-papernexus-innovation/scripts/discovery_metadata_triage.py --project <project-root> --input literature/LITERATURE_DISCOVERY_PACKET.json --stage ideation
+python ../autoreskill-papernexus-innovation/scripts/abstract_screening_audit_lint.py --project <project-root>
 python ../autoreskill-papernexus-innovation/scripts/paper_selection_scorecard_lint.py --project <project-root>
 python ../autoreskill-papernexus-innovation/scripts/pre_idea_breadth_lint.py --project <project-root>
 python ../autoreskill-papernexus-innovation/scripts/split_reading_evidence_pack_lint.py --project <project-root>

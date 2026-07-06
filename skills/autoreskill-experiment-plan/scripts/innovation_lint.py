@@ -9,6 +9,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from hpo_policy_lint import validate_hpo_search_policy
+
 
 SKILL_ROOT = Path(__file__).resolve().parents[2]
 PAPERNEXUS_SCRIPTS = SKILL_ROOT / "autoreskill-papernexus-innovation/scripts"
@@ -29,6 +31,7 @@ REQUIRED = [
     "consumed_innovation_slot_ids",
     "compute_backend",
     "path_mapping",
+    "stability_seed_policy",
     "primary_metric",
     "fixed_budget",
 ]
@@ -49,6 +52,28 @@ VALID_METHOD_SOURCE_ROLES = {
     "target_domain_absence_proven",
 }
 TARGET_DOMAIN_ONLY_ROLES = {"target_domain", "current_field", "target_domain_only"}
+INNOVATION_BUNDLE_REQUIRED_KEYS = [
+    "name",
+    "role",
+    "source_role",
+    "source_evidence_refs",
+    "closest_prior_delta",
+    "paper_story_role",
+    "validation_plan",
+]
+PAPER_STORYLINE_REQUIRED_KEYS = [
+    "paper_thesis",
+    "opening_tension",
+    "hidden_cause",
+    "method_as_resolution",
+    "proof_ladder",
+    "reviewer_risk_and_defense",
+    "narrative_spine",
+]
+PROBLEM_PROTOCOL_ROLES = {"problem_definition", "protocol", "benchmark", "evaluation", "metric"}
+METHOD_ROLES = {"method_mechanism", "algorithm", "model", "architecture", "training_mechanism"}
+PROOF_INTEGRATION_ROLES = {"training_integration", "system_integration", "theory_analysis", "ablation", "validation", "analysis"}
+MAX_STABILITY_RANDOM_SEEDS = 3
 
 
 def ar(project: str) -> Path:
@@ -98,8 +123,66 @@ def require_nested(mapping: Any, prefix: str, keys: list[str], missing: list[str
             missing.append(f"{prefix}.{key}")
 
 
+def int_value(value: Any) -> int | None:
+    if isinstance(value, bool):
+        return None
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed
+
+
+def validate_stability_seed_policy(packet: dict[str, Any], missing: list[str], warnings: list[str]) -> None:
+    policy = packet.get("stability_seed_policy")
+    prefix = "INNOVATION_PACKET.stability_seed_policy"
+    require_nested(policy, prefix, ["max_random_seeds", "planned_seed_count", "claim_rule"], missing)
+    if not isinstance(policy, dict):
+        return
+
+    max_seeds = int_value(policy.get("max_random_seeds"))
+    planned = int_value(policy.get("planned_seed_count"))
+    if max_seeds is None:
+        missing.append(f"{prefix}.max_random_seeds must be numeric")
+    elif max_seeds < 1 or max_seeds > MAX_STABILITY_RANDOM_SEEDS:
+        missing.append(f"{prefix}.max_random_seeds must be between 1 and {MAX_STABILITY_RANDOM_SEEDS}")
+    if planned is None:
+        missing.append(f"{prefix}.planned_seed_count must be numeric")
+    elif planned < 1 or planned > MAX_STABILITY_RANDOM_SEEDS:
+        missing.append(f"{prefix}.planned_seed_count must be between 1 and {MAX_STABILITY_RANDOM_SEEDS}")
+    if max_seeds is not None and planned is not None and planned > max_seeds:
+        missing.append(f"{prefix}.planned_seed_count must not exceed max_random_seeds")
+
+    for key in ["planned_random_seeds", "random_seeds", "stability_seeds"]:
+        value = policy.get(key)
+        if isinstance(value, list):
+            if len(value) > MAX_STABILITY_RANDOM_SEEDS:
+                missing.append(f"{prefix}.{key} must contain at most {MAX_STABILITY_RANDOM_SEEDS} seeds")
+            if value and planned is not None and len(value) != planned:
+                warnings.append(f"{prefix}.{key} length differs from planned_seed_count")
+
+
 def normalized_role(value: Any) -> str:
     return str(value or "").strip().lower().replace("-", "_").replace(" ", "_")
+
+
+def as_list(value: Any) -> list[Any]:
+    if isinstance(value, list):
+        return value
+    if isinstance(value, tuple):
+        return list(value)
+    return []
+
+
+def story_step_count(value: Any) -> int:
+    if isinstance(value, list):
+        return len([item for item in value if present(item) and not placeholder(item)])
+    if not isinstance(value, str):
+        return 0
+    text = value.replace("\n", " ")
+    for sep in ["。", "；", ";", "->", "=>", "|"]:
+        text = text.replace(sep, ".")
+    return len([part for part in text.split(".") if part.strip()])
 
 
 def validate_baseline_backend_paths(packet: dict[str, Any], missing: list[str]) -> None:
@@ -183,6 +266,60 @@ def validate_innovation_contract(packet: dict[str, Any], missing: list[str]) -> 
         missing.append("INNOVATION_PACKET.innovation_search_contract.ablation_required must be true")
     if contract.get("confirmation_required") is not True:
         missing.append("INNOVATION_PACKET.innovation_search_contract.confirmation_required must be true")
+
+
+def validate_paper_bundle(packet: dict[str, Any], missing: list[str], details: dict[str, Any]) -> None:
+    contract = packet.get("innovation_search_contract") if isinstance(packet.get("innovation_search_contract"), dict) else {}
+    bundle = first_present(packet, ["paper_innovation_bundle", "innovation_bundle", "three_innovation_bundle"])
+    if not present(bundle):
+        bundle = contract.get("paper_innovation_bundle") or contract.get("innovation_bundle")
+    points = as_list(bundle)
+    details["paper_innovation_bundle_count"] = len(points)
+    if len(points) < 3:
+        missing.append("INNOVATION_PACKET.paper_innovation_bundle must contain at least 3 paper-level innovation points")
+        return
+    roles: set[str] = set()
+    transfer_source_count = 0
+    for index, point in enumerate(points):
+        prefix = f"INNOVATION_PACKET.paper_innovation_bundle[{index}]"
+        if not isinstance(point, dict):
+            missing.append(f"{prefix} must be an object")
+            continue
+        for key in INNOVATION_BUNDLE_REQUIRED_KEYS:
+            value = point.get(key)
+            if not present(value) or placeholder(value):
+                missing.append(f"{prefix}.{key}")
+        role = normalized_role(point.get("role"))
+        source_role = normalized_role(point.get("source_role"))
+        if role:
+            roles.add(role)
+        if source_role in VALID_METHOD_SOURCE_ROLES:
+            transfer_source_count += 1
+        elif source_role in TARGET_DOMAIN_ONLY_ROLES and not present(point.get("current_field_absence_evidence")):
+            missing.append(f"{prefix}.current_field_absence_evidence required for target-domain-only innovation point")
+    details["paper_innovation_bundle_roles"] = sorted(roles)
+    details["paper_innovation_bundle_transfer_source_count"] = transfer_source_count
+    if not roles & PROBLEM_PROTOCOL_ROLES:
+        missing.append("INNOVATION_PACKET.paper_innovation_bundle needs a problem/protocol/evaluation innovation point")
+    if not roles & METHOD_ROLES:
+        missing.append("INNOVATION_PACKET.paper_innovation_bundle needs a method/mechanism innovation point")
+    if not roles & PROOF_INTEGRATION_ROLES:
+        missing.append("INNOVATION_PACKET.paper_innovation_bundle needs a training/integration/analysis/validation innovation point")
+    if transfer_source_count < 1:
+        missing.append("INNOVATION_PACKET.paper_innovation_bundle needs at least one near/far/cross-lane or external transfer-backed point")
+
+    storyline = first_present(packet, ["paper_storyline", "storyline_contract", "storyline"])
+    if not present(storyline):
+        storyline = contract.get("paper_storyline") or contract.get("storyline")
+    if not isinstance(storyline, dict):
+        missing.append("INNOVATION_PACKET.paper_storyline")
+        return
+    for key in PAPER_STORYLINE_REQUIRED_KEYS:
+        value = storyline.get(key)
+        if not present(value) or placeholder(value):
+            missing.append(f"INNOVATION_PACKET.paper_storyline.{key}")
+    if story_step_count(storyline.get("narrative_spine")) < 5:
+        missing.append("INNOVATION_PACKET.paper_storyline.narrative_spine must contain 5-7 sequential story steps")
 
 
 def validate_evidence_import_gate(packet: dict[str, Any], missing: list[str]) -> None:
@@ -303,7 +440,7 @@ def validate_pre_idea_refs(base: Path, packet: dict[str, Any], missing: list[str
         details["pre_idea_evidence_gate_path"] = relpath(base, gate_path) if gate_path else None
         if not isinstance(gate, dict):
             missing.append("INNOVATION_PACKET.pre_idea_evidence_gate_path target")
-        elif str(gate.get("status") or "").strip().lower() != "passed":
+        elif str(gate.get("status") or "").strip().lower() != "passed" and not degraded_gate_approved(gate):
             missing.append("INNOVATION_PACKET.pre_idea_evidence_gate_path status passed")
     if not present(slot_value):
         missing.append("INNOVATION_PACKET.innovation_slot_map_path")
@@ -315,6 +452,22 @@ def validate_pre_idea_refs(base: Path, packet: dict[str, Any], missing: list[str
             missing.append("INNOVATION_PACKET.innovation_slot_map_path target")
     if not present(consumed):
         missing.append("INNOVATION_PACKET.consumed_innovation_slot_ids")
+
+
+def degraded_gate_approved(gate: Any) -> bool:
+    if not isinstance(gate, dict):
+        return False
+    if str(gate.get("status") or "").strip().lower() != "degraded_requires_user_approval":
+        return False
+    approval = gate.get("degraded_approval") or gate.get("user_approval") or gate.get("approval")
+    if not isinstance(approval, dict) or approval.get("approved") is not True:
+        return False
+    return (
+        present(approval.get("approved_by"))
+        and present(approval.get("approved_at"))
+        and present(approval.get("reason"))
+        and present(gate.get("claim_limits") or approval.get("claim_limits"))
+    )
 
 
 def find_design_review(base: Path, packet: dict[str, Any]) -> tuple[Path | None, Any, bool]:
@@ -363,8 +516,11 @@ def lint_packet(project: str, packet_path: Path | None = None) -> dict[str, Any]
 
     validate_baseline_backend_paths(packet, missing)
     validate_innovation_contract(packet, missing)
+    validate_paper_bundle(packet, missing, details)
     validate_evidence_import_gate(packet, missing)
     validate_pre_idea_refs(base, packet, missing, details)
+    validate_stability_seed_policy(packet, missing, warnings)
+    validate_hpo_search_policy(packet, "INNOVATION_PACKET", missing, warnings)
 
     summary, boundary_missing = boundary_summary(packet)
     missing.extend(boundary_missing)

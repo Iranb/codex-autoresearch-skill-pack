@@ -24,9 +24,25 @@ def append_jsonl(path: Path, row: dict[str, Any]) -> None:
         handle.write(json.dumps(row, ensure_ascii=False) + "\n")
 
 
+def allowed_external_wait_text(text: str) -> bool:
+    wait_markers = ["wait", "waiting", "pending", "queued", "running", "in_progress", "async", "external"]
+    has_wait_marker = any(marker in text for marker in wait_markers)
+    if not has_wait_marker:
+        return False
+    if "papernexus" in text and "literature" in text and "discovery" in text:
+        return True
+    if "literature_discovery" in text and any(marker in text for marker in ["run", "progress", "report", "poll"]):
+        return True
+    if any(marker in text for marker in ["import_workflow", "graph import", "graph_import", "authoritative sync", "authoritative_sync", "graph sync"]):
+        return True
+    if "experiment" in text and any(marker in text for marker in ["runtime", "remote", "resource", "gpu", "slurm", "training"]):
+        return True
+    return False
+
+
 def classify(reason: str) -> tuple[str, str]:
     text = reason.lower()
-    if any(k in text for k in ["import", "queue", "running", "remote", "async", "wait"]):
+    if allowed_external_wait_text(text):
         return "async_wait", "schedule_async_poll"
     if any(k in text for k in ["controller_unavailable", "single_seed", "cost_evidence", "provider", "sparse", "stale"]):
         return "degradable", "advance_with_downgrade_or_fallback"

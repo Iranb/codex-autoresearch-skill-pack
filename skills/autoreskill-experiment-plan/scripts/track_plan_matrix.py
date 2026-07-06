@@ -16,6 +16,7 @@ REQUIRED_ROW_FIELDS = [
     "track_role",
     "baseline_code",
     "dataset",
+    "dataset_runtime_plan_ref",
     "split",
     "primary_metric",
     "metric_direction",
@@ -33,6 +34,24 @@ REQUIRED_ROW_FIELDS = [
 READY_EVIDENCE = {"passed", "complete", "completed", "graph_closed", "source_backed", "not_required"}
 LAUNCH_STATUSES = {"ready", "blocked", "diagnostic_only", "parked"}
 READY_PACKET_STATUSES = {"reviewed", "ready", "approved", "pass", "passed"}
+DEFAULT_BIE_CONFIG = {
+    "branch_budget_B": 4,
+    "search_iterations_I": 2,
+    "versions_per_branch_E": 2,
+    "retain_top_K": 1,
+    "stop_on_spec_violation": True,
+    "promotion_required": True,
+    "param_search_method": "dehb_resource_constrained",
+    "param_search_budget_note": "Use low-fidelity DEHB scouts and promote at most 1-2 full-resource survivors before ablation/confirmation.",
+    "seed_is_search_axis": False,
+    "max_random_seeds_for_stability": 3,
+    "promotion_requirements": [
+        "candidate support on the locked baseline protocol",
+        "linked ablation or confirmation before promoted best_run",
+        "no metric, dataset, evaluator, or budget drift",
+        "failed tracks remain negative evidence and cannot satisfy best_run",
+    ],
+}
 
 
 def now() -> str:
@@ -83,6 +102,10 @@ def rows_from_payload(payload: Any) -> list[dict[str, Any]]:
     return []
 
 
+def decision_rows_by_idea(payload: Any) -> dict[str, dict[str, Any]]:
+    return {str(row.get("idea_id")): row for row in rows_from_payload(payload) if present(row.get("idea_id"))}
+
+
 def normalized(value: Any) -> str:
     return str(value or "").strip().lower()
 
@@ -96,6 +119,7 @@ def review_ready(review: dict[str, Any]) -> bool:
     return (
         present(review.get("baseline_code"))
         and present(review.get("dataset"))
+        and present(review.get("dataset_runtime_plan"))
         and present(review.get("data_split"))
         and present(review.get("primary_metric"))
         and present(review.get("evaluation_command"))
@@ -133,26 +157,54 @@ def default_promotion_gate(seed: dict[str, Any], review: dict[str, Any], selecte
         "stage": "candidate",
         "promotion_requires": ["linked_ablation", "confirmation_or_second_seed"],
         "claim_policy": "seed rows are not launch approval; promoted evidence is required for manuscript claims",
+        "stability_seed_policy": {
+            "max_random_seeds": 3,
+            "claim_rule": "Random-seed stability validation is capped at three seeds; IDEA_TRACK_SEEDS are track candidates, not random seeds.",
+        },
         "ablation_required": seed.get("ablation_required") is True,
         "confirmation_required": seed.get("confirmation_required") is True,
     }
 
 
-def row_from_seed(seed: dict[str, Any], review: dict[str, Any], innovation: dict[str, Any]) -> dict[str, Any]:
+def decision_ref(seed: dict[str, Any], decision: dict[str, Any]) -> str:
+    explicit = decision.get("decision_id") or decision.get("id") or decision.get("ref")
+    if present(explicit):
+        return str(explicit)
+    idea_id = str(seed.get("idea_id") or "unknown").strip().lower()
+    status = str(decision.get("lifecycle_status") or seed.get("track_role") or "seed").strip().lower()
+    return f"idea-decision-{idea_id}-{status}".replace("_", "-")
+
+
+def branch_id(seed: dict[str, Any], selected: bool, decision: dict[str, Any]) -> str:
+    explicit = decision.get("branch_id") or seed.get("branch_id")
+    if present(explicit):
+        return str(explicit)
+    track_id = str(seed.get("track_id") or "track-unknown").strip()
+    role = "primary" if selected else str(seed.get("track_role") or "alternate").strip().lower()
+    return f"branch-{track_id}-{role}".replace("_", "-")
+
+
+def row_from_seed(seed: dict[str, Any], review: dict[str, Any], innovation: dict[str, Any], decision: dict[str, Any]) -> dict[str, Any]:
     selected = str(seed.get("track_id") or "") == str(review.get("track_id") or "") or str(seed.get("idea_id") or "") == str(review.get("selected_idea_id") or "")
     ready = selected and review_ready(review)
     status = "ready" if ready else "blocked" if selected else "parked"
     baseline_code = review.get("baseline_code") if selected and present(review.get("baseline_code")) else {"status": "unresolved", "reason": "baseline lock required before launch"}
     compute_budget = review.get("compute_budget") if selected and present(review.get("compute_budget")) else {"status": "bounded_seed", "gpu_hours": 0, "walltime_hours": 0}
+    hpo_policy = review.get("hpo_search_policy") or innovation.get("hpo_search_policy")
     return {
         "track_id": seed.get("track_id"),
+        "branch_id": branch_id(seed, selected, decision),
         "idea_id": seed.get("idea_id"),
+        "idea_decision_ref": decision_ref(seed, decision),
+        "idea_lifecycle_status": decision.get("lifecycle_status"),
+        "idea_failure_class": decision.get("failure_class"),
         "track_role": seed.get("track_role"),
         "selected_for_review": selected,
         "source_seed_path": "ideation/IDEA_TRACK_SEEDS.json",
         "idea_pool_path": review.get("idea_pool_path") or innovation.get("idea_pool_path") or "ideation/EXPERIMENT_IDEA_POOL.json",
         "baseline_code": baseline_code,
         "dataset": review.get("dataset") if selected and present(review.get("dataset")) else "unresolved_dataset_for_track",
+        "dataset_runtime_plan_ref": "planner/EXPERIMENT_REVIEW_PACKET.json:dataset_runtime_plan" if selected and present(review.get("dataset_runtime_plan")) else "unresolved_dataset_runtime_plan_for_track",
         "split": review.get("data_split") if selected and present(review.get("data_split")) else "unresolved_split_for_track",
         "primary_metric": review.get("primary_metric") if selected and present(review.get("primary_metric")) else "unresolved_primary_metric",
         "metric_direction": review.get("metric_direction") or "higher",
@@ -162,6 +214,8 @@ def row_from_seed(seed: dict[str, Any], review: dict[str, Any], innovation: dict
         "launch_status": status,
         "blocked_reason": "" if ready else blocked_reason(seed, review, selected),
         "promotion_gate": default_promotion_gate(seed, review, selected),
+        "hpo_search_policy_ref": "planner/EXPERIMENT_REVIEW_PACKET.json:hpo_search_policy" if selected and present(hpo_policy) else "not_applicable_until_track_selected",
+        "hpo_search_method": hpo_policy.get("search_method") if selected and isinstance(hpo_policy, dict) else "not_applicable",
         "one_variable_change": seed.get("one_variable_change"),
         "expected_metric_effect": seed.get("expected_metric_effect"),
         "minimum_pilot": seed.get("minimum_pilot"),
@@ -176,17 +230,21 @@ def row_from_seed(seed: dict[str, Any], review: dict[str, Any], innovation: dict
 def build(project: str) -> dict[str, Any]:
     base = ar(project)
     seeds = read_json(base / "ideation/IDEA_TRACK_SEEDS.json", {}) or {}
+    decisions = read_json(base / "ideation/IDEA_DECISION_LEDGER.json", {}) or {}
     review = read_json(base / "planner/EXPERIMENT_REVIEW_PACKET.json", {}) or {}
     innovation = read_json(base / "orchestrator/INNOVATION_PACKET.json", {}) or {}
     rows = rows_from_payload(seeds)
+    decisions_by_idea = decision_rows_by_idea(decisions)
     matrix = {
         "schema_version": 1,
         "generated_at": now(),
         "artifact": "TRACK_PLAN_MATRIX",
         "source_track_seed_path": "ideation/IDEA_TRACK_SEEDS.json",
         "source_review_packet_path": "planner/EXPERIMENT_REVIEW_PACKET.json",
+        "source_idea_decision_ledger_path": "ideation/IDEA_DECISION_LEDGER.json",
+        "bie_config": DEFAULT_BIE_CONFIG,
         "policy": "bounded_explore_exploit_matrix_seed_rows_are_not_launch_approval",
-        "tracks": [row_from_seed(seed, review, innovation) for seed in rows],
+        "tracks": [row_from_seed(seed, review, innovation, decisions_by_idea.get(str(seed.get("idea_id")), {})) for seed in rows],
     }
     return matrix
 

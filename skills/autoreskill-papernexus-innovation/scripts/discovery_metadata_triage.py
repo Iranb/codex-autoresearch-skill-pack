@@ -178,20 +178,43 @@ def collect_candidates(payload: Any) -> list[dict[str, Any]]:
     payload = unwrap(payload)
     if isinstance(payload, dict):
         rows: list[dict[str, Any]] = []
-        for key in ["candidates", "papers", "results", "raw_results", "discovered_near_source_candidates"]:
+        candidate_keys = [
+            "candidates",
+            "candidateRows",
+            "candidate_rows",
+            "papers",
+            "results",
+            "raw_results",
+            "mergedPapers",
+            "merged_papers",
+            "mergedCandidates",
+            "merged_candidates",
+            "selectedCandidates",
+            "discovered_near_source_candidates",
+        ]
+        container_keys = [
+            "attempts",
+            "queryResults",
+            "query_results",
+            "coverage",
+            "payload",
+            "report",
+            "data",
+        ]
+        for key in candidate_keys:
             value = payload.get(key)
             if isinstance(value, list):
                 rows.extend(row for row in value if isinstance(row, dict))
-        attempts = payload.get("attempts")
-        if isinstance(attempts, list):
-            for attempt in attempts:
-                if isinstance(attempt, dict):
-                    rows.extend(collect_candidates(attempt))
+        for key in container_keys:
+            value = payload.get(key)
+            if isinstance(value, list):
+                for item in value:
+                    if isinstance(item, dict):
+                        rows.extend(collect_candidates(item))
+            elif isinstance(value, dict):
+                rows.extend(collect_candidates(value))
         if rows:
             return rows
-        nested = payload.get("payload")
-        if nested is not None:
-            return collect_candidates(nested)
     return []
 
 
