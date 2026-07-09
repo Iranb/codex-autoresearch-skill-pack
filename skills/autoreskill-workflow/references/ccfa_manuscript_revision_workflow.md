@@ -1,8 +1,24 @@
 # CCF-A Manuscript Revision Workflow
 
-Use this reference when applying CCF-A/top-tier writing standards to a concrete manuscript. This is the manuscript-application layer: it consumes the user's draft, project evidence, and, when available, writing-style corpus findings. It must produce `.autoreskill/paper/CCFA_WRITING_AUDIT.md` before rewriting or polishing prose.
+Use this reference when applying CCF-A/top-tier writing standards to a concrete
+manuscript. This is the manuscript-application layer: it consumes the user's
+draft, project evidence, and optional corpus findings, then produces
+`.autoreskill/paper/CCFA_WRITING_AUDIT.md` before rewriting prose.
 
-Read `ccfa_writing_principles.md` before using this workflow. If the revision cites corpus-derived writing claims, also read `ccfa_writing_style_corpus_audit.md` and use only evidence-bounded findings from `.autoreskill/writing_style/EVIDENCE_SYNTHESIS.json` or an equivalent audited source.
+Read `ccfa_writing_principles.md` before using this workflow. If the revision
+cites corpus-derived writing claims, also read
+`ccfa_writing_style_corpus_audit.md` and use only evidence-bounded findings from
+`.autoreskill/writing_style/EVIDENCE_SYNTHESIS.json` or an equivalent audited
+source.
+
+## Table Of Contents
+
+- Non-Negotiable Order
+- Required Inputs
+- Required Output
+- Audit Procedure
+- Audit Template
+- Completion Gate
 
 ## Non-Negotiable Order
 
@@ -15,20 +31,23 @@ Revise in this order:
 5. Run the non-defensive writing pass.
 6. Polish paragraph flow and sentence-level English.
 
-Do not begin with grammar, vocabulary, or "academic tone". A fluent weak argument is still weak.
+Do not begin with grammar, vocabulary, or generic academic tone. A fluent weak
+argument is still weak.
 
 ## Required Inputs
 
 Collect or infer:
 
-- Manuscript source path: `.tex`, `.md`, `.docx`, or extracted text/PDF.
-- Target venue or style target.
-- Core method, claimed contributions, and intended novelty.
-- Evidence package: experiments, ablations, theory, analysis, qualitative examples, limitations, and unavailable/missing evidence.
-- Existing Figure 1 or figure caption when available.
-- Corpus-style evidence only when it has an evidence tier and claim limit.
+- manuscript source path: `.tex`, `.md`, `.docx`, extracted text, or PDF;
+- target venue or style target;
+- core method, claimed contributions, and intended novelty;
+- evidence package: experiments, ablations, theory, analysis, qualitative
+  examples, limitations, and unavailable or missing evidence;
+- existing Figure 1 or caption when available;
+- corpus-style evidence only when it has an evidence tier and claim limit.
 
-If key evidence is missing, record the gap in the audit and downgrade claims instead of inventing support.
+If key evidence is missing, record the gap in the audit and downgrade claims
+instead of inventing support.
 
 ## Required Output
 
@@ -38,162 +57,60 @@ Create or update:
 .autoreskill/paper/CCFA_WRITING_AUDIT.md
 ```
 
-When editing source files, keep the audit as the authority for why each story-level change was made.
+When editing source files, keep the audit as the authority for why each
+story-level change was made.
 
 ## Audit Procedure
 
-### 1. Extract The Current Thesis
+1. Extract the current thesis.
 
-Write the current draft's actual thesis, not the desired thesis:
+   Write the current draft's actual thesis in the form used by
+   `ccfa_writing_principles.md`. Mark `unclear` if the failure mode, mechanism,
+   or enabled capability is missing.
 
-```text
-Existing methods fail because of X. We address this by Y, which enables Z.
-```
+2. Build a gap-diagnosis-method-evidence map.
 
-Mark `unclear` if any part is missing.
+   For each major claim, record gap, diagnosis, method, evidence, claim strength,
+   and required revision. Allowed actions are rewrite, downgrade, move to future
+   work, add evidence, or leave unchanged with evidence ref.
 
-### 2. Build The Gap-Diagnosis-Method-Evidence Map
+3. Audit front matter before method details.
 
-For each major claim, record:
+   Check title, abstract, introduction, contribution list, and Figure 1 against
+   the principle-layer requirements. Record missing diagnosis, vague contribution
+   verbs, unsupported numbers, unclear reader belief shift, and figure-story
+   failures.
 
-- `gap`: what fails or is missing.
-- `diagnosis`: why it fails.
-- `method`: what mechanism addresses the diagnosis.
-- `evidence`: which experiment, ablation, theorem, analysis, figure, or artifact supports it.
-- `claim strength`: strong, moderate, weak, speculative, or unsupported.
-- `required revision`: rewrite, downgrade, move to future work, or add evidence.
+4. Audit method and experiments.
 
-### 3. Audit Front Matter First
+   Each method component should name the bottleneck it solves, the mechanism it
+   changes, and the validation route. Experiments should be organized by claims
+   or research questions, not by table order alone.
 
-Check title, abstract, introduction, contribution list, and Figure 1 before method details.
+5. Calibrate claims.
 
-Title:
+   Choose verbs from the evidence strength rules in `ccfa_writing_principles.md`.
+   Downgrade or remove unsupported intensifiers and unsupported causal,
+   robustness, generalization, or SOTA claims.
 
-- Shows object, action, and contribution.
-- Avoids empty shells such as `A Novel Framework for ...`.
-- Contains a memorable mechanism when appropriate.
+6. Run the non-defensive writing pass.
 
-Abstract:
+   Remove unnecessary self-undermining only after claim calibration. Preserve
+   real limitations, missing evidence, correlative boundaries, validation-only
+   boundaries, and target-domain scope. The pass is invalid if it upgrades weak
+   evidence into a stronger claim.
 
-- Sentence 1 states field pressure, not generic importance.
-- Specific limitation/failure appears before the method.
-- Diagnosis appears between limitation and proposal.
-- Method sentence explains what changes.
-- Evidence scope and key numbers appear when available.
-- Final sentence states implication with boundaries.
+7. Rewrite in dependency order.
 
-Introduction:
+   Edit title and abstract first; then introduction and contribution list;
+   Figure 1 caption/story; method topic sentences and component motivation;
+   experiment organization; related-work group openings; limitations and claim
+   boundaries; high-impact non-defensive wording; paragraph transitions and
+   sentence-level English last.
 
-- Paragraph 1 explains why the field pressure matters now.
-- Paragraph 2 shows the concrete failure of current methods.
-- Paragraph 3 identifies the hidden cause or core observation.
-- The core insight appears on page 1.
-- The contribution list is evidence-routable.
+## Audit Template
 
-Figure 1:
-
-- Shows failure mode, diagnosis, and method-as-resolution when possible.
-- Does more than list modules.
-- Helps a reviewer retell the paper in 30 seconds.
-
-### 4. Audit Method And Experiments
-
-Method:
-
-- Each component begins with the bottleneck it solves.
-- The component changes information flow, representation, objective, supervision, or inference in a way tied to the diagnosis.
-- Each component has a planned or existing validation route.
-
-Experiments:
-
-- Main results answer the main claim.
-- Ablations map to contributions.
-- Generalization tests map to scope claims.
-- Analysis supports the proposed mechanism.
-- Failure cases or limitations calibrate boundaries.
-
-Prefer RQ-based organization:
-
-```text
-RQ1: Does the method improve the main task?
-RQ2: Which component causes the gain?
-RQ3: Does it generalize across datasets/backbones/settings?
-RQ4: Does analysis support the proposed mechanism?
-RQ5: When does it fail?
-```
-
-### 5. Calibrate Claims
-
-Use claim wording according to evidence:
-
-- Strong experimental support: `we show`, `we demonstrate`.
-- Empirical observation: `we find`, `we observe`.
-- Plausible interpretation: `our results suggest`.
-- Method/artifact contribution: `we introduce`, `we propose`.
-- Formal proof only: `we prove`.
-- Weak support: `is consistent with`, `may indicate`, or downgrade.
-
-Remove or weaken `novel`, `effective`, `robust`, `significant`, and `substantial` unless backed by numbers, tests, or mechanisms.
-
-### 6. Non-Defensive Writing Pass
-
-After claim calibration, remove self-undermining prose that is not required by
-the evidence boundary.
-
-Top-tier framing:
-
-- A reviewer should see the paper's strongest supported contribution in the
-  title, abstract, introduction, and contribution list before seeing apologies or
-  caveats.
-- The manuscript should make a direct scoped claim, then show the evidence and
-  boundary. It should not lead with "we do not claim" unless that sentence
-  prevents a likely reviewer misread.
-- Real limitations are not defensive writing. They are part of the evidence
-  boundary and must remain visible in the right location.
-- The pass is invalid if it upgrades weak, pilot, correlative, or
-  validation-only evidence into strong causal, robust, or general claims.
-
-Check for:
-
-- unnecessary disclaimers before supported claims;
-- repeated "we do not claim" or "not intended to" statements;
-- limitation-first paragraphs that bury the contribution;
-- vague hedging where the correct fix is precise evidence wording;
-- negative framing of a valid scope choice;
-- hypothetical objections introduced without reviewer or evidence pressure;
-- contribution statements that apologize for being incremental when the evidence
-  supports a clearer claim.
-
-Repair pattern:
-
-1. State the supported claim directly.
-2. Attach the exact evidence or scope boundary.
-3. Move true limitations to a limitation or discussion position.
-4. Delete caveats that repeat already-stated scope.
-5. Block unsupported claim upgrades introduced during polish.
-6. Preserve necessary uncertainty when evidence is weak, incomplete, or
-   correlative.
-
-This pass must not create overclaiming. It turns defensive wording into precise
-claim scope; it does not remove real limitations.
-
-### 7. Rewrite Sequence
-
-When editing files, use this order:
-
-1. Rewrite title and abstract.
-2. Rewrite introduction paragraphs 1-3 and contribution list.
-3. Rewrite or propose Figure 1 caption/story.
-4. Rewrite method section topic sentences and component motivation.
-5. Reorder experiments into claim-answering RQs where appropriate.
-6. Rewrite related work group openings and gap-positioning sentences.
-7. Add limitations or claim-boundary text.
-8. Run the non-defensive writing pass on high-impact positions: title, abstract,
-   introduction opening/closing, contribution list, method motivation,
-   limitations, and conclusion.
-9. Polish paragraph transitions and sentence-level English.
-
-## `CCFA_WRITING_AUDIT.md` Template
+Use this structure for `.autoreskill/paper/CCFA_WRITING_AUDIT.md`:
 
 ```markdown
 # CCF-A Writing Audit
@@ -236,10 +153,6 @@ Existing methods fail because of X. We address this by Y, which enables Z.
 ## Top-Tier Claim Posture
 | Location | Supported Direct Claim | Evidence/Scope Boundary | Necessary Limitations Preserved | Claim Upgrades Blocked | Top-Tier Reviewer Risk |
 |---|---|---|---|---|---|
-| Title |  |  |  |  |  |
-| Abstract |  |  |  |  |  |
-| Introduction |  |  |  |  |  |
-| Contributions |  |  |  |  |  |
 
 ## Figure 1 Story Check
 - Failure mode:
@@ -269,15 +182,16 @@ Existing methods fail because of X. We address this by Y, which enables Z.
 
 Do not report CCF-A writing polish as complete unless:
 
-- `CCFA_WRITING_AUDIT.md` exists.
-- The one-sentence thesis is explicit.
-- Abstract and introduction include gap, diagnosis, method, evidence, and boundary.
-- Each major contribution has evidence.
-- Strong claims are calibrated.
-- The non-defensive writing pass removes unnecessary self-undermining while
-  preserving true evidence boundaries.
-- Necessary limitations are preserved, unsupported claim upgrades are blocked,
-  and front-matter claim posture is checked from a top-tier reviewer viewpoint.
-- The final polish happened after story-level repair.
+- `CCFA_WRITING_AUDIT.md` exists;
+- the one-sentence thesis is explicit or marked unclear with repair route;
+- front matter has gap, diagnosis, method, evidence, and boundary;
+- each major contribution has evidence or is downgraded;
+- strong claims are calibrated;
+- the non-defensive writing pass removes unnecessary self-undermining while
+  preserving true evidence boundaries;
+- unsupported claim upgrades are blocked;
+- final polish happened after story-level repair.
 
-If the manuscript cannot satisfy these gates because evidence is missing, report the blocker and provide a revision plan rather than masking the gap with fluent prose.
+If the manuscript cannot satisfy these gates because evidence is missing, report
+the blocker and provide a revision plan rather than masking the gap with fluent
+prose.

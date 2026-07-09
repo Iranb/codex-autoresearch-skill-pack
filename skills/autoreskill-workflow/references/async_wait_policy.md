@@ -4,6 +4,15 @@ Use this reference when `goal.py tick` returns a `wakeup` recommendation or when
 a heartbeat resume needs to decide whether to keep, update, or delete a managed
 Codex heartbeat.
 
+## Table Of Contents
+
+- Allowed Heartbeat Scopes
+- Bounded Continuation Before Waiting
+- Stale External Polls
+- Managed Heartbeat Lifecycle
+- Result-Aware Poll Classification
+- PaperNexus Graph Import Heartbeats
+
 ## Allowed Heartbeat Scopes
 
 Create or update a heartbeat only for external waits in these scopes:
@@ -137,15 +146,3 @@ terminal complete with graph visibility, semantic readiness when required, and
 authoritative sync complete, superseded, or explicitly not required. If a
 heartbeat combines graph import with another active wait, compute intervals for
 each wait independently and use the earliest meaningful next-check time.
-
-## Subagent Dispatch
-
-Use `scripts/goal_job_dispatch.py` to render a job packet into a prompt for a
-serialized role pass or real subagent. After the role pass finishes, update the
-queue with `scripts/goal_job_update.py`.
-
-When `goal_job_dispatch.py --mode subagent` writes
-`.autoreskill/job_packets/<job_id>.subagent_request.json`, the parent Codex agent
-must call the configured multi-agent tool and then record the result with
-`scripts/goal_subagent_result.py`. Python helpers do not call Codex MCP tools
-directly.

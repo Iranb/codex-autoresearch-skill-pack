@@ -10,6 +10,15 @@ paper discovery -> code availability check -> repository static evidence -> sour
 
 Do not treat this as a replacement for PaperNexus evidence, experiment planning, or run validation. It is an evidence bridge from external papers and repositories into the normal AutoResearch ideation and experiment workflow.
 
+## Table Of Contents
+
+- Required Layers
+- Canonical Artifacts
+- Artifact Expectations
+- Validity Rules
+- Stage Integration
+- Standalone Invocation
+
 ## Required Layers
 
 Keep three layers separate.

@@ -1,9 +1,15 @@
 # Minimal Harness Hardening Contract
 
-This reference captures the small set of audit objects added from the 2026
-AutoResearch method review. It is intentionally narrower than the full stage
-contract. Apply it only where the current `goal_type` and `claim_mode` require
-paper-claim evidence.
+This reference indexes the cross-stage audit fields added by the 2026
+AutoResearch method review. It is not a second stage contract. Stage completion
+still belongs to `stage_contracts.md` plus `contract_lint.py`.
+
+## Table Of Contents
+
+- Scope
+- Field Index
+- Pruning Rule
+- Removal Or Downgrade Rule
 
 ## Scope
 
@@ -12,191 +18,109 @@ Required by default for:
 - `goal_type=paper_producing_top_tier`
 - `claim_mode=strong_paper_claims`
 
-For `paper_producing_light`, use the same fields as warnings unless the user
-asks for top-tier readiness. For `standalone_survey`, `writing_style_corpus`, and
+For `paper_producing_light`, use these fields as warnings unless the user asks
+for top-tier readiness. For `standalone_survey`, `writing_style_corpus`, and
 `diagnostic_or_resource`, keep provenance and claim limits but do not require
-experiment, review, or submission fields that are irrelevant to the goal.
+irrelevant experiment, review, or submission fields.
 
 When a strong-paper gate is skipped because the goal is out of scope,
 `contract_lint.py` should report the skipped gate under
-`details.out_of_scope_with_claim_limits[]`. The entry must identify the skipped
-items and show where `claim_limits`, `out_of_scope_claim_limits`, or equivalent
-scope boundaries are recorded. A skipped gate without claim limits is still a
-warning because the workflow otherwise cannot distinguish "not applicable" from
-"missing evidence".
+`details.out_of_scope_with_claim_limits[]` and identify the recorded claim
+boundary.
 
-## Experiment Planning
+## Field Index
 
-Each `TRACK_PLAN_MATRIX` row that can launch or support a claim should include:
+`goal_state.json` or `autopilot_policy.json`:
 
-- `certification_policy`: what must be true before this row can support a claim.
-- `intervention_axis`: the scientific variable changed by the track.
-- `critical_evidence_requirements`: minimum evidence needed for promotion.
-- `negative_knowledge_consultation`: negative evidence or failure patterns
-  consulted before launching.
+- `goal_type`
+- `claim_mode`
+- `claim_limits` or `out_of_scope_claim_limits`
+- `project_agents_policy_hash`
 
-The matrix or top-level plan should also keep `selected_idea_id`, B/I/E budget,
-idea-decision refs, selected-projection alignment, and a stable
-`selection_fingerprint` or `selected_primary_ref`. Downstream packets and active
-track rows must carry the same reference so stale projections cannot silently
-continue after idea_gate selects, parks, or kills a different idea/track.
+`TRACK_PLAN_MATRIX.json` launchable or claim-supporting rows:
 
-## Experiment Ledger
+- `selected_idea_id`
+- `selection_fingerprint` or `selected_primary_ref`
+- `bie_config`
+- `certification_policy`
+- `intervention_axis`
+- `critical_evidence_requirements`
+- `negative_knowledge_consultation`
 
-Every failed, regressed, budget-stopped, spec-violating, diagnostic, or
-not-promoted row in `EXPERIMENT_LEDGER` should keep:
+`INNOVATION_PACKET.json` and `EXPERIMENT_REVIEW_PACKET.json`:
+
+- selected idea and track refs matching `IDEA_DECISION_LEDGER.json`
+- locked baseline, dataset, split, metric, and protocol
+- `stability_seed_policy` with at most three experiment seeds
+- `hpo_search_policy` for `PARAM` mechanisms or target sweeps
+- claim limits and evidence boundaries
+
+`EXPERIMENT_LEDGER.json` failed, regressed, budget-stopped, spec-violating,
+diagnostic, or not-promoted rows:
 
 - `failure_class`
-- `failure_diagnosis` with `primary_cause`, `evidence_sufficiency`,
-  `intervention_level`, `repair_route`, and `repeated_failure_key` when the
-  route repeats the same idea
+- `failure_diagnosis`
 - `next_action`
 - selected idea/track lineage
+- branch, iteration, or version lineage when available
 - result summary path when metrics exist
+- retire reason when applicable
 
-Negative evidence is useful only when it remains tied to the selected idea,
-track, branch/iteration/version lineage, and reentry policy.
+`SCORE_VERIFICATION.json`:
 
-## Score Verification
+- `disaggregated_effects`
+- `mechanism_support`
+- `validation_to_test_transfer`
+- `numeric_measurement_registry`
+- paper-reported baseline authority when strong improvement claims are made
 
-`SCORE_VERIFICATION.json` should include:
+`IDEA_OUTCOME_SUMMARY.json`:
 
-- `disaggregated_effects`: all locked metric components, not only a favorable
-  scalar. Critical slices that regress must downgrade or block the affected
-  claim even if an aggregate score improves.
-- `mechanism_support`: whether the observed gains support the proposed
-  mechanism. Outcome-only evidence cannot authorize strong mechanism wording.
-- `validation_to_test_transfer`: whether validation choices transfer to the test
-  or target protocol. Unknown or failed transfer cannot support a strong test
-  claim.
-- `numeric_measurement_registry`: metric units, parser source, baseline source,
-  and measurement provenance.
+- evidence refs for every effective innovation point
+- `mechanism_status`
+- `claim_permission`
+- `negative_knowledge_summary`
+- `post_analysis_self_audit.least_confident_point`
+- `post_analysis_self_audit.largest_possible_misunderstanding`
 
-## Idea Outcome Summary
+`REVIEW_FINDINGS.json`:
 
-`IDEA_OUTCOME_SUMMARY.json` should include:
+- `claim_drift`
+- `scientific_alignment`
+- `defensive_underclaim`
 
-- evidence refs for every effective innovation point;
-- `mechanism_status` for each point;
-- `claim_permission` for each point or idea outcome;
-- `negative_knowledge_summary` describing failures consulted and how claims were
-  bounded.
-- `post_analysis_self_audit` with `least_confident_point` and
-  `largest_possible_misunderstanding`, explicitly naming the weakest part of the
-  current conclusion and the largest possible blind spot or mistaken framing.
-
-Parameter tuning, diagnostics, and resource-fill runs do not count as effective
-innovation points unless idea_gate explicitly reclassifies them as a new
-mechanism with evidence boundaries.
-
-## Review Findings
-
-`REVIEW_FINDINGS.json` should include the usual reviewer axes plus:
-
-- `claim_drift`: claims that moved beyond the evidence or selected idea.
-- `scientific_alignment`: mismatch among problem, mechanism, protocol, metrics,
-  and evidence.
-- `defensive_underclaim`: unnecessary caveats or apology framing that weakens a
-  supported contribution.
-
-These axes repair different failure modes and should not be collapsed into a
-generic clarity issue.
-
-## Subjective Top-Tier Rubrics
-
-Some high-impact decisions include subjective quality: idea taste, story
-coherence, Figure 1 clarity, reviewer excitement, and writing posture. Score
-these only when they affect a top-tier paper-producing stage. Do not use them as
-generic style decoration.
-
-A rubric row should contain:
-
-- `axis`: what is being judged, such as novelty tension, mechanism elegance,
-  story coherence, reviewer risk, or front-matter claim posture.
-- `weight`: why this axis matters for the target venue or stage.
-- `score`: bounded local score, preferably with a short scale definition.
-- `evidence_ref`: paper, experiment, figure, draft, or reviewer finding that
-  justifies the score.
-- `reviewer_gap`: what a strong reviewer would still object to.
-- `required_repair`: concrete revision, downgrade, evidence repair, or no-op.
-
-Rubrics are evidence and repair guidance. They are not independent stage
-authorities unless a stage contract explicitly names them.
-
-## Writing Claim Verification
-
-`PAPER_CLAIM_VERIFICATION.json` should include:
+`PAPER_CLAIM_VERIFICATION.json`:
 
 - `claim_drift_status`
 - `scientific_alignment_status`
 - `numeric_grounding_status`
 - `non_defensive_writing_status`
 
-`CCFA_WRITING_AUDIT.md` should include a `Non-Defensive Writing Pass` section for
-manuscript work. The pass removes unnecessary disclaimers, converts defensive
-limitations into positive scope statements, replaces vague hedging with evidence
-precision, and preserves necessary uncertainty. For top-tier targets, the pass
-must explicitly record:
+`CCFA_WRITING_AUDIT.md` for concrete top-tier/CCF-A manuscript work:
 
-- `Necessary Limitations Preserved`: real limits, missing evidence, correlation
-  limits, and target-domain boundaries remain visible.
-- `Claim Upgrades Blocked`: polishing did not convert weak, pilot, or
-  correlative evidence into strong claims.
-- `Top-Tier Reviewer Risk` or `Front Matter Claim Posture`: title, abstract,
-  introduction, and contribution wording state the supported contribution
-  directly while keeping evidence boundaries auditable.
+- `Non-Defensive Writing Pass`
+- `Necessary Limitations Preserved`
+- `Claim Upgrades Blocked`
+- `Top-Tier Reviewer Risk` or `Front Matter Claim Posture`
 
-## Paper Integrity Forensics
+`PAPER_FORENSICS_REPORT.json`:
 
-`PAPER_FORENSICS_REPORT.json` should be produced by
-`scripts/paper_forensics_lint.py` before strong-paper `writing` or
-`submission_ready` passes. It is a manuscript-level self-consistency and residue
-gate, not an AI-authorship detector.
+- produce it through `scripts/paper_forensics_lint.py`;
+- use `paper_integrity_forensics_contract.md` for check families and blocking
+  policy.
 
-The report should summarize:
+## Pruning Rule
 
-- `PAPER_CLAIM_LEDGER.json`: deterministic source spans and hashes from
-  `paper/main.tex`.
-- Audit fields: `input_hashes`, deterministic `finding_hashes`,
-  `finding_counts`, and `downgraded_counts`.
-- Numeric self-consistency: headline numbers, table cells, and relative
-  improvement arithmetic.
-- Statistical self-consistency: GRIM-style impossible percentages, impossible
-  bounded variance, and p-value/statistic mismatches when parseable.
-- Presentation residue: exact template or pipeline strings and duplicate table
-  signatures.
-- `AIS_STYLE_IMPRESSIONS.json`: defensive/style cues with `zero_weight=true` and
-  `verdict_weight=0`.
+Before adding or promoting any required gate, artifact, heartbeat, queue, or
+prompt block, answer:
 
-For `paper_producing_top_tier` plus `strong_paper_claims`, major or critical
-verdict-bearing forensic findings block the stage. Minor findings warn unless
-`paper_forensics_minor_blocks=true`. AIS style impressions never block and must
-not be presented as evidence of AI authorship.
-
-## Control Plane
-
-`goal_state.json` or `autopilot_policy.json` should record:
-
-- `goal_type`
-- `claim_mode`
-- `claim_limits` or `out_of_scope_claim_limits` when the goal is not strong
-  paper production but strong-paper gates are skipped
-- `project_agents_policy_hash`
-
-The hash prevents repeated project `AGENTS.md` rewrites when the required policy
-surface is already current.
-
-## Harness Pruning
-
-New harness rules should not grow monotonically. Before adding a required gate or
-artifact, apply the minimal artifact test:
-
-1. Does it own a state transition that no existing authority owns?
-2. Does it improve recovery across interruptions, failed runs, or role handoffs?
+1. Does it own a state transition no existing authority owns?
+2. Does it improve recovery after interruption, failed runs, or role handoff?
 3. Does it block a known expensive failure that existing lints miss?
 
-If the answer is no, keep the idea as guidance, a rubric item, or an optional
-trace entry instead of a mandatory artifact.
+If not, keep it as optional guidance, a rubric row, or a trace note.
+
+## Removal Or Downgrade Rule
 
 Remove or downgrade a gate when it duplicates another authority, does not change
 stage decisions, mostly emits noisy findings, or a better model/tool/script now

@@ -5,6 +5,15 @@ AutoResearch workflows. It checks the submitted manuscript surface against
 deterministic evidence available in `.autoreskill/`; it is not an AI-authorship
 detector, misconduct detector, or replacement for peer review.
 
+## Table Of Contents
+
+- Scope
+- Observability Levels
+- Required Artifacts
+- Check Families
+- Blocking Policy
+- Repair Guidance
+
 ## Scope
 
 Required by default for:

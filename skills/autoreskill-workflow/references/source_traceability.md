@@ -13,4 +13,5 @@ Portable AutoResearch maps OpenClaw concepts into `.autoreskill/` contracts with
 | `CLAIM_EVIDENCE_MATRIX.md` | Analyzer claim-evidence gate | OpenClaw analyzer handoff |
 | `REVIEW_FINDINGS.json` | Reviewer pressure gate | OpenClaw review stage |
 
-This file is a traceability note, not a runtime import. The skill pack must remain usable when the OpenClaw repository is absent.
+This file is a traceability and multi-experiment audit note, not a runtime
+import. The skill pack must remain usable when the OpenClaw repository is absent.

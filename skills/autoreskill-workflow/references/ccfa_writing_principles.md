@@ -2,6 +2,21 @@
 
 Use this reference when the user wants to learn, check, or apply CCF-A/top-tier English academic writing style. This is the writing-principle layer: it turns corpus observations and expert top-tier review practice into reusable writing standards. It does not collect evidence and does not directly rewrite a manuscript; use `ccfa_writing_style_corpus_audit.md` for evidence collection and `ccfa_manuscript_revision_workflow.md` for manuscript application.
 
+## Table Of Contents
+
+- Core Rule
+- 1. One-Sentence Thesis
+- 2. Abstract With Diagnosis
+- 3. Introduction As Reviewer Persuasion
+- 4. Contributions As Insights
+- 5. Method As Resolution
+- 6. Experiments As Claim Chain
+- 7. Figure 1 As Story
+- 8. Related Work As Gap Positioning
+- 9. Claim Calibration And English
+- 10. Non-Defensive Writing Posture
+- 11. Final Self-Check
+
 ## Core Rule
 
 Do not learn sentence patterns first. Learn how strong papers build an argument. Good English follows from a clear evidence-bound story in which every paragraph advances the same claim.

@@ -1,42 +1,55 @@
 # Literature Discovery Triggers
 
-PaperNexus literature discovery is a recurring evidence repair action across the workflow. Do not treat the first `topic_search` packet or the first `literature_review` draft as final coverage.
+PaperNexus literature discovery is a recurring evidence repair action across the
+workflow. Use this file to decide when discovery or material repair is needed.
+Use `stage_contracts.md` for completion, `async_wait_policy.md` for heartbeat
+cadence, and PaperNexus child skills for concrete tool configuration.
 
-Use live `papernexus-remote` discovery/material calls when any of these evidence gaps appear. Discovery is a recall step only; after a useful async discovery report or targeted search, close the evidence loop as:
+Discovery is a recall step only. Raw discovery results may prove that a search
+was attempted; they do not support novelty, baseline, mechanism, limitation, or
+citation claims until usable papers are screened and graph/material evidence is
+captured.
 
-`literature_discovery submit/progress/report or bounded targeted search -> candidate triage -> ABSTRACT_SCREENING_AUDIT.json -> PAPER_SELECTION_SCORECARD.json -> GRAPH_IMPORT_PLAN.json -> PaperNexus import_workflow import/supplement for all actionable graph_import rows plus material-view/split-reading for material_view rows -> IMPORT_WORKFLOW_STATUS.json -> authoritative sync wait or source-limited exception record -> SPLIT_READING_EVIDENCE_PACK.json`
+Paper-code surveys can extend discovery when the task asks for repository
+analysis, source-code mechanisms, or innovation migration. They do not replace
+PaperNexus/literature evidence. Use `paper_code_innovation_transfer.md` for that
+audit chain.
 
-Raw discovery results may prove that a search was attempted. They do not support novelty, baseline, mechanism, limitation, or citation claims until selected usable papers are screened and graph/material evidence is captured.
-
-Paper-code surveys can extend discovery when the task asks for repository analysis, source-code mechanisms, or innovation migration, but they do not replace PaperNexus/literature evidence. Keep repository evidence under `.autoreskill/survey/` and treat it as implementation/mechanism feasibility until the target-task experiment ledger promotes it. Code search hits, project pages, stars, benchmark tables, and static source inspection do not close novelty, citation, or effectiveness claims.
-
-For broad or long-running discovery/import work, prefer `operation=submit` plus progress/report polling so server-side state survives MCP client timeouts. If the submitted run is still active, persist the progress snapshot, queue async wait, and let `goal_tick.py` return a Codex heartbeat `wakeup` recommendation instead of sleeping inside the current turn. Literature discovery can use the policy default interval, but graph import waits must use the adaptive PaperNexus graph-state cadence from `SKILL.md` rather than a fixed 5-minute default. For selected import tasks, `IMPORT_WORKFLOW_STATUS.json` must record task ids or batch ids from `import_workflow queue_progress/status/wait`; graph visibility requires `status=completed`, `stage=completed`, and authoritative sync completion, supersession, or explicit not-required status for every actionable `GRAPH_IMPORT_PLAN` row with `import_action=import/supplement`. If selected rows cannot materialize import tasks after exact source discovery, OA/index checks, and PaperNexus source attempts, record `source_limited_exception_keys` and claim limits; those rows are not graph evidence.
+For broad or long-running discovery/import work, prefer server-side submit plus
+progress/report polling so state survives MCP client timeouts. If a submitted run
+or graph import is still active, persist the progress snapshot, queue async wait,
+and let `goal_tick.py` return a heartbeat recommendation. Graph import waits use
+the adaptive policy in `async_wait_policy.md`, not a universal fixed cadence.
 
 | Stage | Trigger discovery when | Preferred output |
 | --- | --- | --- |
-| `topic_search` | no broad discovery packet, topic is underspecified, corpus scope is unclear, keywords are too narrow, or raw results have not been screened | `literature/LITERATURE_DISCOVERY_PACKET.json`, `papernexus/LITERATURE_DISCOVERY_TRIAGE.json`, `papernexus/PAPER_SELECTION_SCORECARD.json`, `papernexus/GRAPH_IMPORT_PLAN.json` |
-| `graph_build` | graph decision is not source-backed for imported rows, corpus/source coverage is unclear, PaperNexus capability/corpus state is stale, any actionable `import`/`supplement` row is unsubmitted/incomplete/unsynced, source-limited rows lack exact-source exhaustion records/claim limits, or `material_view` rows lack material routing | `papernexus/source_discovery_plan.json`, `papernexus/GRAPH_IMPORT_PLAN.json`, `papernexus/IMPORT_WORKFLOW_STATUS.json`, `graph/GRAPH_BUILD_DECISION.json` |
-| `frontier_mapping` | gap, limitation, failure mode, transfer source, negative evidence, or experiment/cost norm is missing | `papernexus/research_material_pack.json`, challenge/transfer materials |
-| `literature_review` | SOTA matrix, gap synthesis, citation queue, baseline/dataset/metric anchors, target-venue related-work coverage, or requested paper-code survey coverage is incomplete | `literature/SOTA_MATRIX.md`, `literature/GAP_SYNTHESIS.md`, `literature/CITATION_QUEUE.json`, and when in scope `.autoreskill/survey/PAPER_CODE_CANDIDATES.json` |
-| `ideation` | any target-domain, near-neighbor, or far-neighbor lane misses breadth, one-row-per-candidate abstract audit, role coverage, source resolvability, import_workflow completion/authoritative sync, split-reading evidence, transferable mechanism quality, or code-mechanism migration evidence | lane discovery packets, triage, abstract screening audit, paper selection scorecard, graph import plan, import workflow status, split-reading pack, and when in scope `CODE_MECHANISM_MAP.json` plus `INNOVATION_MIGRATION_MATRIX.json` |
-| `idea_gate` | selected/top ideas have unresolved closest-prior comparison, overlap risk, missing negative evidence, weak transfer bridge, unsupported novelty score, or an idea lifecycle decision needs evidence to choose repair/park/kill/reentry | selected-idea follow-up evidence, updated scorecard, and `IDEA_DECISION_LEDGER.json` evidence refs |
-| `experiment_plan` | selected idea is below `plan_ready`, evidence import gate is blocked/async, baseline/protocol/metric norms are not source-backed, target-domain absence evidence is required, or B/I/E track planning exposes a lifecycle/evidence mismatch | evidence import/material refs in `INNOVATION_PACKET.json`, `EXPERIMENT_REVIEW_PACKET.json`, and lifecycle refs in `TRACK_PLAN_MATRIX.json` |
-| `code` | normally do not search; return to `experiment_plan` only if implementation reveals the locked baseline/protocol/dataset choice was unsupported by literature evidence | planning repair packet, not ad hoc code-stage search |
-| `experiment` | normally do not search while a run is active; after terminal negative/regressed/budget-stopped/spec-violating results, trigger discovery only if mechanism failure needs literature-backed diagnosis, negative evidence, or a new structural ALGO/CODE idea | failure-mode evidence routed to `IDEA_DECISION_LEDGER.json`, `TRACK_PLAN_MATRIX.json`, or planning repair; do not mutate an active run's locked protocol |
-| `analysis` | claims are unsupported, result contradicts the expected mechanism, ablation exposes a hidden confound, failed ideas need limitation framing, or `IDEA_OUTCOME_SUMMARY.json` needs source-backed negative/contradictory evidence | claim-evidence repair notes, negative/contradictory evidence, and updated `IDEA_OUTCOME_SUMMARY.json` claim scopes |
-| `review_pressure` | reviewer findings mention novelty, related work, missing baselines, missing citations, threat models, protocol norms, or unsupported significance | targeted discovery/citation closure plus updated findings |
-| `writing` | related work has placeholders, claims lack citation ids, closest-prior contrast is weak, or citation queue is unresolved | citation queue updates, related-work evidence, `refs.bib` entries |
+| `topic_search` | no broad discovery packet, topic is underspecified, corpus scope is unclear, keywords are too narrow, or raw results have not been screened | discovery packet, triage, paper selection scorecard, graph/material plan |
+| `graph_build` | graph decision is not source-backed, required imports are unsubmitted/incomplete/unsynced, source-limited rows lack exhaustion records, or material-view rows lack material routing | source discovery plan, graph import plan, import workflow status, graph build decision |
+| `frontier_mapping` | gap, limitation, failure mode, transfer source, negative evidence, or experiment/cost norm is missing | research material pack or challenge/transfer materials |
+| `literature_review` | SOTA matrix, gap synthesis, citation queue, baseline/dataset/metric anchors, target-venue coverage, or requested paper-code survey coverage is incomplete | SOTA matrix, gap synthesis, citation queue, and survey artifacts when in scope |
+| `ideation` | target-domain, near-neighbor, or far-neighbor lanes miss breadth, screening, source resolvability, import/material closure, transferable mechanisms, or code-migration evidence | lane discovery packets, screening, graph/material artifacts, split-reading pack, and migration matrix when in scope |
+| `idea_gate` | selected ideas have unresolved closest-prior comparison, overlap risk, negative evidence, weak transfer bridge, or unsupported novelty score | selected-idea follow-up evidence and updated decision ledger refs |
+| `experiment_plan` | selected idea is below `plan_ready`, evidence import/material gate is blocked, protocol norms are not source-backed, or track planning exposes lifecycle/evidence mismatch | evidence refs in planning packets and track plan matrix |
+| `code` | implementation reveals the locked baseline/protocol/dataset choice was unsupported by literature evidence | planning repair packet, not ad hoc code-stage search |
+| `experiment` | terminal negative/regressed/budget-stopped/spec-violating results need literature-backed mechanism diagnosis, negative evidence, or structural replacement ideas | failure-mode evidence routed to decision ledger or planning repair |
+| `analysis` | claims are unsupported, results contradict the expected mechanism, ablations expose confounds, or failed ideas need source-backed limitation framing | claim-evidence repair and updated outcome summary |
+| `review_pressure` | reviewer findings mention novelty, related work, baselines, citations, threat models, protocol norms, or unsupported significance | targeted discovery and updated findings |
+| `writing` | related work has placeholders, claims lack citation ids, closest-prior contrast is weak, or citation queue is unresolved | citation queue updates, related-work evidence, and bibliography entries |
 | `submission_ready` | citation lint, bibliography, venue claims, or front-matter evidence checks fail | final citation/corpus verification before readiness |
 
-Default search policy:
+Default policy:
 
-- Start broad and metadata-only for ideation lanes; import/supplement/split-read only after candidate triage and `ABSTRACT_SCREENING_AUDIT.json`.
-- `ABSTRACT_SCREENING_AUDIT.json` must account for every merged discovery candidate. Prefer abstract-level screening with `abstract_read=true`; when no abstract is available, mark `abstract_missing=true` and record the metadata fallback basis instead of silently dropping the paper.
-- Do not mechanically import raw discovery results. Reject duplicates, weak relevance, unresolved sources, survey noise, and generic benchmark-only papers before graph/material work.
-- Prefer targeted follow-up discovery after idea selection, analysis, review, and writing; do not rerun broad discovery when the missing evidence is a specific closest prior, baseline, citation, or negative-evidence question.
-- Every selected usable paper should have an explicit next action: `graph_import`, `split_read_only`, `watchlist`, or rejection reason. Only `graph_import` and `split_read_only` candidates can feed graph-grounded claims.
-- Do not treat `fastCommitted` alone as evidence closure. If `authoritativeSync` is pending, queue an async monitor based on `import_workflow` progress, schedule the returned heartbeat wakeup, and wait for the selected task ids.
-- Keep target-domain discovery as the problem/baseline/protocol/overlap-risk anchor. Use near-neighbor and far-neighbor discovery to supply primary method mechanisms and transfer bridges.
-- Record each submit/report/search attempt, failed attempt, import/material queue, and degraded boundary. A missing PaperNexus result is a blocker or explicit claim limit, not permission to invent citations or novelty claims.
-- Terminal negative or regressed results should first be classified in `coder/EXPERIMENT_LEDGER.json` with `failure_class` and `next_action`. Trigger PaperNexus discovery only when that class needs source-backed mechanism diagnosis, negative evidence, limitation framing, closest-prior recheck, or a structural replacement idea; otherwise route to same-branch repair, track switch, downgrade, or hard stop without broad reruns.
-- Failed, parked, killed, or candidate-only ideas must remain visible in `IDEA_DECISION_LEDGER.json` and `IDEA_OUTCOME_SUMMARY.json`. They may support pruning, limitations, future work, or claim downgrade, but not stable improvement claims.
+- Start broad and metadata-only for ideation lanes; import, supplement, and
+  split-read only after candidate triage.
+- Account for every merged discovery candidate in `ABSTRACT_SCREENING_AUDIT.json`
+  or an equivalent screening artifact.
+- Reject duplicates, weak relevance, unresolved sources, survey noise, and
+  generic benchmark-only papers before graph/material work.
+- Prefer targeted follow-up discovery after idea selection, analysis, review, and
+  writing.
+- Record each submit/report/search attempt, failed attempt, import/material
+  queue, and degraded boundary.
+- Failed, parked, killed, or candidate-only ideas must remain visible in
+  `IDEA_DECISION_LEDGER.json` and `IDEA_OUTCOME_SUMMARY.json`. They may support
+  pruning, limitations, future work, or claim downgrade, but not stable
+  improvement claims.

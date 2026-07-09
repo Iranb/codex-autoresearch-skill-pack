@@ -2,84 +2,178 @@
 
 Each stage is complete only when its contract authority passes lint.
 
+Direct completion authority:
+
+```bash
+python <skill-root>/scripts/contract_lint.py --project <project-root> --stage <stage>
+```
+
+This file owns stage completion criteria. It does not own child-skill routing,
+heartbeat cadence, job packet schema, PaperNexus tool configuration, or writing
+style details. Those decisions live in their dedicated references.
+
+## Table Of Contents
+
+- Applicability Scope
+- Global Completion Gates
+- Stage Completion Registry
+- Literature Discovery Trigger Rule
+- Important Guardrails
+
 ## Applicability Scope
 
-Before applying the full table, read `goal_type` and `claim_mode` from
+Before applying the full registry, read `goal_type` and `claim_mode` from
 `goal_state.json` or `autopilot_policy.json`.
 
 - `paper_producing_top_tier` with `strong_paper_claims` uses the full contract.
 - `paper_producing_light` may treat review/submission hard gates as warnings only
   when the project records a reduced evidence target.
 - `standalone_survey`, `writing_style_corpus`, and `diagnostic_or_resource` keep
-  provenance, evidence boundaries, and claim limits, but they do not need
-  unrelated experiment, writing, or submission artifacts.
-- When a strong-paper gate is not applicable, the lint details should record the
-  skipped gate under `out_of_scope_with_claim_limits` and point to the recorded
-  `claim_limits`, `out_of_scope_claim_limits`, or equivalent boundary.
+  provenance, evidence boundaries, and claim limits, but do not need unrelated
+  experiment, writing, or submission artifacts.
+- When a strong-paper gate is out of scope, lint details should record
+  `out_of_scope_with_claim_limits` and point to the recorded claim boundary.
 
-The minimal added fields from the 2026 AutoResearch audit live in
-`minimal_harness_hardening_contract.md`. They should be enforced for strong paper
-claims and downgraded to warnings for lighter scopes.
+## Global Completion Gates
 
-For top-tier paper-producing workflows, use an isolated Evaluator packet before
-high-risk transitions where the producing role should not grade itself:
-`experiment_plan -> code`, `experiment -> analysis`, `analysis -> writing`, and
-`writing -> submission_ready`. This gate may be downgraded only when
-`goal_type`/`claim_mode` makes the transition out of scope and
-`contract_lint.py` records explicit claim limits. Evaluator findings are repair
-evidence; they do not replace the stage authority or `contract_lint.py`.
+- Missing artifacts cannot be converted into completion by projection.
+- Empty directories are not evidence.
+- WorkflowGuard is the only stage-advancing owner.
+- Evaluator packets are recommended before high-risk strong-paper transitions:
+  `experiment_plan -> code`, `experiment -> analysis`, `analysis -> writing`, and
+  `writing -> submission_ready`. Evaluator findings are repair evidence, not
+  stage authority.
+- Paper-reported baseline metrics are primary when protocol-aligned. A reproduced
+  baseline result does not authorize a paper-report improvement claim unless
+  `baseline_report_alignment_lint.py` establishes the comparison.
+- Source-code evidence supports feasibility, active-code-path, and
+  mechanism-transfer claims only. Effectiveness claims require promoted matched
+  experiment evidence.
+- Random-seed stability validation is capped at three experiment seeds.
+  `IDEA_TRACK_SEEDS` are idea/track candidates and do not authorize extra random
+  seeds.
+- Launchable `PARAM` mechanisms and target sweeps require
+  `hpo_search_policy.search_method="dehb_resource_constrained"` in the planning
+  packets. Seed, dataset, split, baseline, and metric are protected axes; linear
+  or grid tuning is incomplete.
+- Paper-code surveys use `.autoreskill/survey/` as their machine-readable audit
+  surface. Obsidian notes and `03_CODE_TRANSFER_STORY.md` are derived views.
+- Strong-paper `writing` and `submission_ready` require manuscript forensics with
+  no blocking numeric, statistical, or presentation findings. AIS style
+  impressions carry zero verdict weight.
+- Heartbeats are allowed only for external waits described in
+  `async_wait_policy.md`; local repairs, stage transitions, planning, review, and
+  writing must not be deferred to heartbeat.
 
-| Stage | Owner | Authority | Complete when |
-| --- | --- | --- | --- |
-| `init` | WorkflowGuard | `.autoreskill/goal_state.json` | project, policy, capabilities, memory, queues exist |
-| `topic_search` | Researcher | literature discovery packet/run state + candidate screening | broad topic/query/paper evidence exists, the search scope is recorded, raw candidates are screened, and usable papers have graph/material next actions |
-| `graph_build` | Researcher | `graph/GRAPH_BUILD_DECISION.json` + graph/material import plan | `decision=complete`, `source_backed_graph_claim=true`, every actionable `GRAPH_IMPORT_PLAN` row with `import_action=import/supplement` has a submitted PaperNexus task with completed stage and authoritative sync, and only `material_view` rows may be satisfied by split-reading/material evidence. If exact source discovery, OA/index checks, and PaperNexus source attempts are exhausted for selected rows with no server-acceptable full text, `IMPORT_WORKFLOW_STATUS.json` may pass as `complete_with_source_limited_exceptions` only when `source_limited_exception_keys` are recorded and `GRAPH_BUILD_DECISION.json` uses `decision=advance_with_source_limited_exceptions`, `source_backed_graph_claim_scope=imported_only`, explicit `claim_limits`, and exact exception keys. Those exception rows are not graph-grounded evidence |
-| `frontier_mapping` | Researcher | frontier artifacts | gap/limitation/transfer/negative-evidence and experiment-norm evidence exists, or a discovery blocker/claim limit is recorded |
-| `literature_review` | Researcher | lit review artifacts + paper-code transfer lint when code survey is in scope | SOTA matrix, gap synthesis, and citation queue exist. When the goal includes paper-code survey, repository analysis, innovation extraction, or innovation migration, `.autoreskill/survey/` must preserve the raw candidate ledger, repo static evidence, code mechanism map, and migration matrix, and `paper_code_transfer_lint.py` must pass before the survey can support downstream ideas |
-| `ideation` | Researcher | `ideation/PRE_IDEA_EVIDENCE_GATE.json` + `ideation/INNOVATION_SLOT_MAP.json` + `ideation/EVIDENCE_GRAPH_PROJECTION.json` + `ideation/IDEA_BUILD_BRIEF.json/md` + `ideation/GOE_IDEA_AUDIT.json` + `papernexus/proposal_graph_session.json` when available + paper-code transfer artifacts when required + `ideation/EXPERIMENT_IDEA_POOL.json` + `user_view/innovation_story/00_STORYLINE_DESIGN.md` | target-domain, near-neighbor, and far-neighbor discovery all have persisted broad attempts; `pre_idea_discovery_config_lint.py`, `ABSTRACT_SCREENING_AUDIT.json`, lane-aware screening, `PAPER_SELECTION_SCORECARD.json`, `GRAPH_IMPORT_PLAN.json`, `IMPORT_WORKFLOW_STATUS.json` covering every `import`/`supplement` graph-import row, PaperNexus split-reading/material evidence for `material_view` rows, and innovation slot map pass lint. The abstract audit must have one row per merged discovery candidate, with abstract read status or an explicit no-abstract metadata fallback, decision, and rationale; if paper-code survey is required, `paper_code_transfer_lint.py` passes and source-code mechanisms may enter the idea pool only through reviewed rows in `CODE_MECHANISM_MAP.json` and `INNOVATION_MIGRATION_MATRIX.json`; if `proposal_graph_session` is available, a committed proposal graph session passes lint or a diagnosis/fallback boundary is explicit; then `idea_graph_lint.py`, `idea_pool_lint.py`, and `idea_scorecard_lint.py` pass with 12-15 academic-paper-oriented ideas tied to GOE paths, innovation slots, proposal graph provenance where used, and paper-code migration refs where used. Every paper idea must contain a three-or-more innovation bundle covering problem/protocol/evaluation, method/mechanism, and training/integration/analysis/validation, plus a narrative spine explaining why the points are mutually necessary. For method ideas, target-domain evidence anchors problem/baseline/protocol/overlap risk, while the primary method mechanism is near-neighbor, far-neighbor, code-mechanism transfer, or cross-lane transfer unless a source-backed audit proves no current-field occurrence. `innovation_story_lint.py --stage ideation` passes for the storyline design, showing reader belief shift, opening tension, hidden cause, three-innovation bundle, method-as-resolution, proof ladder, figure story, and reviewer risk. An approved degraded gate may pass only when claim limits and evidence boundaries are recorded in both the pool and scorecard |
-| `idea_gate` | Reviewer/Critic | pre-idea gate + review scorecard + `ideation/EXPERIMENT_IDEA_POOL.json` + `ideation/IDEA_DECISION_LEDGER.json` + `ideation/IDEA_TRACK_SEEDS.json` + paper-code transfer matrix when code migration is used + `user_view/innovation_story/00_STORYLINE_DESIGN.md` | pre-idea gate still passes or has explicit approved degraded status, scorecard compares every idea against target/near/far evidence or records the missing evidence boundary, each score row assesses the three-innovation bundle and story coherence, one primary idea is selected, and `IDEA_DECISION_LEDGER.json` covers every idea with lifecycle status, decision reason, failure class, claim scope, next action, reentry conditions when reentry is allowed, and `selection_fingerprint` or `selected_primary_ref` for the selected primary. Only selected primary, alternate, risk-repair, or constrained-advance ideas may enter `IDEA_TRACK_SEEDS.json`; killed or parked ideas cannot be launch seeds unless a later explicit reentry decision changes their lifecycle. Code-migrated ideas require a valid `INNOVATION_MIGRATION_MATRIX.json` row with source mechanism ref, target adaptation, required code/protocol deltas, novelty or overlap risk, claim boundary, validation route, and falsifier; static repository evidence alone cannot promote the idea beyond feasibility. 2-3 alternate/risk-repair track seeds are preserved with `launch_approval=false`, weakest assumptions and evidence debt are explicit, selected method source is not target-domain-only for the main method claim, remaining selected-idea novelty/baseline/protocol evidence is routed to `experiment_plan`, and `innovation_story_lint.py --stage idea_gate` passes for the revised storyline |
-| `experiment_plan` | Orchestrator | `orchestrator/INNOVATION_PACKET.json` + `orchestrator/TRACK_PLAN_MATRIX.json` + `planner/EXPERIMENT_REVIEW_PACKET.json` + paper-code transfer lint when code migration is used + paper-report baseline alignment when enabled + `user_view/innovation_story/00_STORYLINE_DESIGN.md` + `user_view/innovation_story/01_METHOD_INNOVATION_STORY.md` + `user_view/innovation_story/02_CLAIM_EVIDENCE_MAP.md` | `innovation_lint.py`, `prelaunch_lint.py`, `track_plan_matrix.py --check`, selected-projection alignment, selected-negative-evidence alignment, `baseline_report_alignment_lint.py --stage experiment_plan` when enabled, `paper_code_transfer_lint.py` when required, and `innovation_story_lint.py --stage experiment_plan` pass: selected ideation idea is consumed, the selected paper's three-or-more innovation bundle is preserved in `INNOVATION_PACKET.json`, track seeds are converted into ready/blocked/diagnostic/parked rows, proposal graph provenance is retained when present, source repository and active-code-path evidence refs are preserved for code-migrated mechanisms, an innovation search contract is bound, primary method source role and neighbor/code transfer mechanism are preserved, target-domain overlap risk is closed, evidence boundaries, locked baseline/eval/metric/data, one-variable plan, budget/falsifier, promotion gate, and controller/proposal-graph/fallback design review are present. When `mechanism_type=PARAM` or a target sweep is planned, both planning packets must carry `hpo_search_policy.search_method="dehb_resource_constrained"` with a bounded search-space audit, epochs/steps/data-fraction resource axis, Hyperband rungs, seed excluded from search, scout seed count 1, max confirmation seeds 3, and top 1-2 full-resource survivor promotion; linear/grid tuning blocks launch. When paper-backed baselines are enabled, `.autoreskill/experiment/BASELINE_ALIGNMENT_POLICY.json`, `.autoreskill/experiment/BASELINE_REPORT_METRICS.json`, and `.autoreskill/experiment/BASELINE_ALIGNMENT_AUDIT.md` must define paper-reported metrics as the primary baseline authority before launch plans can support claims. `TRACK_PLAN_MATRIX.json` must carry `bie_config` (`branch_budget_B`, `search_iterations_I`, `versions_per_branch_E`, `retain_top_K`, `stop_on_spec_violation`, `promotion_required`) plus idea-decision refs so B/I/E is bounded track search under the locked protocol rather than unconstrained tuning. Strong paper-claim rows must also record `certification_policy`, `intervention_axis`, `critical_evidence_requirements`, and `negative_knowledge_consultation`. `INNOVATION_PACKET.json`, `EXPERIMENT_REVIEW_PACKET.json`, top-level `TRACK_PLAN_MATRIX`, and every launch-ready, selected-for-review, or primary active track row must carry a matching `selection_fingerprint` or `selected_primary_ref` and match the current selected primary idea/track in `IDEA_DECISION_LEDGER.json` + `IDEA_TRACK_SEEDS.json`; stale rows pointing to parked, killed, failed, or not-promoted tracks are projection drift and block advancement. The selected primary idea/track must not have unresolved terminal not-promoted/failed/regressed evidence in `CANDIDATE_VERDICT.json`, `REMOTE_RUN.json`, or `EXPERIMENT_LEDGER.json`; a same-track reentry must be explicit, launch-blocked, and non-equivalent. The user-facing story explains the paper storyline and method formation logic rather than listing contributions |
-| `code` | Coder | experiment manifest/dry-run + `coder/TRACK_IMPLEMENTATION_INDEX.json` | experiment index, manifests, per-track implementation index, dry-run proof, baseline/data audit, clone/worktree proof plus patch proof, no metric/dataset/baseline drift, real-data or real-feature smoke proof, and no fixture-only path marked launch-ready |
-| `experiment` | Researcher/Coder | run metadata/ledger + per-result summaries + paper-report baseline alignment when enabled | execution proof, full ledger trajectory, per-run `RESULT_SUMMARY.json`/`METRIC_TRAJECTORY.csv` or equivalent manifest-linked small artifacts, promoted `best_run` or `track_best_runs`, no unreconciled run, and `baseline_report_alignment_lint.py --stage experiment` passes when enabled; `candidate_supported` alone is incomplete. Every result-bearing run records final/terminal state when known, latest/final metric, best-so-far peaks over every locked metric component, and same-count baseline deltas when a matched baseline exists. When paper-backed baselines are enabled, promoted, ready-for-analysis, or manuscript-supporting rows must reference a paper-report baseline id from `BASELINE_REPORT_METRICS.json`; rows compared only to local/reproduced baselines must remain diagnostic with `paper_claim_allowed=false`. Every failed, regressed, budget-stopped, spec-violating, not-promoted, rollback, or off-protocol diagnostic run remains in `coder/EXPERIMENT_LEDGER.json` with selected idea id, track id, failure class, failure diagnosis, retire reason where applicable, result summary path when metrics exist, and next action (`repair_same_branch`, `run_ablation_or_confirmation`, `switch_track`, `leap_idea`, `negative_result_route`, `hard_stop`, or equivalent). If no active run remains and no promoted best exists, WorkflowGuard must analyze the latest failed/regressed/budget-stopped/spec-violating run before hard stop: fewer than two same-idea repairs routes to one bounded `repair_failed_experiment` job; after two failed same-idea repairs without promoted improvement, write `coder/EXPERIMENT_NEGATIVE_BLOCKER.json` and route to `experiment_plan`, `idea_gate`, or `ideation` to switch track, change idea, or rebuild the innovation point |
-| `analysis` | Analyzer | claim matrix/verdicts + `BEST_RUN_SELECTION.json` + `SCORE_VERIFICATION.json` + `SPEC_VIOLATION_AUDIT.json` + `IDEA_OUTCOME_SUMMARY.json` + paper-report baseline alignment when enabled + `user_view/innovation_story/*` | results proof plus claim-evidence matrix tied to ledger trajectory and promoted track best; deterministic best-run selection, score verification, spec audit, and `baseline_report_alignment_lint.py --stage analysis` when enabled pass; candidate-supported evidence is marked pilot-only; `BEST_RUN_SELECTION.json` and `SCORE_VERIFICATION.json` must record paper-reported baseline authority before strong improvement claims are allowed. For strong paper claims, `SCORE_VERIFICATION.json` also records `disaggregated_effects`, `mechanism_support`, `validation_to_test_transfer`, and `numeric_measurement_registry`. `IDEA_OUTCOME_SUMMARY.json` connects each idea lifecycle decision to track/run outcomes and claim scope, separating promoted evidence from candidate-only, failed/regressed, parked, killed, negative-evidence, limitation, future-work, and downgraded ideas. It must also contain `effective_innovation_points[]` with at least three accepted, evidence-backed points covering problem/protocol/evaluation, method/mechanism, and training/integration/analysis/validation, plus evidence refs, mechanism status, claim permission, negative-knowledge summary, and `post_analysis_self_audit` naming the least-confident conclusion point and largest possible misunderstanding/blind spot; parameter tuning, diagnostics, resource-fill runs, unsupported future work, and terminal negative ideas cannot count unless explicitly reclassified by idea_gate as a new mechanism. `innovation_story_lint.py --stage analysis` passes after proof ladder, claim limits, and experiment mapping are revised |
-| `review_pressure` | Reviewer | `reviewer/REVIEW_FINDINGS.json` + `reviewer/MULTI_ROUND_REVIEW_GATE.json` + `reviewer/REVIEW_REPAIR_LEDGER.json` + `user_view/innovation_story/*` | at least two complete review-repair cycles are recorded; novelty, soundness/method, experiment/statistics, clarity/writing, reproducibility/limitations, claim drift, scientific alignment, and defensive-underclaim axes are covered; high/critical issues are closed, waived, or claims downgraded; `innovation_story_lint.py --stage review_pressure` passes and the user-facing story reflects reviewer risks, defenses, and downgraded claims |
-| `writing` | Academic Writer | `paper/RESEARCH_REPRESENTATION.json/md` + `paper/GROUNDED_WRITE_PACKAGE.json` + `paper/PAPER_CLAIM_VERIFICATION.json` + `paper/PAPER_FORENSICS_REPORT.json` + `paper/CCFA_WRITING_AUDIT.md` for top-tier/CCF-A targets + paper draft/write package + paper-report baseline alignment when enabled + `user_view/innovation_story/*` | manuscript exists and strong claims are supported; research representation is generated before prose and consumes `IDEA_OUTCOME_SUMMARY.json` as claim-routing evidence; the draft preserves the three-effective-innovation storyline; Ground-Critic-Resolve passes before accepting `main.tex`, claim verification has no blocking failures, failed/regressed/parked/killed/future-work, parameter-tuning-only ideas, or local/reproduced-baseline-only deltas do not support strong numerical improvement claims; `PAPER_CLAIM_VERIFICATION.json` records passed `claim_drift_status`, `scientific_alignment_status`, `numeric_grounding_status`, and `non_defensive_writing_status`. For strong-paper mode, `paper_forensics_lint.py --stage writing` passes and `PAPER_FORENSICS_REPORT.json` has no major/critical verdict-bearing findings; AIS style impressions are zero-weight and never block. For top-tier/CCF-A polish, `non_defensive_writing_status` must preserve necessary limitations, preserve evidence/scope boundaries, block unsupported claim upgrades, and check front-matter claim posture from a top-tier reviewer viewpoint; `CCFA_WRITING_AUDIT.md` includes a Non-Defensive Writing Pass with Necessary Limitations Preserved, Claim Upgrades Blocked, and Top-Tier Reviewer Risk or Front Matter Claim Posture; `baseline_report_alignment_lint.py --stage writing` passes when enabled, and `innovation_story_lint.py --stage writing` passes |
-| `submission_ready` | WorkflowGuard/Reviewer | `submission_ready.json` + verified paper package + `reviewer/MULTI_ROUND_REVIEW_GATE.json` + `analyzer/IDEA_OUTCOME_SUMMARY.json` + `paper/PAPER_FORENSICS_REPORT.json` + paper-report baseline alignment when enabled + `user_view/innovation_story/*` | `main.tex`, `main.pdf`, citation/front-matter/package gates ready; `PAPER_CLAIM_VERIFICATION.json` remains passed; final manuscript forensics have no blocking numeric/statistical/presentation findings and AIS style impressions remain zero-weight; at least three effective innovation points are accepted; at least two review-repair cycles pass with no unresolved blockers; `baseline_report_alignment_lint.py --stage submission_ready` passes when enabled; `innovation_story_lint.py --stage submission_ready` passes; and final story docs remain synchronized with submitted claims |
+## Stage Completion Registry
 
-Do not convert missing artifacts into "complete" by projection. Use autopilot repair, degradation, rollback, or hard stop.
+`init` is complete when project state, policy, capabilities, memory, queues, and
+`goal_state.json` exist and `contract_lint.py --stage init` passes.
 
-Literature discovery trigger rule:
+`topic_search` is complete when broad topic/query/paper evidence exists, search
+scope is recorded, raw candidates are screened, and usable papers have graph or
+material next actions.
 
-- Treat literature discovery as reusable evidence repair across `topic_search`, `graph_build`, `frontier_mapping`, `literature_review`, `ideation`, `idea_gate`, `experiment_plan`, `analysis`, `review_pressure`, `writing`, and `submission_ready`.
-- Queue another PaperNexus discovery/material job whenever required novelty, closest-prior, baseline/protocol, negative-evidence, transfer-source, cost-norm, citation, or reviewer-risk evidence is missing, stale, or too generic.
-- After a discovery job returns candidates, do not advance on the raw result alone. First write `papernexus/ABSTRACT_SCREENING_AUDIT.json` so every merged candidate is accounted for at abstract level or marked as an explicit no-abstract metadata fallback. Then screen candidates, reject low-value papers, build a graph/material import plan for usable papers, capture `IMPORT_WORKFLOW_STATUS.json`, wait for every actionable `import`/`supplement` row to be submitted, completed, and authoritative-synced, and capture PaperNexus material or split-reading evidence for `material_view` rows before treating those papers as evidence. Rows whose exact sources are exhausted may advance only as source-limited exceptions with claim limits; they remain metadata-screened background, not graph evidence.
-- Do not trigger fresh discovery during `code` or an active `experiment` run unless the correct action is to roll back to planning/ideation; implementation and training should not silently change the literature basis.
-- Use `references/literature_discovery_triggers.md` as the detailed trigger map.
+`graph_build` is complete when `graph/GRAPH_BUILD_DECISION.json` is source-backed
+for imported rows, every actionable `GRAPH_IMPORT_PLAN` import/supplement row has
+completed PaperNexus import/sync status or an explicit source-limited exception,
+and material-view rows have material or split-reading evidence. Source-limited
+rows must carry claim limits and are not graph-grounded evidence.
 
-Important guardrails:
+`frontier_mapping` is complete when gap, limitation, transfer, negative-evidence,
+and experiment-norm evidence exists, or a discovery blocker and claim limit are
+recorded.
 
-- Empty directories are never completion evidence.
-- Existing legacy idea pools without `ideation/PRE_IDEA_EVIDENCE_GATE.json` are incomplete until `legacy_pre_idea_reconcile.py` records repair state or the missing pre-idea evidence artifacts are built. A gate under `orchestrator/` or another non-canonical path is a misplaced gate, not completion evidence.
-- Paper-code surveys use `.autoreskill/survey/` as the machine-readable authority: raw paper/code candidates, repository static evidence, source-code mechanism map, and reviewed migration decisions must remain separate. Obsidian/wiki notes and `03_CODE_TRANSFER_STORY.md` are derived views. A valid repository proves code feasibility and implementation path evidence, not numerical effectiveness, novelty closure, or a promoted claim.
-- `code` needs `EXPERIMENT_INDEX.md`, at least one `EXPERIMENT_MANIFEST.json`, `TRACK_IMPLEMENTATION_INDEX.json`, baseline/data audit, clone/worktree proof plus patch proof from `baseline_clone_lint.py`, non-fixture real-data or real-feature smoke proof, `experiment_real_readiness_lint.py` completion, selected-projection alignment with the current idea-gate primary idea/track, and selected-negative-evidence alignment. Historical failed/not-promoted `REMOTE_RUN.json` files stay audit evidence but cannot satisfy active code readiness for a new selection or same-track reentry without explicit non-equivalent launch-blocked authority.
-- `idea_gate` needs `IDEA_DECISION_LEDGER.json`; scorecards rank ideas, but the decision ledger is the authority for selected, alternate, repair-needed, parked, killed, and degraded-speculative lifecycle states.
-- `experiment_plan` needs `TRACK_PLAN_MATRIX.json` with `bie_config` and idea-decision refs. B/I/E values are bounded branch/iteration/version budgets under locked protocol; they are not permission for open-ended parameter sweeps.
-- `experiment_plan` needs `stability_seed_policy` in both `INNOVATION_PACKET.json` and `EXPERIMENT_REVIEW_PACKET.json`. Random-seed stability validation is capped at three experiment seeds; `IDEA_TRACK_SEEDS` are track candidates and do not authorize extra random seeds.
-- `experiment_plan` needs `hpo_search_policy` in both planning packets for
-  `PARAM` mechanisms or target sweeps. The default is resource-constrained DEHB:
-  at most 3-6 search dimensions, seed/dataset/split/baseline/metric protected,
-  epochs/steps/data-fraction resource axis, low-fidelity scouts excluded from
-  promotion, and top 1-2 full-resource survivors before ablation/confirmation.
-  Linear/grid sweeps and seed-as-search-axis plans are incomplete.
-- `experiment` needs an experiment ledger plus run metadata/results for every attempt, including failed and regressed attempts, small per-run result summaries that preserve final state and best-so-far trajectory peaks, and a promoted ablation/confirmation-backed best run before automatic analysis.
-- `experiment` may run at most three random seeds for stability validation. If a fourth or later random seed would be needed to rescue a claim, downgrade the claim or switch track instead of expanding the stability check.
-- Failed or regressed experiment ledger rows need `failure_class` and `next_action`; negative evidence is useful only when it remains tied to selected idea, track, branch/iteration/version lineage where available. The failure route is active, not passive: analyze the failure, allow at most two same-idea repair attempts, and after that require a track/idea/innovation change instead of another same-idea rerun.
-- Clean restart is allowed only at the branch, track, hypothesis, or idea level.
-  It means retiring or rebuilding a failed route while preserving its logs,
-  ledgers, negative evidence, and claim limits. It never means deleting the
-  project, datasets, checkpoints, or audit history to hide failed evidence.
-- `experiment` also needs baseline clone/patch proof and baseline-protocol launch preflight before spending GPU time; off-protocol probes must remain diagnostic and cannot be expanded into sweeps.
-- Heartbeats may be created only for PaperNexus literature discovery, PaperNexus graph import/authoritative sync, or experiment runtime/resource waits. Missing local artifacts, stage transitions, ready repair jobs, review/writing/planning work, and generic queues must be repaired or reported in the current bounded loop rather than deferred to heartbeat.
-- `analysis` needs claim-evidence, track verdicts, and `IDEA_OUTCOME_SUMMARY.json` tied back to the idea decision ledger, track matrix, and experiment ledger, not only the best metric; candidate-supported results cannot support stable improvement claims. It cannot pass with fewer than three effective innovation points.
-- `review_pressure` cannot pass with unresolved high/critical findings or fewer than two complete review-repair cycles.
-- Storyline artifacts under `.autoreskill/user_view/innovation_story/` are mandatory user-facing views, but they are not a substitute for source artifacts. They must be prose-first, evidence-aligned, and pass `innovation_story_lint.py`; bullet-dominant contribution lists are incomplete.
+`literature_review` is complete when SOTA matrix, gap synthesis, and citation
+queue exist. If paper-code survey, repository analysis, innovation extraction, or
+migration is in scope, `paper_code_transfer_lint.py --required` must pass before
+survey artifacts can support downstream ideas.
+
+`ideation` is complete when the pre-idea evidence gate, lane-aware screening,
+paper selection scorecard, graph/material plan and status, split-reading evidence
+where required, innovation slot map, evidence projection, idea build brief,
+GOE audit, proposal graph session or fallback boundary, idea pool, scorecard, and
+storyline design pass their lints. Ideas must be academic-paper-oriented and
+evidence-bounded; degraded speculative ideation requires explicit approval and
+claim limits.
+
+`idea_gate` is complete when the pre-idea gate is still valid or explicitly
+degraded, every idea has reviewer score/evidence boundaries, one primary idea is
+selected, `IDEA_DECISION_LEDGER.json` owns lifecycle status for every idea, and
+`IDEA_TRACK_SEEDS.json` contains only selected, alternate, risk-repair, or
+constrained-advance track candidates. Killed or parked ideas cannot launch unless
+a later explicit reentry decision changes their lifecycle.
+
+`experiment_plan` is complete when `INNOVATION_PACKET.json`,
+`TRACK_PLAN_MATRIX.json`, and `EXPERIMENT_REVIEW_PACKET.json` pass
+`innovation_lint.py`, `prelaunch_lint.py`, `track_plan_matrix.py --check`,
+selected-projection checks, selected-negative-evidence checks, and required
+paper-code, baseline-alignment, and innovation-story lints. The selected idea
+and track references must match the current decision ledger and track seeds.
+Launch-ready `PARAM` or target-sweep plans must use resource-constrained DEHB,
+one scout seed, at most three confirmation seeds, and top 1-2 full-resource
+survivor promotion.
+
+`code` is complete when the experiment index, manifests,
+`TRACK_IMPLEMENTATION_INDEX.json`, baseline/data audit, clone or worktree proof,
+patch proof, selected-projection alignment, and real-data or real-feature smoke
+proof are present. Fixture-only proof cannot satisfy launch readiness.
+
+`experiment` is complete when `EXPERIMENT_LEDGER.json` records every attempt,
+including failed, regressed, budget-stopped, spec-violating, rollback, and
+diagnostic runs, and the ledger contains promoted `best_run` or
+`track_best_runs`. Candidate-supported results alone are incomplete. If no active
+run remains and no promoted best exists, the latest failed or regressed run must
+be analyzed before rerun, rollback, downgrade, or hard stop. At most two same-idea
+repair attempts are allowed before changing track, idea, or innovation point.
+
+`analysis` is complete when claim-evidence matrix, track verdicts,
+`BEST_RUN_SELECTION.json`, `SCORE_VERIFICATION.json`,
+`SPEC_VIOLATION_AUDIT.json`, `IDEA_OUTCOME_SUMMARY.json`, required baseline
+alignment, and story updates pass. Candidate-only evidence stays pilot-only.
+Strong paper claims require at least three accepted effective innovation points
+and `post_analysis_self_audit` with `least_confident_point` and
+`largest_possible_misunderstanding`.
+
+`review_pressure` is complete when `REVIEW_FINDINGS.json`,
+`REVIEW_REPAIR_LEDGER.json`, and `MULTI_ROUND_REVIEW_GATE.json` record at least
+two complete review-repair cycles, cover novelty, soundness, experiment/statistic,
+clarity/writing, reproducibility/limitations, claim drift, and scientific
+alignment, and no unresolved high or critical issue remains.
+
+`writing` is complete when research representation, grounded write package,
+claim verification, manuscript forensics report, top-tier/CCF-A writing audit
+when in scope, draft source, required baseline alignment, and innovation-story
+sync pass. Strong claims must be citation-backed and cannot rely on
+failed/regressed/parked/killed ideas, future work, parameter tuning alone, or
+local/reproduced-baseline-only deltas.
+
+`submission_ready` is complete when `main.tex`, `main.pdf`, citation/front-matter
+and package gates, `submission_ready.json`, review gate, idea outcome summary,
+final manuscript forensics, required baseline alignment, and story synchronization
+pass. Strong-paper mode requires no blocking final numeric, statistical, or
+presentation findings and at least three accepted effective innovation points.
+
+## Literature Discovery Trigger Rule
+
+Use `literature_discovery_triggers.md` to decide when missing novelty,
+closest-prior, baseline/protocol, negative-evidence, transfer-source, cost-norm,
+citation, or reviewer-risk evidence requires PaperNexus discovery or material
+repair.
+
+Discovery is recall evidence until candidates are screened and graph/material
+evidence is captured. Do not trigger fresh discovery during `code` or an active
+`experiment` run unless the correct action is rollback to planning or ideation.
+
+## Important Guardrails
+
+- Legacy idea pools without canonical `ideation/PRE_IDEA_EVIDENCE_GATE.json` are
+  incomplete until reconciled or rebuilt.
+- `IDEA_DECISION_LEDGER.json` owns idea lifecycle decisions.
+- `TRACK_PLAN_MATRIX.json` owns bounded B/I/E track search under locked protocol;
+  it is not open-ended parameter tuning.
+- `EXPERIMENT_LEDGER.json` owns run history and negative evidence.
+- Clean restart is allowed only at branch, track, hypothesis, or idea level while
+  preserving logs, ledgers, negative evidence, and claim limits.
+- Storyline artifacts under `.autoreskill/user_view/innovation_story/` are
+  mandatory user-facing views when in scope, but never replace source artifacts.
