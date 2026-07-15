@@ -113,7 +113,7 @@ def populate_story(base: Path) -> None:
                 "Reader Belief Shift",
                 "Opening Tension",
                 "Hidden Cause",
-                "Three Innovation Bundle",
+                "Core Scientific Contribution",
                 "Method As Resolution",
                 "Novelty Positioning",
                 "Proof Ladder",
@@ -131,7 +131,7 @@ def populate_story(base: Path) -> None:
                 "Where The Method Comes From",
                 "Method Idea In One Sentence",
                 "Mechanism Construction",
-                "Innovation Bundle And Dependencies",
+                "Contribution Roles And Dependencies",
                 "What Is Actually New",
                 "Evidence Chain",
                 "Experiment Implications",
@@ -146,7 +146,7 @@ def populate_story(base: Path) -> None:
                 "Main Claims",
                 "Evidence Support",
                 "Claim Limits",
-                "Three-Innovation Evidence Matrix",
+                "Core Contribution Evidence",
                 "Experiment Mapping",
                 "Revision Notes",
             ]
@@ -155,22 +155,17 @@ def populate_story(base: Path) -> None:
 
 
 def effective_points() -> dict[str, Any]:
-    roles = [
-        ("p1", "problem protocol evaluation"),
-        ("p2", "method mechanism"),
-        ("p3", "training integration analysis validation"),
-    ]
     return {
         "status": "passed",
         "effective_innovation_points": [
             {
-                "innovation_point_id": point_id,
-                "story_role": role,
+                "innovation_point_id": "core-1",
+                "contribution_class": "core_scientific_contribution",
+                "story_role": "method mechanism",
                 "evidence_status": "effective",
                 "claim_scope": "strong bounded claim",
-                "evidence_ref": f"evidence:{point_id}",
+                "evidence_ref": "evidence:core-1",
             }
-            for point_id, role in roles
         ],
         "negative_knowledge_summary": "Failed and parked routes remain downgraded.",
     }

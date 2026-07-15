@@ -4,7 +4,10 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
+import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -42,6 +45,7 @@ SOURCE_KEYS = {
     "title",
 }
 SPAN_HINTS = ("span", "quote", "excerpt", "locator", "section", "claim_summary", "evidence_text", "source_text")
+EVIDENCE_SOURCE_MODES = {"papernexus", "external_material"}
 
 
 def ar(project: str) -> Path:
@@ -333,6 +337,342 @@ def summarize_candidate(record: dict[str, Any], selected_id: str, root_has_prove
     }
 
 
+def sha256_file(path: Path | None) -> str | None:
+    if path is None or not path.is_file():
+        return None
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def run_json(cmd: list[str]) -> dict[str, Any]:
+    proc = subprocess.run(cmd, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
+    try:
+        out = json.loads(proc.stdout) if proc.stdout.strip() else {}
+    except json.JSONDecodeError:
+        out = {"stdout": proc.stdout}
+    if not isinstance(out, dict):
+        out = {"result": out}
+    out.setdefault("returncode", proc.returncode)
+    if proc.stderr.strip():
+        out["stderr"] = proc.stderr.strip()
+    return out
+
+
+def evidence_source_mode(base: Path, packet: dict[str, Any] | None) -> tuple[str, dict[str, Any], Path]:
+    gate_value = (
+        first_present(packet, ["pre_idea_evidence_gate_path", "preIdeaEvidenceGatePath"])
+        if isinstance(packet, dict)
+        else None
+    )
+    gate_path = resolve_artifact_path(base, gate_value, "ideation/PRE_IDEA_EVIDENCE_GATE.json")
+    assert gate_path is not None
+    gate = read_json(gate_path)
+    if not isinstance(gate, dict):
+        gate = {}
+    mode = str(gate.get("evidence_source_mode") or "papernexus").strip().lower()
+    return mode, gate, gate_path
+
+
+def has_forbidden_papernexus_metadata(value: Any) -> bool:
+    if isinstance(value, dict):
+        for key, item in value.items():
+            nkey = norm_key(str(key))
+            if nkey == "papernexus_used" and item is False:
+                continue
+            if "papernexus" in nkey and "non_papernexus" not in nkey:
+                return True
+            if nkey == "mcp_attempted" and item is True:
+                return True
+            if has_forbidden_papernexus_metadata(item):
+                return True
+    elif isinstance(value, list):
+        return any(has_forbidden_papernexus_metadata(item) for item in value)
+    elif isinstance(value, str):
+        text = value.lower().replace("-", "_")
+        return "papernexus" in text and "non_papernexus" not in text
+    return False
+
+
+def dict_rows(value: Any, keys: set[str]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for record in walk_dicts(value):
+        for key, item in record.items():
+            if norm_key(str(key)) in keys and isinstance(item, list):
+                rows.extend(row for row in item if isinstance(row, dict))
+    return rows
+
+
+def external_candidate_rows(campaign: Any, candidate_id: str) -> list[dict[str, Any]]:
+    rows = dict_rows(campaign, {"candidates", "idea_candidates", "admitted_candidates"})
+    out: list[dict[str, Any]] = []
+    for row in rows:
+        value = first_present(row, ["external_candidate_id", "candidate_id", "id"])
+        if present(value) and str(value) == candidate_id:
+            out.append(row)
+    return out
+
+
+def reference_strings(value: Any) -> set[str]:
+    refs: set[str] = set()
+    for record in walk_dicts(value):
+        for key, item in record.items():
+            nkey = norm_key(str(key))
+            if nkey in {
+                "source_ref",
+                "source_refs",
+                "evidence_ref",
+                "evidence_refs",
+                "material_ref",
+                "material_refs",
+                "source_id",
+                "evidence_id",
+            }:
+                refs.update(collect_strings(item))
+    return refs
+
+
+def external_source_summary(campaign: Any, candidate: dict[str, Any]) -> dict[str, Any]:
+    refs = reference_strings(candidate)
+    gap_refs = {
+        str(row.get("gap_ref"))
+        for row in candidate.get("gap_closures", [])
+        if isinstance(row, dict) and present(row.get("gap_ref"))
+    }
+    gaps = {
+        str(row.get("id")): row
+        for row in (campaign.get("structural_gaps", []) if isinstance(campaign, dict) else [])
+        if isinstance(row, dict) and present(row.get("id"))
+    }
+    lineage = campaign.get("method_lineage") if isinstance(campaign, dict) else {}
+    lineage_nodes = {
+        str(row.get("id")): row
+        for row in (lineage.get("nodes", []) if isinstance(lineage, dict) else [])
+        if isinstance(row, dict) and present(row.get("id"))
+    }
+    for gap_ref in gap_refs:
+        gap = gaps.get(gap_ref, {})
+        refs.update(collect_strings(gap.get("evidence_refs")))
+        for node_ref in collect_strings(gap.get("lineage_node_refs")):
+            refs.update(collect_strings(lineage_nodes.get(node_ref, {}).get("evidence_refs")))
+    records = dict_rows(
+        campaign,
+        {"sources", "source_records", "evidence_records", "materials", "literature_evidence"},
+    )
+    matched: list[dict[str, Any]] = []
+    integrity_ok = 0
+    locator_count = 0
+    excerpt_count = 0
+    for row in records:
+        row_ids = set()
+        for key in ["source_id", "evidence_id", "material_id", "id", "stable_locator", "url", "doi", "arxiv"]:
+            if present(row.get(key)):
+                row_ids.add(str(row[key]))
+        if refs and not (refs & row_ids):
+            continue
+        locator = first_present(row, ["locator", "stable_locator", "span", "section", "url", "doi", "arxiv"])
+        excerpt = first_present(row, ["excerpt", "quote", "source_text", "evidence_text"])
+        digest = first_present(row, ["excerpt_sha256", "source_excerpt_sha256", "sha256"])
+        if present(locator):
+            locator_count += 1
+        if present(excerpt):
+            excerpt_count += 1
+        if present(excerpt) and present(digest):
+            actual = hashlib.sha256(str(excerpt).encode("utf-8")).hexdigest()
+            if actual == str(digest).strip().lower():
+                integrity_ok += 1
+        matched.append(row)
+    return {
+        "source_refs": sorted(refs),
+        "source_count": len(matched),
+        "locator_count": locator_count,
+        "excerpt_count": excerpt_count,
+        "integrity_verified_count": integrity_ok,
+    }
+
+
+def lint_external_support(
+    project: str,
+    base: Path,
+    packet_path: Path,
+    packet: dict[str, Any],
+    gate: dict[str, Any],
+    gate_path: Path,
+) -> dict[str, Any]:
+    missing: list[str] = []
+    warnings: list[str] = []
+    candidate_id = str(packet.get("external_candidate_id") or "").strip()
+    fragment_id = str(packet.get("selected_idea_fragment_id") or "").strip()
+    track_id = str(
+        packet.get("track_id")
+        or (packet.get("innovation_search_contract") or {}).get("track_id")
+        or ""
+    ).strip()
+    for key, value in [
+        ("external_campaign_ref", packet.get("external_campaign_ref")),
+        ("external_campaign_sha256", packet.get("external_campaign_sha256")),
+        ("external_candidate_id", candidate_id),
+        ("selected_idea_fragment_id", fragment_id),
+        ("track_id", track_id),
+    ]:
+        if not present(value):
+            missing.append(f"INNOVATION_PACKET.{key}")
+    if candidate_id and fragment_id and candidate_id == fragment_id:
+        missing.append("external_candidate_id must remain distinct from selected_idea_fragment_id")
+    if candidate_id and track_id and candidate_id == track_id:
+        missing.append("external_candidate_id must remain distinct from track_id")
+
+    campaign_ref = str(gate.get("campaign_ref") or "").strip()
+    lint_ref = str(gate.get("lint_ref") or "").strip()
+    if str(packet.get("external_campaign_ref") or "") != campaign_ref:
+        missing.append("INNOVATION_PACKET.external_campaign_ref must match PRE_IDEA_EVIDENCE_GATE.campaign_ref")
+    if str(packet.get("external_campaign_sha256") or "") != str(gate.get("campaign_sha256") or ""):
+        missing.append("INNOVATION_PACKET.external_campaign_sha256 must match PRE_IDEA_EVIDENCE_GATE.campaign_sha256")
+
+    campaign_path = resolve_artifact_path(base, campaign_ref)
+    lint_path = resolve_artifact_path(base, lint_ref)
+    campaign = read_json(campaign_path) if campaign_path else None
+    lint_payload = read_json(lint_path) if lint_path else None
+    campaign_hash = sha256_file(campaign_path)
+    lint_hash = sha256_file(lint_path)
+    if campaign_hash != str(gate.get("campaign_sha256") or "").strip().lower():
+        missing.append("current external campaign hash must match PRE_IDEA_EVIDENCE_GATE.campaign_sha256")
+    if lint_hash != str(gate.get("lint_sha256") or "").strip().lower():
+        missing.append("current external lint hash must match PRE_IDEA_EVIDENCE_GATE.lint_sha256")
+    if not isinstance(lint_payload, dict) or lint_payload.get("complete") is not True:
+        missing.append("external lint record complete=true")
+    if not isinstance(campaign, dict):
+        missing.append("external campaign JSON")
+        campaign = {}
+    elif campaign.get("papernexus_used") is not False:
+        missing.append("external campaign papernexus_used=false")
+    if has_forbidden_papernexus_metadata(campaign) or has_forbidden_papernexus_metadata(packet):
+        missing.append("external-material support must not contain PaperNexus or mcp_attempted=true metadata")
+
+    candidates = external_candidate_rows(campaign, candidate_id) if candidate_id else []
+    if not candidates:
+        missing.append(f"admitted external candidate {candidate_id or '<missing>'} in current campaign")
+        source_summary = {
+            "source_refs": [],
+            "source_count": 0,
+            "locator_count": 0,
+            "excerpt_count": 0,
+            "integrity_verified_count": 0,
+        }
+    else:
+        source_summary = external_source_summary(campaign, candidates[0])
+        if source_summary["source_count"] < 1:
+            missing.append("selected external candidate source record")
+        if source_summary["locator_count"] < 1 or source_summary["excerpt_count"] < 1:
+            missing.append("selected external candidate source locator/span and excerpt")
+        if source_summary["integrity_verified_count"] < 1:
+            missing.append("selected external candidate verified excerpt SHA-256")
+
+    checker = Path(__file__).resolve().parents[2] / "autoreskill-gpu-idea-validation/scripts/idea_campaign.py"
+    checker_out = (
+        run_json([sys.executable, str(checker), "check", "--project", str(base.parent)])
+        if checker.is_file()
+        else {
+            "complete": False,
+            "missing": ["autoreskill-gpu-idea-validation/scripts/idea_campaign.py"],
+            "warnings": [],
+            "returncode": 1,
+        }
+    )
+    if not checker_out.get("complete"):
+        items = checker_out.get("missing") if isinstance(checker_out.get("missing"), list) else []
+        missing.extend(f"external_campaign_check: {item}" for item in items or ["failed without structured missing output"])
+    admitted_ids = {str(item) for item in checker_out.get("admitted_candidate_ids", []) if present(item)}
+    if candidate_id and candidate_id not in admitted_ids:
+        missing.append("INNOVATION_PACKET.external_candidate_id must be admitted by current campaign lint")
+
+    alignment_script = Path(__file__).resolve().parents[2] / "autoreskill-gpu-idea-validation/scripts/external_alignment_lint.py"
+    alignment = (
+        run_json(
+            [
+                sys.executable,
+                str(alignment_script),
+                "--project",
+                str(base.parent),
+                "--stage",
+                "experiment_plan",
+            ]
+        )
+        if alignment_script.is_file()
+        else {
+            "complete": False,
+            "missing": ["autoreskill-gpu-idea-validation/scripts/external_alignment_lint.py"],
+            "warnings": [],
+            "returncode": 1,
+        }
+    )
+    if not alignment.get("complete"):
+        items = alignment.get("missing") if isinstance(alignment.get("missing"), list) else []
+        missing.extend(f"external_alignment_lint: {item}" for item in items or ["failed without structured missing output"])
+    warnings.extend(
+        f"external_alignment_lint: {item}"
+        for item in alignment.get("warnings", [])
+        if isinstance(item, str)
+    )
+
+    import_gate = packet.get("evidence_import_gate")
+    if not isinstance(import_gate, dict):
+        missing.append("INNOVATION_PACKET.evidence_import_gate")
+    else:
+        expected = {
+            "status": "not_required",
+            "source_mode": "external_material",
+            "validation_ref": lint_ref,
+            "launch_blocked": False,
+        }
+        for key, value in expected.items():
+            if import_gate.get(key) != value:
+                missing.append(f"INNOVATION_PACKET.evidence_import_gate.{key}={value!r}")
+        material_refs = {str(item).removeprefix(".autoreskill/") for item in as_list(import_gate.get("material_refs"))}
+        if campaign_ref.removeprefix(".autoreskill/") not in material_refs:
+            missing.append("INNOVATION_PACKET.evidence_import_gate.material_refs must include campaign_ref")
+        if not present(import_gate.get("reason")):
+            missing.append("INNOVATION_PACKET.evidence_import_gate.reason")
+        if import_gate.get("mcp_attempted") is True:
+            missing.append("INNOVATION_PACKET.evidence_import_gate.mcp_attempted must not be true")
+
+    supported = []
+    if not missing:
+        supported.append(
+            {
+                "fragment_id": fragment_id,
+                "external_candidate_id": candidate_id,
+                "complete": True,
+                "evidence_status": "external_material_source_backed",
+                "raw_statuses": ["external_material_source_backed"],
+                "source_count": source_summary["source_count"],
+                "span_count": source_summary["locator_count"],
+                "integrity_verified_count": source_summary["integrity_verified_count"],
+                "papernexus_provenance": False,
+            }
+        )
+    return {
+        "schema_version": 1,
+        "complete": not missing,
+        "status": "complete" if not missing else "incomplete",
+        "evidence_source_mode": "external_material",
+        "selected_idea_fragment_id": fragment_id or None,
+        "external_candidate_id": candidate_id or None,
+        "source_backed_fragment_count": len(supported),
+        "missing": missing,
+        "warnings": warnings,
+        "packet_path": relpath(base, packet_path),
+        "pre_idea_evidence_gate_path": relpath(base, gate_path),
+        "evidence_export_path": relpath(base, campaign_path) if campaign_path else None,
+        "external_campaign_check": checker_out,
+        "external_alignment_lint": alignment,
+        "source_summary": source_summary,
+        "supported_fragments": supported,
+    }
+
+
 def lint_idea_support(
     project: str,
     packet_path: Path | None = None,
@@ -345,6 +685,27 @@ def lint_idea_support(
     warnings: list[str] = []
     supported: list[dict[str, Any]] = []
     proposal_support: dict[str, Any] | None = None
+
+    mode, source_gate, source_gate_path = evidence_source_mode(
+        base, packet if isinstance(packet, dict) else None
+    )
+    if mode not in EVIDENCE_SOURCE_MODES:
+        return {
+            "schema_version": 1,
+            "complete": False,
+            "status": "incomplete",
+            "evidence_source_mode": mode,
+            "selected_idea_fragment_id": None,
+            "source_backed_fragment_count": 0,
+            "missing": [
+                "PRE_IDEA_EVIDENCE_GATE.evidence_source_mode must be papernexus or external_material"
+            ],
+            "warnings": [],
+            "packet_path": relpath(base, packet_path),
+            "supported_fragments": [],
+        }
+    if mode == "external_material" and isinstance(packet, dict):
+        return lint_external_support(project, base, packet_path, packet, source_gate, source_gate_path)
 
     if not isinstance(packet, dict):
         missing.append(relpath(base, packet_path))

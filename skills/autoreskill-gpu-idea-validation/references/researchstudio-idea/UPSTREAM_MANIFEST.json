@@ -1,0 +1,334 @@
+{
+  "schema_version": 1,
+  "commit": "868f0e9c30685b72ebd475f0dada1492a1982168",
+  "aggregate_sha256": "1e4057c6fe2b1eb8a3b630adad3ffd96d56039ce085e82d80b8c120e9434ebb2",
+  "license": "MIT",
+  "license_sha256": "db60a6df93f1786929a223558ca0c202ef61095600785cf7503fbcd4bac1bd02",
+  "upstream": {
+    "repository": "https://github.com/microsoft/ResearchStudio.git",
+    "commit": "868f0e9c30685b72ebd475f0dada1492a1982168",
+    "component": "ResearchStudio-Idea/skills/idea_spark/references",
+    "paper": "https://arxiv.org/abs/2607.04439"
+  },
+  "license_metadata": {
+    "spdx": "MIT",
+    "source_path": "LICENSE",
+    "vendored_path": "LICENSE",
+    "sha256": "db60a6df93f1786929a223558ca0c202ef61095600785cf7503fbcd4bac1bd02"
+  },
+  "aggregate": {
+    "algorithm": "sha256(sorted '<file_sha256>  <upstream_source_path>\\n')",
+    "algorithm_details": "Sort records lexicographically by upstream source_path, encode as UTF-8, separate the hash and path with two ASCII spaces, terminate every record with LF, concatenate, then SHA-256 the resulting bytes.",
+    "record_format": "<file_sha256>  <upstream_source_path>\\n",
+    "sort_key": "source_path",
+    "file_count": 50,
+    "total_bytes": 500548,
+    "sha256": "1e4057c6fe2b1eb8a3b630adad3ffd96d56039ce085e82d80b8c120e9434ebb2"
+  },
+  "exclusions": [
+    "ResearchStudio-Idea/skills/idea_spark/references/ideation-patterns/companion-combos.md",
+    "ResearchStudio-Idea control-plane files, prompts, scripts, schemas, setup, routing, and upstream SKILL.md"
+  ],
+  "files": [
+    {
+      "source_path": "LICENSE",
+      "vendored_path": "LICENSE",
+      "bytes": 1062,
+      "sha256": "db60a6df93f1786929a223558ca0c202ef61095600785cf7503fbcd4bac1bd02"
+    },
+    {
+      "source_path": "ResearchStudio-Idea/skills/idea_spark/references/anti-patterns.md",
+      "vendored_path": "anti-patterns.md",
+      "bytes": 5789,
+      "sha256": "bdb25ffe55796ec6f2b3e8296fec53141fcca81c33ea50696f20ae5101256555"
+    },
+    {
+      "source_path": "ResearchStudio-Idea/skills/idea_spark/references/ideation-patterns/adapt_via_conditioning.md",
+      "vendored_path": "ideation-patterns/adapt_via_conditioning.md",
+      "bytes": 13442,
+      "sha256": "b5aac2a729f2c46ae2a7a593823115fec9749da30477c6aeb75a2c36325f085b"
+    },
+    {
+      "source_path": "ResearchStudio-Idea/skills/idea_spark/references/ideation-patterns/algebraic_equivalence_unification.md",
+      "vendored_path": "ideation-patterns/algebraic_equivalence_unification.md",
+      "bytes": 12905,
+      "sha256": "f52205190e01c73e751d586bafb44b53df85d3a75a6a58214922b6b0c45a9a33"
+    },
+    {
+      "source_path": "ResearchStudio-Idea/skills/idea_spark/references/ideation-patterns/architectural_operator_substitution.md",
+      "vendored_path": "ideation-patterns/architectural_operator_substitution.md",
+      "bytes": 13456,
+      "sha256": "3d19340d40077d188b19d8db29f6dc531068b2f94f474a814a12e6da47a220e7"
+    },
+    {
+      "source_path": "ResearchStudio-Idea/skills/idea_spark/references/ideation-patterns/assumption_audit_and_pivot.md",
+      "vendored_path": "ideation-patterns/assumption_audit_and_pivot.md",
+      "bytes": 13046,
+      "sha256": "09e166f1511831bae513bd7c25cc63440c5f14110a88430af8b9c5d157aa5cc3"
+    },
+    {
+      "source_path": "ResearchStudio-Idea/skills/idea_spark/references/ideation-patterns/characterize_limit_then_surpass.md",
+      "vendored_path": "ideation-patterns/characterize_limit_then_surpass.md",
+      "bytes": 11325,
+      "sha256": "546e02ccfcf965d4084f8d3a00776268f93212b32a3849f2fa20c7a287db5001"
+    },
+    {
+      "source_path": "ResearchStudio-Idea/skills/idea_spark/references/ideation-patterns/controlled_diagnostic_design.md",
+      "vendored_path": "ideation-patterns/controlled_diagnostic_design.md",
+      "bytes": 12147,
+      "sha256": "6eb00c3e1536238e9e7120479a156b73fcf649c8b20b7615069a463225dbf7c5"
+    },
+    {
+      "source_path": "ResearchStudio-Idea/skills/idea_spark/references/ideation-patterns/decompose_and_delegate.md",
+      "vendored_path": "ideation-patterns/decompose_and_delegate.md",
+      "bytes": 13727,
+      "sha256": "504a0f168dd1f8fb5e725f1a2d404b172d0967be6f3d91f9d32801067dbaa0cd"
+    },
+    {
+      "source_path": "ResearchStudio-Idea/skills/idea_spark/references/ideation-patterns/generative_process_redesign.md",
+      "vendored_path": "ideation-patterns/generative_process_redesign.md",
+      "bytes": 12389,
+      "sha256": "d8d7a8633ff3243ab5d56f0e3ddabba88cb0314bf01b788922e369d4d19348d0"
+    },
+    {
+      "source_path": "ResearchStudio-Idea/skills/idea_spark/references/ideation-patterns/heterogeneous_decomposition.md",
+      "vendored_path": "ideation-patterns/heterogeneous_decomposition.md",
+      "bytes": 14539,
+      "sha256": "08cc30a356d8aeb0c07109c914938c3da14d60c07be809613b2195efd45f4476"
+    },
+    {
+      "source_path": "ResearchStudio-Idea/skills/idea_spark/references/ideation-patterns/overview.md",
+      "vendored_path": "ideation-patterns/overview.md",
+      "bytes": 13284,
+      "sha256": "20014a5167c41a0a71b492bb4b20e25947b4cf30c7f86234c020e8d45f7450b2"
+    },
+    {
+      "source_path": "ResearchStudio-Idea/skills/idea_spark/references/ideation-patterns/reframe_as_solvable_object.md",
+      "vendored_path": "ideation-patterns/reframe_as_solvable_object.md",
+      "bytes": 12859,
+      "sha256": "a0876cbb5670f0b99d46279079066119a5c795be42aa438aa793be34f7e89dfc"
+    },
+    {
+      "source_path": "ResearchStudio-Idea/skills/idea_spark/references/ideation-patterns/relax_discrete_search_to_continuous.md",
+      "vendored_path": "ideation-patterns/relax_discrete_search_to_continuous.md",
+      "bytes": 13762,
+      "sha256": "7a4db9933efa57024083886e5d42432ac5330f56a9ea6a7936de8fd70368b502"
+    },
+    {
+      "source_path": "ResearchStudio-Idea/skills/idea_spark/references/ideation-patterns/self_supervised_signal_engineering.md",
+      "vendored_path": "ideation-patterns/self_supervised_signal_engineering.md",
+      "bytes": 13719,
+      "sha256": "7e63e33e84b6c6438041999bc7180aba61dfa1e8cd3cfac8bdd0263dcb819f53"
+    },
+    {
+      "source_path": "ResearchStudio-Idea/skills/idea_spark/references/ideation-patterns/structural_prior_encoding.md",
+      "vendored_path": "ideation-patterns/structural_prior_encoding.md",
+      "bytes": 14397,
+      "sha256": "3ebc3ea6829e9904b5d73b6b01808e3464115d8cc95795a61005029ca1ad358a"
+    },
+    {
+      "source_path": "ResearchStudio-Idea/skills/idea_spark/references/ideation-patterns/targeted_self_supervised_objective.md",
+      "vendored_path": "ideation-patterns/targeted_self_supervised_objective.md",
+      "bytes": 11294,
+      "sha256": "a7e8ba7e87ea63a0446741ed89d53f38b2f7fc85a84c9f69dd75afcb67ba8df1"
+    },
+    {
+      "source_path": "ResearchStudio-Idea/skills/idea_spark/references/ideation-patterns/unify_into_shared_representation.md",
+      "vendored_path": "ideation-patterns/unify_into_shared_representation.md",
+      "bytes": 14709,
+      "sha256": "ebba3230237271e37d5280030ad147493deed2605fe53f5324f3ebb70f1d599c"
+    },
+    {
+      "source_path": "ResearchStudio-Idea/skills/idea_spark/references/ideation-sub-patterns/C00.md",
+      "vendored_path": "ideation-sub-patterns/C00.md",
+      "bytes": 9562,
+      "sha256": "0bc790076bc61bc5a902094b3b1326375b20a2210540b9665c97728f8a869d56"
+    },
+    {
+      "source_path": "ResearchStudio-Idea/skills/idea_spark/references/ideation-sub-patterns/C01.md",
+      "vendored_path": "ideation-sub-patterns/C01.md",
+      "bytes": 8931,
+      "sha256": "a09198aec391b4beef0c9630b9c1a1793275ee6b72e8276646b76a95d69b7a3c"
+    },
+    {
+      "source_path": "ResearchStudio-Idea/skills/idea_spark/references/ideation-sub-patterns/C02.md",
+      "vendored_path": "ideation-sub-patterns/C02.md",
+      "bytes": 8673,
+      "sha256": "c526fdc812d2e955da7de11c64be2a0858fa65f331ae0679b5d9170a1d96b5ff"
+    },
+    {
+      "source_path": "ResearchStudio-Idea/skills/idea_spark/references/ideation-sub-patterns/C03.md",
+      "vendored_path": "ideation-sub-patterns/C03.md",
+      "bytes": 8602,
+      "sha256": "8c69e090645656f141b869a7701f6f611917395f2abf6578eced99520dea6da9"
+    },
+    {
+      "source_path": "ResearchStudio-Idea/skills/idea_spark/references/ideation-sub-patterns/C04.md",
+      "vendored_path": "ideation-sub-patterns/C04.md",
+      "bytes": 8406,
+      "sha256": "e479b0ce12a37ce4c9bc052fa2dd3cc9c7f52b77be4b619253fda8defa0c23fe"
+    },
+    {
+      "source_path": "ResearchStudio-Idea/skills/idea_spark/references/ideation-sub-patterns/C05.md",
+      "vendored_path": "ideation-sub-patterns/C05.md",
+      "bytes": 9612,
+      "sha256": "e6c07526be463b48ef858270dba3de30170ecb3fcde37ad66d4dc635e0f34d48"
+    },
+    {
+      "source_path": "ResearchStudio-Idea/skills/idea_spark/references/ideation-sub-patterns/C06.md",
+      "vendored_path": "ideation-sub-patterns/C06.md",
+      "bytes": 8439,
+      "sha256": "d1570fddded634848788b33c6a731dbce440d0450e6f3c550f0f517d87a7bba8"
+    },
+    {
+      "source_path": "ResearchStudio-Idea/skills/idea_spark/references/ideation-sub-patterns/C07.md",
+      "vendored_path": "ideation-sub-patterns/C07.md",
+      "bytes": 9632,
+      "sha256": "1cf23b65fbee15bbbffcda7f4af3542f60cc167134efce2e203cd0fc4aede69f"
+    },
+    {
+      "source_path": "ResearchStudio-Idea/skills/idea_spark/references/ideation-sub-patterns/C08.md",
+      "vendored_path": "ideation-sub-patterns/C08.md",
+      "bytes": 9002,
+      "sha256": "dd9b19e9af3315d69cd3435f2033c87d1d6ca44126603db2595ece8952f0e16b"
+    },
+    {
+      "source_path": "ResearchStudio-Idea/skills/idea_spark/references/ideation-sub-patterns/C09.md",
+      "vendored_path": "ideation-sub-patterns/C09.md",
+      "bytes": 8485,
+      "sha256": "e178b7925e08f94311f28639a88030f84ece1468b7080707472afe432ff4126e"
+    },
+    {
+      "source_path": "ResearchStudio-Idea/skills/idea_spark/references/ideation-sub-patterns/C10.md",
+      "vendored_path": "ideation-sub-patterns/C10.md",
+      "bytes": 8259,
+      "sha256": "8724aaff35a9704544a9be7625e6a05d58c606335f3a65e99a825d3bbce8366a"
+    },
+    {
+      "source_path": "ResearchStudio-Idea/skills/idea_spark/references/ideation-sub-patterns/C11.md",
+      "vendored_path": "ideation-sub-patterns/C11.md",
+      "bytes": 9686,
+      "sha256": "74f197a89da72069cef06640e425cb5fed8b36fa3f2247ac50690424ec904c65"
+    },
+    {
+      "source_path": "ResearchStudio-Idea/skills/idea_spark/references/ideation-sub-patterns/C12.md",
+      "vendored_path": "ideation-sub-patterns/C12.md",
+      "bytes": 9409,
+      "sha256": "6157bfd876ba96f837c0f577399f6afc1602e419c45fe77424f57b5e446a8927"
+    },
+    {
+      "source_path": "ResearchStudio-Idea/skills/idea_spark/references/ideation-sub-patterns/C13.md",
+      "vendored_path": "ideation-sub-patterns/C13.md",
+      "bytes": 9020,
+      "sha256": "7e19113e0aff6d02e77fc4a9898c6c5edae5a1b20f6c46bf65cd78fae0e62d9b"
+    },
+    {
+      "source_path": "ResearchStudio-Idea/skills/idea_spark/references/ideation-sub-patterns/C14.md",
+      "vendored_path": "ideation-sub-patterns/C14.md",
+      "bytes": 9519,
+      "sha256": "5eb5d1ba44a72a8e8274a8958a1e9ac64b0badb96896f637d2072733e2312abe"
+    },
+    {
+      "source_path": "ResearchStudio-Idea/skills/idea_spark/references/ideation-sub-patterns/C15.md",
+      "vendored_path": "ideation-sub-patterns/C15.md",
+      "bytes": 9267,
+      "sha256": "fce7d01cac2fe7f8562d5de2af87159547d7a7e9bb9b115560af14a00a6f8999"
+    },
+    {
+      "source_path": "ResearchStudio-Idea/skills/idea_spark/references/ideation-sub-patterns/C16.md",
+      "vendored_path": "ideation-sub-patterns/C16.md",
+      "bytes": 9354,
+      "sha256": "0978269b1da55a84902d42087c8d481a3fb40c6d299870d760ff9a64df1ed70e"
+    },
+    {
+      "source_path": "ResearchStudio-Idea/skills/idea_spark/references/ideation-sub-patterns/C17.md",
+      "vendored_path": "ideation-sub-patterns/C17.md",
+      "bytes": 8079,
+      "sha256": "7909db559de1066dee94d425dd43285f7a88c619ba65870632bf787629aaf167"
+    },
+    {
+      "source_path": "ResearchStudio-Idea/skills/idea_spark/references/ideation-sub-patterns/C18.md",
+      "vendored_path": "ideation-sub-patterns/C18.md",
+      "bytes": 8422,
+      "sha256": "871ad780b2120f7f4bd0930a3ae0d2c66e3928368a5ffbf36f4777c3fb8d01a6"
+    },
+    {
+      "source_path": "ResearchStudio-Idea/skills/idea_spark/references/ideation-sub-patterns/C19.md",
+      "vendored_path": "ideation-sub-patterns/C19.md",
+      "bytes": 9872,
+      "sha256": "80f960607eadbb4c61eb9e8c9b7394e76d36b568700fdcc73b53ea9cc7ac6cce"
+    },
+    {
+      "source_path": "ResearchStudio-Idea/skills/idea_spark/references/ideation-sub-patterns/C20.md",
+      "vendored_path": "ideation-sub-patterns/C20.md",
+      "bytes": 9045,
+      "sha256": "44b744d5822c8c662171e2f9607e78f0dd57246938254a22354e05386841c63f"
+    },
+    {
+      "source_path": "ResearchStudio-Idea/skills/idea_spark/references/ideation-sub-patterns/C21.md",
+      "vendored_path": "ideation-sub-patterns/C21.md",
+      "bytes": 8904,
+      "sha256": "5f37f2da95b53bfc32fa8a257293cbf549dc1959a45e933949e04bad4b65e89f"
+    },
+    {
+      "source_path": "ResearchStudio-Idea/skills/idea_spark/references/ideation-sub-patterns/C22.md",
+      "vendored_path": "ideation-sub-patterns/C22.md",
+      "bytes": 8823,
+      "sha256": "094fa0747a14ae5f706575ad7be75604d7ccd307420e39ad22c79bc870c5a17c"
+    },
+    {
+      "source_path": "ResearchStudio-Idea/skills/idea_spark/references/ideation-sub-patterns/C23.md",
+      "vendored_path": "ideation-sub-patterns/C23.md",
+      "bytes": 8809,
+      "sha256": "d301755650014fa6d6df8c14faadbdc32aea4952c2bca76e209981495682f455"
+    },
+    {
+      "source_path": "ResearchStudio-Idea/skills/idea_spark/references/ideation-sub-patterns/C24.md",
+      "vendored_path": "ideation-sub-patterns/C24.md",
+      "bytes": 9523,
+      "sha256": "b4f8759c8da5248c192265a3b42dfd6356e98fcae95a8f8d6048dabeee28bd8a"
+    },
+    {
+      "source_path": "ResearchStudio-Idea/skills/idea_spark/references/ideation-sub-patterns/C25.md",
+      "vendored_path": "ideation-sub-patterns/C25.md",
+      "bytes": 8369,
+      "sha256": "ced46168bbcc6ab1aeaf9a242b47631d6076097bd8758c08560c3faa888da4ff"
+    },
+    {
+      "source_path": "ResearchStudio-Idea/skills/idea_spark/references/ideation-sub-patterns/C26.md",
+      "vendored_path": "ideation-sub-patterns/C26.md",
+      "bytes": 9016,
+      "sha256": "8b3b77eb217046fa5c64a7f5fd38a67bbfc96550b92cc6249a46241d222318ae"
+    },
+    {
+      "source_path": "ResearchStudio-Idea/skills/idea_spark/references/ideation-sub-patterns/C27.md",
+      "vendored_path": "ideation-sub-patterns/C27.md",
+      "bytes": 8492,
+      "sha256": "1c6a3b88c1c50aab2841681e9eeea8e6279409b02f4221eca7aa8e3059795bf4"
+    },
+    {
+      "source_path": "ResearchStudio-Idea/skills/idea_spark/references/ideation-sub-patterns/C28.md",
+      "vendored_path": "ideation-sub-patterns/C28.md",
+      "bytes": 9159,
+      "sha256": "d72af42e36a4333f45f633454858cada56aca66b4b3ac1c711f23abad3273b6c"
+    },
+    {
+      "source_path": "ResearchStudio-Idea/skills/idea_spark/references/ideation-sub-patterns/C29.md",
+      "vendored_path": "ideation-sub-patterns/C29.md",
+      "bytes": 9316,
+      "sha256": "9f619738bcf908ebbb9b27a771b83007b4370ac5fc9f84738b3c823fb5789ca1"
+    },
+    {
+      "source_path": "ResearchStudio-Idea/skills/idea_spark/references/ideation-sub-patterns/C30.md",
+      "vendored_path": "ideation-sub-patterns/C30.md",
+      "bytes": 9966,
+      "sha256": "7e91d3605898cddc818268020289617ca76496905342b58adc4358eedc146497"
+    },
+    {
+      "source_path": "ResearchStudio-Idea/skills/idea_spark/references/ideation-sub-patterns/overview.md",
+      "vendored_path": "ideation-sub-patterns/overview.md",
+      "bytes": 3044,
+      "sha256": "bef036e8aed185e598f98caf45984b2444b47a45e3f35babe3bb038ff006a8fa"
+    }
+  ]
+}

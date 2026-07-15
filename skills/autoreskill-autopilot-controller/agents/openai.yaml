@@ -1,3 +1,3 @@
 display_name: AutoResearch Autopilot
-short_description: Converts blockers into repairs, async waits, downgrades, or stops.
-default_prompt: Keep the /goal workflow moving under a bounded full-auto policy.
+short_description: Routes typed blockers under separate repair budgets.
+default_prompt: Keep the scientific decision loop moving while separating operational retries from scientific revisions and stopping bounded failure signatures.

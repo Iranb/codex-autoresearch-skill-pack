@@ -17,6 +17,8 @@ known_hosts
 
 # AutoResearch runtime state and generated outputs
 .autoreskill/
+!skills/autoreskill-workflow/tests/fixtures/**/.autoreskill/
+!skills/autoreskill-workflow/tests/fixtures/**/.autoreskill/**
 .openclaw-research/
 PROJECT_MANIFEST.json
 workflow-*.json

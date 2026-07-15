@@ -1,13 +1,17 @@
 ---
 name: autoreskill-implement-experiment
-description: Research engineering skill for portable AutoResearch. Use to implement experiment bundles from INNOVATION_PACKET and EXPERIMENT_REVIEW_PACKET, consume locked baseline-code decisions, local-vs-AutoDL GPU backend decisions, dataset/code path mappings, create manifests, configs, train/evaluate scripts, dry-run logs, and baseline/proposed comparable code.
+description: Research engineering skill for portable AutoResearch. Use to implement one named experiment track from its per-track INNOVATION_PACKET and EXPERIMENT_REVIEW_PACKET, consume locked baseline-code decisions, GPU backend decisions, and path mappings, then create auditable baseline/proposed experiment bundles.
 metadata:
   short-description: Implement reproducible experiment bundles
 ---
 
 # Implement Experiment
 
-Use only after `INNOVATION_PACKET.json` and `EXPERIMENT_REVIEW_PACKET.json` pass lint.
+Use only after the named track's
+`orchestrator/tracks/<track-id>/INNOVATION_PACKET.json` and
+`planner/tracks/<track-id>/EXPERIMENT_REVIEW_PACKET.json` pass lint. The
+top-level packet pair is a compatibility projection for the current primary
+track only; never use it to implement an alternate or risk-repair track.
 
 The default path is a real baseline/data/GPU-backed experiment bundle. Offline contract-test fixtures belong only in dedicated smoke-test helpers and must never be used as the implementation path for an experiment job.
 
@@ -31,10 +35,19 @@ The default path is a real baseline/data/GPU-backed experiment bundle. Offline c
 - Do not change dataset, locked metric suite / `metric_policy`, or baseline protocol.
 - Do not search for another baseline implementation. Use only `baseline_code` locked by `autoreskill-experiment-plan`; if it is missing, ambiguous, unavailable, or incompatible, stop and return to planning.
 - The locked baseline must be a real clone/worktree or verified repository snapshot. Do not recreate baseline logic in new files. Proposed changes must be recorded as a patch/diff against the locked baseline clone through `baseline_patch_proof`.
-- Do not choose a new compute backend in implementation. Use `compute_backend.backend` from the review packet: `local_gpu` means use the recorded local/SSH GPU assumptions; `autodl_gpu` means implement against the AutoDL path mapping and pass lifecycle work to `autodl-pro-gpu-api`.
+- Do not choose a new compute backend or execution route in implementation. Use the reviewed pair: `local_gpu` with `execution_route=local|ssh|bjtu_hpc`, or `autodl_gpu` with `execution_route=autodl`. Generic SSH remains project-specific; BJTU work must use `$bjtu-hpc` preflight/planning; AutoDL lifecycle work passes to `autodl-pro-gpu-api`. Route metadata is not launch authorization.
+- For `external_material`, preserve `external_campaign_ref`, `external_campaign_sha256`, `external_candidate_id`, and `protected_commitment_sha256` from the reviewed packets, keep candidate/fragment/track IDs distinct, and copy the same protected commitment hash into every canonical queue row.
 - Do not invent dataset or output paths. Use `path_mapping` from the review packet and expose those paths through configs or environment variables such as `DATA_ROOT`, `OUTPUT_DIR`, and `CKPT_DIR`.
 - Do not change the locked evaluation command, data split, metric parser, or metric policy.
-- Implement exactly one selected idea per experiment bundle.
+- Implement exactly one named track and its selected idea per experiment bundle. Do not mix mechanisms or packet pairs across tracks.
+- Preserve `track_id`, `track_role`, `idea_lifecycle_status`, `selection_fingerprint`, both packet refs and semantic hashes, and `evidence_tier_ceiling` in `EXPERIMENT_MANIFEST.json`. An `alternate` or `risk_repair` bundle must remain `evidence_tier=pilot_only`; only an explicit primary reselection followed by a frozen matched-baseline rerun can make it claim-eligible.
+- Resolve the packet's `project_execution_passport_ref` and verify its index
+  hash plus the named `execution_profile_id`/`execution_profile_sha256`. Carry
+  those identities, `innovation_delta_sha256`, and
+  `resolved_execution_contract_projection_sha256` into
+  `EXPERIMENT_MANIFEST.json`. Shared baseline/data/runtime fields come from that
+  profile; the packet may change only its innovation delta. Fail closed on a
+  missing, stale, or mismatched profile rather than reconstructing it from prose.
 - Keep baseline and proposed paths comparable; proposed code may differ only by the planned logical change.
 - Carry the `innovation_search_contract` into `EXPERIMENT_MANIFEST.json`, including `innovation_mechanism`, `mechanism_type`, and `promotion_stage`.
 - Carry the planning `metric_policy` into `EXPERIMENT_MANIFEST.json`, configs, run manifests, and result parsers. For multi-metric protocols, extract every locked component and the predeclared composite/stress metric; do not hardcode a single-component summary such as `New` as the launch or ranking result.
@@ -55,13 +68,19 @@ The default path is a real baseline/data/GPU-backed experiment bundle. Offline c
 - Write logs to stdout and file.
 - Run a real-data or real-feature smoke run before reporting launch-ready.
 - Record source state in `EXPERIMENT_MANIFEST.json`: git commit when available, diff/status summary, selected idea id, locked protocol, and protected eval/test/metric paths.
-- Record `baseline_code`, `compute_backend`, `path_mapping`, `baseline_data_audit`, `backend_upload`, `remote_run`, `dry_run_kind`, `innovation_search_contract`, `promotion_stage`, and any `ablation_of`/`confirmation_of` link in `EXPERIMENT_MANIFEST.json`; linters treat drift or fixture-only proof as launch-blocking.
+- Record `baseline_code`, `compute_backend`, `execution_route`, `path_mapping`, `baseline_data_audit`, `backend_upload`, `remote_run`, `dry_run_kind`, `innovation_search_contract`, `promotion_stage`, and any `ablation_of`/`confirmation_of` link in `EXPERIMENT_MANIFEST.json`; linters treat drift or fixture-only proof as launch-blocking.
 - After manifests are written, run `track_implementation_index.py` to create `coder/TRACK_IMPLEMENTATION_INDEX.json`. This index must map every ready or selected `TRACK_PLAN_MATRIX.json` row to manifest paths, baseline audit paths, patch proof status, remote-run proof, and fixture status.
+- The implementation index also projects each matrix/manifest passport index,
+  execution profile, innovation-delta, and resolved-projection hash so later
+  audits can identify drift without treating the index as a new authority.
 - If implementation discovers a red-line violation, stop and return to `autoreskill-experiment-plan` instead of repairing by changing the metric policy, data, or eval.
 
 ## Execution Order
 
-1. Read `INNOVATION_PACKET.json`, `EXPERIMENT_REVIEW_PACKET.json`, and the current job packet.
+1. Read the named track's per-track innovation/review packet pair and the current
+   job packet. Verify their `track_id`, selected idea, role, lifecycle, selection
+   fingerprint, semantic hashes, project-passport index, execution profile,
+   innovation delta, and resolved projection agree before touching code.
 2. Audit the locked baseline and data:
    - open the locked baseline entrypoints and relevant config/data loaders;
    - verify the baseline code path and entrypoints exist locally or are staged for upload;
@@ -78,10 +97,10 @@ The default path is a real baseline/data/GPU-backed experiment bundle. Offline c
 ## Deterministic Helpers
 
 ```bash
-python scripts/experiment_scaffold.py --project <project-root> --experiment-id <id>
+python scripts/experiment_scaffold.py --project <project-root> --track-id <track-id> --experiment-id <id>
 python scripts/track_implementation_index.py --project <project-root>
 python scripts/track_implementation_index.py --project <project-root> --check
-python scripts/baseline_clone_lint.py --project <project-root>
+python scripts/baseline_clone_lint.py --project <project-root> --track-id <track-id>
 python scripts/experiment_drift_lint.py --project <project-root>
 python scripts/experiment_real_readiness_lint.py --project <project-root>
 ```

@@ -1,0 +1,2275 @@
+{
+  "_template_metadata": {
+    "authoring_only": true,
+    "instruction": "Replace every synthetic/replace-* value, verify sources, then remove _template_metadata.",
+    "materialization_forbidden": true,
+    "synthetic": true
+  },
+  "admitted_candidate_ids": [],
+  "anchor_gap_id": "replace-gap-additive",
+  "campaign_id": "replace-with-stable-campaign-id",
+  "campaign_revision": 1,
+  "candidates": [
+    {
+      "collision_audit": {
+        "alias_terms": [
+          "replace-alias-term"
+        ],
+        "alias_window_months": 48,
+        "claim_limit": "No novelty certificate.",
+        "query_trace": [
+          {
+            "channel": "signature",
+            "provider": "replace-with-non-PaperNexus-provider",
+            "query": "replace signature query",
+            "result_refs": [
+              "replace-target-1"
+            ],
+            "searched_at": "replace-with-UTC-timestamp"
+          },
+          {
+            "channel": "alias",
+            "provider": "replace-with-non-PaperNexus-provider",
+            "query": "replace alias query",
+            "result_refs": [
+              "replace-near-1"
+            ],
+            "searched_at": "replace-with-UTC-timestamp"
+          }
+        ],
+        "search_limitations": "Synthetic template; repeat bounded live retrieval before use.",
+        "signature_terms": [
+          "replace-signature-term"
+        ],
+        "signature_window_months": 10,
+        "status": "no_threat_found"
+      },
+      "contribution_type": "ALGO",
+      "gap_closures": [
+        {
+          "expected_artifact": "Replace with the method artifact.",
+          "gap_ref": "replace-gap-additive",
+          "main_pattern": "reframe_as_solvable_object",
+          "recipe_application": "Replace with the concrete pattern recipe application.",
+          "role": "primary",
+          "structural_fit": "Replace with source-bound structural fit.",
+          "subpattern": "C00"
+        },
+        {
+          "expected_artifact": "Replace with the isolating ablation.",
+          "gap_ref": "replace-gap-subtractive",
+          "main_pattern": "assumption_audit_and_pivot",
+          "recipe_application": "Replace with the assumption relaxation procedure.",
+          "role": "secondary",
+          "structural_fit": "Replace with the shared-assumption fit.",
+          "subpattern": "C01"
+        }
+      ],
+      "id": "replace-candidate-01",
+      "implementability_audit": {
+        "enriched_steps": [
+          {
+            "build_procedure": "Replace with exact procedure.",
+            "id": "step-1",
+            "inputs": [
+              "replace-input"
+            ],
+            "outputs": [
+              "replace-output"
+            ],
+            "what_changes": "Replace with exact change."
+          },
+          {
+            "build_procedure": "Replace with exact procedure.",
+            "id": "step-2",
+            "inputs": [
+              "replace-input"
+            ],
+            "outputs": [
+              "replace-output"
+            ],
+            "what_changes": "Replace with exact change."
+          }
+        ],
+        "generation_context_id": "replace-generation-01",
+        "protected_commitments_present": false,
+        "reviewer_context_id": "replace-independent-review-01",
+        "reviewer_role": "skeptical_engineer",
+        "status": "passed",
+        "underspecified_points": [
+          {
+            "fill": "Replace with concrete fill.",
+            "hole": "Replace with identified hole.",
+            "load_bearing": true,
+            "severity": "filled",
+            "step_id": "step-2"
+          }
+        ]
+      },
+      "mechanism": {
+        "alternative_explanation": "Replace with the strongest alternative explanation.",
+        "falsifier": "Replace with an outcome that falsifies the mechanism.",
+        "intervention": "Replace with one intervention.",
+        "load_bearing_variable": "replace-load-bearing-variable",
+        "method_steps": [
+          {
+            "action": "Replace with the first build action.",
+            "id": "step-1"
+          },
+          {
+            "action": "Replace with the second build action.",
+            "id": "step-2"
+          }
+        ],
+        "one_variable_change": "Replace with one controlled variable change.",
+        "predicted_observation": "Replace with the matched predicted observation."
+      },
+      "negative_control": {
+        "downstream_metric": "replace-primary-metric",
+        "expected_if_mechanism_true": "Replace with the control prediction.",
+        "intervention": "Replace with a non-tautological negative control.",
+        "non_tautology_rationale": "Replace with why the control isolates the mechanism."
+      },
+      "protected_commitments": {
+        "payload": {
+          "baseline": {
+            "comparison_label": "paper-report comparison not established",
+            "revision": "replace-with-immutable-revision",
+            "source_ref": "https://replace.invalid/baseline"
+          },
+          "dataset": {
+            "name": "replace-dataset",
+            "proxy_rationale": "Replace with the smallest protocol-aligned proxy rationale.",
+            "split": "replace-locked-split"
+          },
+          "evidence_tier": "pilot_only",
+          "falsifier": "Replace with an outcome that falsifies the mechanism.",
+          "load_bearing_variable": "replace-load-bearing-variable",
+          "metric_policy": {
+            "direction": "higher",
+            "locked": true,
+            "primary_metric": "replace-primary-metric"
+          },
+          "negative_control": {
+            "downstream_metric": "replace-primary-metric",
+            "expected_if_mechanism_true": "Replace with the control prediction.",
+            "intervention": "Replace with a non-tautological negative control.",
+            "non_tautology_rationale": "Replace with why the control isolates the mechanism."
+          },
+          "observable_prediction": "Replace with the matched predicted observation.",
+          "outcome_routes": {
+            "implementation_failure": "no hypothesis belief change",
+            "infrastructure_failure": "no hypothesis belief change",
+            "protocol_invalid": "no hypothesis belief change",
+            "valid_inconclusive": "allow at most one decision-changing discriminator",
+            "valid_negative": "lower belief or retire",
+            "valid_positive_candidate": "survivor only; require matched confirmation and ablation"
+          },
+          "resource_ceiling": {
+            "compute_backend": "local_gpu",
+            "estimated_gpu_hours": 0.5,
+            "execution_route": "local",
+            "gpu_count": 1,
+            "smoke_minutes": 5,
+            "walltime_minutes": 30
+          },
+          "seed_policy": {
+            "max_random_seeds": 3,
+            "planned_seed_count": 1,
+            "retry_reuses_seed": true,
+            "seed": 1001
+          }
+        },
+        "sha256": "5941afd380bd4ffa58b079f514657bda3ceb3568e4bdc70ca9899607ea802e83"
+      },
+      "quality_gauntlet": {
+        "checks": {
+          "anti_pattern_check": {
+            "hard_floor_triggered": false,
+            "rationale": "Replace synthetic rationale for anti_pattern_check.",
+            "verdict": "pass"
+          },
+          "falsification_structure_check": {
+            "hard_floor_triggered": false,
+            "rationale": "Replace synthetic rationale for falsification_structure_check.",
+            "verdict": "pass"
+          },
+          "gap_closure_reject_check": {
+            "hard_floor_triggered": false,
+            "rationale": "Replace synthetic rationale for gap_closure_reject_check.",
+            "verdict": "pass"
+          },
+          "paper_pointed_threat": {
+            "hard_floor_triggered": false,
+            "rationale": "Replace synthetic rationale for paper_pointed_threat.",
+            "verdict": "pass"
+          },
+          "recipe_application_check": {
+            "hard_floor_triggered": false,
+            "rationale": "Replace synthetic rationale for recipe_application_check.",
+            "verdict": "pass"
+          }
+        },
+        "repair": {
+          "count": 0
+        },
+        "revision_targets": [],
+        "verdict": "advance",
+        "verdict_layer": "soft_judgment"
+      },
+      "rapid_validation": {
+        "baseline_code": {
+          "comparison_label": "paper-report comparison not established",
+          "eval_entrypoint": "replace-eval-entrypoint",
+          "locked": true,
+          "resolved_path": "/replace/with/local/baseline/path",
+          "revision": "replace-with-immutable-revision",
+          "source_ref": "https://replace.invalid/baseline",
+          "train_entrypoint": "replace-train-entrypoint"
+        },
+        "claim_intent": "candidate_screening",
+        "dataset": {
+          "name": "replace-dataset",
+          "proxy_rationale": "Replace with the smallest protocol-aligned proxy rationale.",
+          "split": "replace-locked-split"
+        },
+        "decision_class": "falsify_core_mechanism",
+        "evaluation_command": "replace-with-evaluation-command",
+        "evidence_tier": "pilot_only",
+        "expected_decision_change": "Replace with the decision changed by this pilot.",
+        "metric_policy": {
+          "direction": "higher",
+          "locked": true,
+          "primary_metric": "replace-primary-metric"
+        },
+        "outcome_routes": {
+          "implementation_failure": "no hypothesis belief change",
+          "infrastructure_failure": "no hypothesis belief change",
+          "protocol_invalid": "no hypothesis belief change",
+          "valid_inconclusive": "allow at most one decision-changing discriminator",
+          "valid_negative": "lower belief or retire",
+          "valid_positive_candidate": "survivor only; require matched confirmation and ablation"
+        },
+        "resource_request": {
+          "compute_backend": "local_gpu",
+          "estimated_gpu_hours": 0.5,
+          "execution_route": "local",
+          "gpu_count": 1,
+          "smoke_minutes": 5,
+          "walltime_minutes": 30
+        },
+        "seed_policy": {
+          "max_random_seeds": 3,
+          "planned_seed_count": 1,
+          "retry_reuses_seed": true,
+          "seed": 1001
+        }
+      },
+      "research_question": "Replace with one falsifiable research question.",
+      "status": "candidate",
+      "title": "Replace synthetic candidate 01"
+    },
+    {
+      "collision_audit": {
+        "alias_terms": [
+          "replace-alias-term"
+        ],
+        "alias_window_months": 48,
+        "claim_limit": "No novelty certificate.",
+        "query_trace": [
+          {
+            "channel": "signature",
+            "provider": "replace-with-non-PaperNexus-provider",
+            "query": "replace signature query",
+            "result_refs": [
+              "replace-target-1"
+            ],
+            "searched_at": "replace-with-UTC-timestamp"
+          },
+          {
+            "channel": "alias",
+            "provider": "replace-with-non-PaperNexus-provider",
+            "query": "replace alias query",
+            "result_refs": [
+              "replace-near-1"
+            ],
+            "searched_at": "replace-with-UTC-timestamp"
+          }
+        ],
+        "search_limitations": "Synthetic template; repeat bounded live retrieval before use.",
+        "signature_terms": [
+          "replace-signature-term"
+        ],
+        "signature_window_months": 10,
+        "status": "no_threat_found"
+      },
+      "contribution_type": "ALGO",
+      "gap_closures": [
+        {
+          "expected_artifact": "Replace with the method artifact.",
+          "gap_ref": "replace-gap-additive",
+          "main_pattern": "reframe_as_solvable_object",
+          "recipe_application": "Replace with the concrete pattern recipe application.",
+          "role": "primary",
+          "structural_fit": "Replace with source-bound structural fit.",
+          "subpattern": "C00"
+        },
+        {
+          "expected_artifact": "Replace with the isolating ablation.",
+          "gap_ref": "replace-gap-subtractive",
+          "main_pattern": "assumption_audit_and_pivot",
+          "recipe_application": "Replace with the assumption relaxation procedure.",
+          "role": "secondary",
+          "structural_fit": "Replace with the shared-assumption fit.",
+          "subpattern": "C01"
+        }
+      ],
+      "id": "replace-candidate-02",
+      "implementability_audit": {
+        "enriched_steps": [
+          {
+            "build_procedure": "Replace with exact procedure.",
+            "id": "step-1",
+            "inputs": [
+              "replace-input"
+            ],
+            "outputs": [
+              "replace-output"
+            ],
+            "what_changes": "Replace with exact change."
+          },
+          {
+            "build_procedure": "Replace with exact procedure.",
+            "id": "step-2",
+            "inputs": [
+              "replace-input"
+            ],
+            "outputs": [
+              "replace-output"
+            ],
+            "what_changes": "Replace with exact change."
+          }
+        ],
+        "generation_context_id": "replace-generation-02",
+        "protected_commitments_present": false,
+        "reviewer_context_id": "replace-independent-review-02",
+        "reviewer_role": "skeptical_engineer",
+        "status": "passed",
+        "underspecified_points": [
+          {
+            "fill": "Replace with concrete fill.",
+            "hole": "Replace with identified hole.",
+            "load_bearing": true,
+            "severity": "filled",
+            "step_id": "step-2"
+          }
+        ]
+      },
+      "mechanism": {
+        "alternative_explanation": "Replace with the strongest alternative explanation.",
+        "falsifier": "Replace with an outcome that falsifies the mechanism.",
+        "intervention": "Replace with one intervention.",
+        "load_bearing_variable": "replace-load-bearing-variable",
+        "method_steps": [
+          {
+            "action": "Replace with the first build action.",
+            "id": "step-1"
+          },
+          {
+            "action": "Replace with the second build action.",
+            "id": "step-2"
+          }
+        ],
+        "one_variable_change": "Replace with one controlled variable change.",
+        "predicted_observation": "Replace with the matched predicted observation."
+      },
+      "negative_control": {
+        "downstream_metric": "replace-primary-metric",
+        "expected_if_mechanism_true": "Replace with the control prediction.",
+        "intervention": "Replace with a non-tautological negative control.",
+        "non_tautology_rationale": "Replace with why the control isolates the mechanism."
+      },
+      "protected_commitments": {
+        "payload": {
+          "baseline": {
+            "comparison_label": "paper-report comparison not established",
+            "revision": "replace-with-immutable-revision",
+            "source_ref": "https://replace.invalid/baseline"
+          },
+          "dataset": {
+            "name": "replace-dataset",
+            "proxy_rationale": "Replace with the smallest protocol-aligned proxy rationale.",
+            "split": "replace-locked-split"
+          },
+          "evidence_tier": "pilot_only",
+          "falsifier": "Replace with an outcome that falsifies the mechanism.",
+          "load_bearing_variable": "replace-load-bearing-variable",
+          "metric_policy": {
+            "direction": "higher",
+            "locked": true,
+            "primary_metric": "replace-primary-metric"
+          },
+          "negative_control": {
+            "downstream_metric": "replace-primary-metric",
+            "expected_if_mechanism_true": "Replace with the control prediction.",
+            "intervention": "Replace with a non-tautological negative control.",
+            "non_tautology_rationale": "Replace with why the control isolates the mechanism."
+          },
+          "observable_prediction": "Replace with the matched predicted observation.",
+          "outcome_routes": {
+            "implementation_failure": "no hypothesis belief change",
+            "infrastructure_failure": "no hypothesis belief change",
+            "protocol_invalid": "no hypothesis belief change",
+            "valid_inconclusive": "allow at most one decision-changing discriminator",
+            "valid_negative": "lower belief or retire",
+            "valid_positive_candidate": "survivor only; require matched confirmation and ablation"
+          },
+          "resource_ceiling": {
+            "compute_backend": "local_gpu",
+            "estimated_gpu_hours": 0.5,
+            "execution_route": "local",
+            "gpu_count": 1,
+            "smoke_minutes": 5,
+            "walltime_minutes": 30
+          },
+          "seed_policy": {
+            "max_random_seeds": 3,
+            "planned_seed_count": 1,
+            "retry_reuses_seed": true,
+            "seed": 1002
+          }
+        },
+        "sha256": "debb12137ff3ef2d649d627c989ccfdb41fd0b1d5f441365a0fb106fdbefef52"
+      },
+      "quality_gauntlet": {
+        "checks": {
+          "anti_pattern_check": {
+            "hard_floor_triggered": false,
+            "rationale": "Replace synthetic rationale for anti_pattern_check.",
+            "verdict": "pass"
+          },
+          "falsification_structure_check": {
+            "hard_floor_triggered": false,
+            "rationale": "Replace synthetic rationale for falsification_structure_check.",
+            "verdict": "pass"
+          },
+          "gap_closure_reject_check": {
+            "hard_floor_triggered": false,
+            "rationale": "Replace synthetic rationale for gap_closure_reject_check.",
+            "verdict": "pass"
+          },
+          "paper_pointed_threat": {
+            "hard_floor_triggered": false,
+            "rationale": "Replace synthetic rationale for paper_pointed_threat.",
+            "verdict": "pass"
+          },
+          "recipe_application_check": {
+            "hard_floor_triggered": false,
+            "rationale": "Replace synthetic rationale for recipe_application_check.",
+            "verdict": "pass"
+          }
+        },
+        "repair": {
+          "count": 0
+        },
+        "revision_targets": [],
+        "verdict": "advance",
+        "verdict_layer": "soft_judgment"
+      },
+      "rapid_validation": {
+        "baseline_code": {
+          "comparison_label": "paper-report comparison not established",
+          "eval_entrypoint": "replace-eval-entrypoint",
+          "locked": true,
+          "resolved_path": "/replace/with/local/baseline/path",
+          "revision": "replace-with-immutable-revision",
+          "source_ref": "https://replace.invalid/baseline",
+          "train_entrypoint": "replace-train-entrypoint"
+        },
+        "claim_intent": "candidate_screening",
+        "dataset": {
+          "name": "replace-dataset",
+          "proxy_rationale": "Replace with the smallest protocol-aligned proxy rationale.",
+          "split": "replace-locked-split"
+        },
+        "decision_class": "falsify_core_mechanism",
+        "evaluation_command": "replace-with-evaluation-command",
+        "evidence_tier": "pilot_only",
+        "expected_decision_change": "Replace with the decision changed by this pilot.",
+        "metric_policy": {
+          "direction": "higher",
+          "locked": true,
+          "primary_metric": "replace-primary-metric"
+        },
+        "outcome_routes": {
+          "implementation_failure": "no hypothesis belief change",
+          "infrastructure_failure": "no hypothesis belief change",
+          "protocol_invalid": "no hypothesis belief change",
+          "valid_inconclusive": "allow at most one decision-changing discriminator",
+          "valid_negative": "lower belief or retire",
+          "valid_positive_candidate": "survivor only; require matched confirmation and ablation"
+        },
+        "resource_request": {
+          "compute_backend": "local_gpu",
+          "estimated_gpu_hours": 0.5,
+          "execution_route": "local",
+          "gpu_count": 1,
+          "smoke_minutes": 5,
+          "walltime_minutes": 30
+        },
+        "seed_policy": {
+          "max_random_seeds": 3,
+          "planned_seed_count": 1,
+          "retry_reuses_seed": true,
+          "seed": 1002
+        }
+      },
+      "research_question": "Replace with one falsifiable research question.",
+      "status": "candidate",
+      "title": "Replace synthetic candidate 02"
+    },
+    {
+      "collision_audit": {
+        "alias_terms": [
+          "replace-alias-term"
+        ],
+        "alias_window_months": 48,
+        "claim_limit": "No novelty certificate.",
+        "query_trace": [
+          {
+            "channel": "signature",
+            "provider": "replace-with-non-PaperNexus-provider",
+            "query": "replace signature query",
+            "result_refs": [
+              "replace-target-1"
+            ],
+            "searched_at": "replace-with-UTC-timestamp"
+          },
+          {
+            "channel": "alias",
+            "provider": "replace-with-non-PaperNexus-provider",
+            "query": "replace alias query",
+            "result_refs": [
+              "replace-near-1"
+            ],
+            "searched_at": "replace-with-UTC-timestamp"
+          }
+        ],
+        "search_limitations": "Synthetic template; repeat bounded live retrieval before use.",
+        "signature_terms": [
+          "replace-signature-term"
+        ],
+        "signature_window_months": 10,
+        "status": "no_threat_found"
+      },
+      "contribution_type": "ALGO",
+      "gap_closures": [
+        {
+          "expected_artifact": "Replace with the method artifact.",
+          "gap_ref": "replace-gap-additive",
+          "main_pattern": "reframe_as_solvable_object",
+          "recipe_application": "Replace with the concrete pattern recipe application.",
+          "role": "primary",
+          "structural_fit": "Replace with source-bound structural fit.",
+          "subpattern": "C00"
+        },
+        {
+          "expected_artifact": "Replace with the isolating ablation.",
+          "gap_ref": "replace-gap-subtractive",
+          "main_pattern": "assumption_audit_and_pivot",
+          "recipe_application": "Replace with the assumption relaxation procedure.",
+          "role": "secondary",
+          "structural_fit": "Replace with the shared-assumption fit.",
+          "subpattern": "C01"
+        }
+      ],
+      "id": "replace-candidate-03",
+      "implementability_audit": {
+        "enriched_steps": [
+          {
+            "build_procedure": "Replace with exact procedure.",
+            "id": "step-1",
+            "inputs": [
+              "replace-input"
+            ],
+            "outputs": [
+              "replace-output"
+            ],
+            "what_changes": "Replace with exact change."
+          },
+          {
+            "build_procedure": "Replace with exact procedure.",
+            "id": "step-2",
+            "inputs": [
+              "replace-input"
+            ],
+            "outputs": [
+              "replace-output"
+            ],
+            "what_changes": "Replace with exact change."
+          }
+        ],
+        "generation_context_id": "replace-generation-03",
+        "protected_commitments_present": false,
+        "reviewer_context_id": "replace-independent-review-03",
+        "reviewer_role": "skeptical_engineer",
+        "status": "passed",
+        "underspecified_points": [
+          {
+            "fill": "Replace with concrete fill.",
+            "hole": "Replace with identified hole.",
+            "load_bearing": true,
+            "severity": "filled",
+            "step_id": "step-2"
+          }
+        ]
+      },
+      "mechanism": {
+        "alternative_explanation": "Replace with the strongest alternative explanation.",
+        "falsifier": "Replace with an outcome that falsifies the mechanism.",
+        "intervention": "Replace with one intervention.",
+        "load_bearing_variable": "replace-load-bearing-variable",
+        "method_steps": [
+          {
+            "action": "Replace with the first build action.",
+            "id": "step-1"
+          },
+          {
+            "action": "Replace with the second build action.",
+            "id": "step-2"
+          }
+        ],
+        "one_variable_change": "Replace with one controlled variable change.",
+        "predicted_observation": "Replace with the matched predicted observation."
+      },
+      "negative_control": {
+        "downstream_metric": "replace-primary-metric",
+        "expected_if_mechanism_true": "Replace with the control prediction.",
+        "intervention": "Replace with a non-tautological negative control.",
+        "non_tautology_rationale": "Replace with why the control isolates the mechanism."
+      },
+      "protected_commitments": {
+        "payload": {
+          "baseline": {
+            "comparison_label": "paper-report comparison not established",
+            "revision": "replace-with-immutable-revision",
+            "source_ref": "https://replace.invalid/baseline"
+          },
+          "dataset": {
+            "name": "replace-dataset",
+            "proxy_rationale": "Replace with the smallest protocol-aligned proxy rationale.",
+            "split": "replace-locked-split"
+          },
+          "evidence_tier": "pilot_only",
+          "falsifier": "Replace with an outcome that falsifies the mechanism.",
+          "load_bearing_variable": "replace-load-bearing-variable",
+          "metric_policy": {
+            "direction": "higher",
+            "locked": true,
+            "primary_metric": "replace-primary-metric"
+          },
+          "negative_control": {
+            "downstream_metric": "replace-primary-metric",
+            "expected_if_mechanism_true": "Replace with the control prediction.",
+            "intervention": "Replace with a non-tautological negative control.",
+            "non_tautology_rationale": "Replace with why the control isolates the mechanism."
+          },
+          "observable_prediction": "Replace with the matched predicted observation.",
+          "outcome_routes": {
+            "implementation_failure": "no hypothesis belief change",
+            "infrastructure_failure": "no hypothesis belief change",
+            "protocol_invalid": "no hypothesis belief change",
+            "valid_inconclusive": "allow at most one decision-changing discriminator",
+            "valid_negative": "lower belief or retire",
+            "valid_positive_candidate": "survivor only; require matched confirmation and ablation"
+          },
+          "resource_ceiling": {
+            "compute_backend": "local_gpu",
+            "estimated_gpu_hours": 0.5,
+            "execution_route": "local",
+            "gpu_count": 1,
+            "smoke_minutes": 5,
+            "walltime_minutes": 30
+          },
+          "seed_policy": {
+            "max_random_seeds": 3,
+            "planned_seed_count": 1,
+            "retry_reuses_seed": true,
+            "seed": 1003
+          }
+        },
+        "sha256": "91a9b295d1000b0e59a95e5faa59af7dd96bc9df2280322ef0f133975c5d5e3d"
+      },
+      "quality_gauntlet": {
+        "checks": {
+          "anti_pattern_check": {
+            "hard_floor_triggered": false,
+            "rationale": "Replace synthetic rationale for anti_pattern_check.",
+            "verdict": "pass"
+          },
+          "falsification_structure_check": {
+            "hard_floor_triggered": false,
+            "rationale": "Replace synthetic rationale for falsification_structure_check.",
+            "verdict": "pass"
+          },
+          "gap_closure_reject_check": {
+            "hard_floor_triggered": false,
+            "rationale": "Replace synthetic rationale for gap_closure_reject_check.",
+            "verdict": "pass"
+          },
+          "paper_pointed_threat": {
+            "hard_floor_triggered": false,
+            "rationale": "Replace synthetic rationale for paper_pointed_threat.",
+            "verdict": "pass"
+          },
+          "recipe_application_check": {
+            "hard_floor_triggered": false,
+            "rationale": "Replace synthetic rationale for recipe_application_check.",
+            "verdict": "pass"
+          }
+        },
+        "repair": {
+          "count": 0
+        },
+        "revision_targets": [],
+        "verdict": "advance",
+        "verdict_layer": "soft_judgment"
+      },
+      "rapid_validation": {
+        "baseline_code": {
+          "comparison_label": "paper-report comparison not established",
+          "eval_entrypoint": "replace-eval-entrypoint",
+          "locked": true,
+          "resolved_path": "/replace/with/local/baseline/path",
+          "revision": "replace-with-immutable-revision",
+          "source_ref": "https://replace.invalid/baseline",
+          "train_entrypoint": "replace-train-entrypoint"
+        },
+        "claim_intent": "candidate_screening",
+        "dataset": {
+          "name": "replace-dataset",
+          "proxy_rationale": "Replace with the smallest protocol-aligned proxy rationale.",
+          "split": "replace-locked-split"
+        },
+        "decision_class": "falsify_core_mechanism",
+        "evaluation_command": "replace-with-evaluation-command",
+        "evidence_tier": "pilot_only",
+        "expected_decision_change": "Replace with the decision changed by this pilot.",
+        "metric_policy": {
+          "direction": "higher",
+          "locked": true,
+          "primary_metric": "replace-primary-metric"
+        },
+        "outcome_routes": {
+          "implementation_failure": "no hypothesis belief change",
+          "infrastructure_failure": "no hypothesis belief change",
+          "protocol_invalid": "no hypothesis belief change",
+          "valid_inconclusive": "allow at most one decision-changing discriminator",
+          "valid_negative": "lower belief or retire",
+          "valid_positive_candidate": "survivor only; require matched confirmation and ablation"
+        },
+        "resource_request": {
+          "compute_backend": "local_gpu",
+          "estimated_gpu_hours": 0.5,
+          "execution_route": "local",
+          "gpu_count": 1,
+          "smoke_minutes": 5,
+          "walltime_minutes": 30
+        },
+        "seed_policy": {
+          "max_random_seeds": 3,
+          "planned_seed_count": 1,
+          "retry_reuses_seed": true,
+          "seed": 1003
+        }
+      },
+      "research_question": "Replace with one falsifiable research question.",
+      "status": "candidate",
+      "title": "Replace synthetic candidate 03"
+    },
+    {
+      "collision_audit": {
+        "alias_terms": [
+          "replace-alias-term"
+        ],
+        "alias_window_months": 48,
+        "claim_limit": "No novelty certificate.",
+        "query_trace": [
+          {
+            "channel": "signature",
+            "provider": "replace-with-non-PaperNexus-provider",
+            "query": "replace signature query",
+            "result_refs": [
+              "replace-target-1"
+            ],
+            "searched_at": "replace-with-UTC-timestamp"
+          },
+          {
+            "channel": "alias",
+            "provider": "replace-with-non-PaperNexus-provider",
+            "query": "replace alias query",
+            "result_refs": [
+              "replace-near-1"
+            ],
+            "searched_at": "replace-with-UTC-timestamp"
+          }
+        ],
+        "search_limitations": "Synthetic template; repeat bounded live retrieval before use.",
+        "signature_terms": [
+          "replace-signature-term"
+        ],
+        "signature_window_months": 10,
+        "status": "no_threat_found"
+      },
+      "contribution_type": "ALGO",
+      "gap_closures": [
+        {
+          "expected_artifact": "Replace with the method artifact.",
+          "gap_ref": "replace-gap-additive",
+          "main_pattern": "reframe_as_solvable_object",
+          "recipe_application": "Replace with the concrete pattern recipe application.",
+          "role": "primary",
+          "structural_fit": "Replace with source-bound structural fit.",
+          "subpattern": "C00"
+        },
+        {
+          "expected_artifact": "Replace with the isolating ablation.",
+          "gap_ref": "replace-gap-subtractive",
+          "main_pattern": "assumption_audit_and_pivot",
+          "recipe_application": "Replace with the assumption relaxation procedure.",
+          "role": "secondary",
+          "structural_fit": "Replace with the shared-assumption fit.",
+          "subpattern": "C01"
+        }
+      ],
+      "id": "replace-candidate-04",
+      "implementability_audit": {
+        "enriched_steps": [
+          {
+            "build_procedure": "Replace with exact procedure.",
+            "id": "step-1",
+            "inputs": [
+              "replace-input"
+            ],
+            "outputs": [
+              "replace-output"
+            ],
+            "what_changes": "Replace with exact change."
+          },
+          {
+            "build_procedure": "Replace with exact procedure.",
+            "id": "step-2",
+            "inputs": [
+              "replace-input"
+            ],
+            "outputs": [
+              "replace-output"
+            ],
+            "what_changes": "Replace with exact change."
+          }
+        ],
+        "generation_context_id": "replace-generation-04",
+        "protected_commitments_present": false,
+        "reviewer_context_id": "replace-independent-review-04",
+        "reviewer_role": "skeptical_engineer",
+        "status": "passed",
+        "underspecified_points": [
+          {
+            "fill": "Replace with concrete fill.",
+            "hole": "Replace with identified hole.",
+            "load_bearing": true,
+            "severity": "filled",
+            "step_id": "step-2"
+          }
+        ]
+      },
+      "mechanism": {
+        "alternative_explanation": "Replace with the strongest alternative explanation.",
+        "falsifier": "Replace with an outcome that falsifies the mechanism.",
+        "intervention": "Replace with one intervention.",
+        "load_bearing_variable": "replace-load-bearing-variable",
+        "method_steps": [
+          {
+            "action": "Replace with the first build action.",
+            "id": "step-1"
+          },
+          {
+            "action": "Replace with the second build action.",
+            "id": "step-2"
+          }
+        ],
+        "one_variable_change": "Replace with one controlled variable change.",
+        "predicted_observation": "Replace with the matched predicted observation."
+      },
+      "negative_control": {
+        "downstream_metric": "replace-primary-metric",
+        "expected_if_mechanism_true": "Replace with the control prediction.",
+        "intervention": "Replace with a non-tautological negative control.",
+        "non_tautology_rationale": "Replace with why the control isolates the mechanism."
+      },
+      "protected_commitments": {
+        "payload": {
+          "baseline": {
+            "comparison_label": "paper-report comparison not established",
+            "revision": "replace-with-immutable-revision",
+            "source_ref": "https://replace.invalid/baseline"
+          },
+          "dataset": {
+            "name": "replace-dataset",
+            "proxy_rationale": "Replace with the smallest protocol-aligned proxy rationale.",
+            "split": "replace-locked-split"
+          },
+          "evidence_tier": "pilot_only",
+          "falsifier": "Replace with an outcome that falsifies the mechanism.",
+          "load_bearing_variable": "replace-load-bearing-variable",
+          "metric_policy": {
+            "direction": "higher",
+            "locked": true,
+            "primary_metric": "replace-primary-metric"
+          },
+          "negative_control": {
+            "downstream_metric": "replace-primary-metric",
+            "expected_if_mechanism_true": "Replace with the control prediction.",
+            "intervention": "Replace with a non-tautological negative control.",
+            "non_tautology_rationale": "Replace with why the control isolates the mechanism."
+          },
+          "observable_prediction": "Replace with the matched predicted observation.",
+          "outcome_routes": {
+            "implementation_failure": "no hypothesis belief change",
+            "infrastructure_failure": "no hypothesis belief change",
+            "protocol_invalid": "no hypothesis belief change",
+            "valid_inconclusive": "allow at most one decision-changing discriminator",
+            "valid_negative": "lower belief or retire",
+            "valid_positive_candidate": "survivor only; require matched confirmation and ablation"
+          },
+          "resource_ceiling": {
+            "compute_backend": "local_gpu",
+            "estimated_gpu_hours": 0.5,
+            "execution_route": "local",
+            "gpu_count": 1,
+            "smoke_minutes": 5,
+            "walltime_minutes": 30
+          },
+          "seed_policy": {
+            "max_random_seeds": 3,
+            "planned_seed_count": 1,
+            "retry_reuses_seed": true,
+            "seed": 1004
+          }
+        },
+        "sha256": "c420a76fea38951d16d4bcce92c67d8237406ccaf5baf1ec0249f4a2510ef994"
+      },
+      "quality_gauntlet": {
+        "checks": {
+          "anti_pattern_check": {
+            "hard_floor_triggered": false,
+            "rationale": "Replace synthetic rationale for anti_pattern_check.",
+            "verdict": "pass"
+          },
+          "falsification_structure_check": {
+            "hard_floor_triggered": false,
+            "rationale": "Replace synthetic rationale for falsification_structure_check.",
+            "verdict": "pass"
+          },
+          "gap_closure_reject_check": {
+            "hard_floor_triggered": false,
+            "rationale": "Replace synthetic rationale for gap_closure_reject_check.",
+            "verdict": "pass"
+          },
+          "paper_pointed_threat": {
+            "hard_floor_triggered": false,
+            "rationale": "Replace synthetic rationale for paper_pointed_threat.",
+            "verdict": "pass"
+          },
+          "recipe_application_check": {
+            "hard_floor_triggered": false,
+            "rationale": "Replace synthetic rationale for recipe_application_check.",
+            "verdict": "pass"
+          }
+        },
+        "repair": {
+          "count": 0
+        },
+        "revision_targets": [],
+        "verdict": "advance",
+        "verdict_layer": "soft_judgment"
+      },
+      "rapid_validation": {
+        "baseline_code": {
+          "comparison_label": "paper-report comparison not established",
+          "eval_entrypoint": "replace-eval-entrypoint",
+          "locked": true,
+          "resolved_path": "/replace/with/local/baseline/path",
+          "revision": "replace-with-immutable-revision",
+          "source_ref": "https://replace.invalid/baseline",
+          "train_entrypoint": "replace-train-entrypoint"
+        },
+        "claim_intent": "candidate_screening",
+        "dataset": {
+          "name": "replace-dataset",
+          "proxy_rationale": "Replace with the smallest protocol-aligned proxy rationale.",
+          "split": "replace-locked-split"
+        },
+        "decision_class": "falsify_core_mechanism",
+        "evaluation_command": "replace-with-evaluation-command",
+        "evidence_tier": "pilot_only",
+        "expected_decision_change": "Replace with the decision changed by this pilot.",
+        "metric_policy": {
+          "direction": "higher",
+          "locked": true,
+          "primary_metric": "replace-primary-metric"
+        },
+        "outcome_routes": {
+          "implementation_failure": "no hypothesis belief change",
+          "infrastructure_failure": "no hypothesis belief change",
+          "protocol_invalid": "no hypothesis belief change",
+          "valid_inconclusive": "allow at most one decision-changing discriminator",
+          "valid_negative": "lower belief or retire",
+          "valid_positive_candidate": "survivor only; require matched confirmation and ablation"
+        },
+        "resource_request": {
+          "compute_backend": "local_gpu",
+          "estimated_gpu_hours": 0.5,
+          "execution_route": "local",
+          "gpu_count": 1,
+          "smoke_minutes": 5,
+          "walltime_minutes": 30
+        },
+        "seed_policy": {
+          "max_random_seeds": 3,
+          "planned_seed_count": 1,
+          "retry_reuses_seed": true,
+          "seed": 1004
+        }
+      },
+      "research_question": "Replace with one falsifiable research question.",
+      "status": "candidate",
+      "title": "Replace synthetic candidate 04"
+    },
+    {
+      "collision_audit": {
+        "alias_terms": [
+          "replace-alias-term"
+        ],
+        "alias_window_months": 48,
+        "claim_limit": "No novelty certificate.",
+        "query_trace": [
+          {
+            "channel": "signature",
+            "provider": "replace-with-non-PaperNexus-provider",
+            "query": "replace signature query",
+            "result_refs": [
+              "replace-target-1"
+            ],
+            "searched_at": "replace-with-UTC-timestamp"
+          },
+          {
+            "channel": "alias",
+            "provider": "replace-with-non-PaperNexus-provider",
+            "query": "replace alias query",
+            "result_refs": [
+              "replace-near-1"
+            ],
+            "searched_at": "replace-with-UTC-timestamp"
+          }
+        ],
+        "search_limitations": "Synthetic template; repeat bounded live retrieval before use.",
+        "signature_terms": [
+          "replace-signature-term"
+        ],
+        "signature_window_months": 10,
+        "status": "no_threat_found"
+      },
+      "contribution_type": "ALGO",
+      "gap_closures": [
+        {
+          "expected_artifact": "Replace with the method artifact.",
+          "gap_ref": "replace-gap-additive",
+          "main_pattern": "reframe_as_solvable_object",
+          "recipe_application": "Replace with the concrete pattern recipe application.",
+          "role": "primary",
+          "structural_fit": "Replace with source-bound structural fit.",
+          "subpattern": "C00"
+        },
+        {
+          "expected_artifact": "Replace with the isolating ablation.",
+          "gap_ref": "replace-gap-subtractive",
+          "main_pattern": "assumption_audit_and_pivot",
+          "recipe_application": "Replace with the assumption relaxation procedure.",
+          "role": "secondary",
+          "structural_fit": "Replace with the shared-assumption fit.",
+          "subpattern": "C01"
+        }
+      ],
+      "id": "replace-candidate-05",
+      "implementability_audit": {
+        "enriched_steps": [
+          {
+            "build_procedure": "Replace with exact procedure.",
+            "id": "step-1",
+            "inputs": [
+              "replace-input"
+            ],
+            "outputs": [
+              "replace-output"
+            ],
+            "what_changes": "Replace with exact change."
+          },
+          {
+            "build_procedure": "Replace with exact procedure.",
+            "id": "step-2",
+            "inputs": [
+              "replace-input"
+            ],
+            "outputs": [
+              "replace-output"
+            ],
+            "what_changes": "Replace with exact change."
+          }
+        ],
+        "generation_context_id": "replace-generation-05",
+        "protected_commitments_present": false,
+        "reviewer_context_id": "replace-independent-review-05",
+        "reviewer_role": "skeptical_engineer",
+        "status": "passed",
+        "underspecified_points": [
+          {
+            "fill": "Replace with concrete fill.",
+            "hole": "Replace with identified hole.",
+            "load_bearing": true,
+            "severity": "filled",
+            "step_id": "step-2"
+          }
+        ]
+      },
+      "mechanism": {
+        "alternative_explanation": "Replace with the strongest alternative explanation.",
+        "falsifier": "Replace with an outcome that falsifies the mechanism.",
+        "intervention": "Replace with one intervention.",
+        "load_bearing_variable": "replace-load-bearing-variable",
+        "method_steps": [
+          {
+            "action": "Replace with the first build action.",
+            "id": "step-1"
+          },
+          {
+            "action": "Replace with the second build action.",
+            "id": "step-2"
+          }
+        ],
+        "one_variable_change": "Replace with one controlled variable change.",
+        "predicted_observation": "Replace with the matched predicted observation."
+      },
+      "negative_control": {
+        "downstream_metric": "replace-primary-metric",
+        "expected_if_mechanism_true": "Replace with the control prediction.",
+        "intervention": "Replace with a non-tautological negative control.",
+        "non_tautology_rationale": "Replace with why the control isolates the mechanism."
+      },
+      "protected_commitments": {
+        "payload": {
+          "baseline": {
+            "comparison_label": "paper-report comparison not established",
+            "revision": "replace-with-immutable-revision",
+            "source_ref": "https://replace.invalid/baseline"
+          },
+          "dataset": {
+            "name": "replace-dataset",
+            "proxy_rationale": "Replace with the smallest protocol-aligned proxy rationale.",
+            "split": "replace-locked-split"
+          },
+          "evidence_tier": "pilot_only",
+          "falsifier": "Replace with an outcome that falsifies the mechanism.",
+          "load_bearing_variable": "replace-load-bearing-variable",
+          "metric_policy": {
+            "direction": "higher",
+            "locked": true,
+            "primary_metric": "replace-primary-metric"
+          },
+          "negative_control": {
+            "downstream_metric": "replace-primary-metric",
+            "expected_if_mechanism_true": "Replace with the control prediction.",
+            "intervention": "Replace with a non-tautological negative control.",
+            "non_tautology_rationale": "Replace with why the control isolates the mechanism."
+          },
+          "observable_prediction": "Replace with the matched predicted observation.",
+          "outcome_routes": {
+            "implementation_failure": "no hypothesis belief change",
+            "infrastructure_failure": "no hypothesis belief change",
+            "protocol_invalid": "no hypothesis belief change",
+            "valid_inconclusive": "allow at most one decision-changing discriminator",
+            "valid_negative": "lower belief or retire",
+            "valid_positive_candidate": "survivor only; require matched confirmation and ablation"
+          },
+          "resource_ceiling": {
+            "compute_backend": "local_gpu",
+            "estimated_gpu_hours": 0.5,
+            "execution_route": "local",
+            "gpu_count": 1,
+            "smoke_minutes": 5,
+            "walltime_minutes": 30
+          },
+          "seed_policy": {
+            "max_random_seeds": 3,
+            "planned_seed_count": 1,
+            "retry_reuses_seed": true,
+            "seed": 1005
+          }
+        },
+        "sha256": "6d58c424f19a5b8f74d747daf7b1d654872597adf4f9f2e1118509ab304e6101"
+      },
+      "quality_gauntlet": {
+        "checks": {
+          "anti_pattern_check": {
+            "hard_floor_triggered": false,
+            "rationale": "Replace synthetic rationale for anti_pattern_check.",
+            "verdict": "pass"
+          },
+          "falsification_structure_check": {
+            "hard_floor_triggered": false,
+            "rationale": "Replace synthetic rationale for falsification_structure_check.",
+            "verdict": "pass"
+          },
+          "gap_closure_reject_check": {
+            "hard_floor_triggered": false,
+            "rationale": "Replace synthetic rationale for gap_closure_reject_check.",
+            "verdict": "pass"
+          },
+          "paper_pointed_threat": {
+            "hard_floor_triggered": false,
+            "rationale": "Replace synthetic rationale for paper_pointed_threat.",
+            "verdict": "pass"
+          },
+          "recipe_application_check": {
+            "hard_floor_triggered": false,
+            "rationale": "Replace synthetic rationale for recipe_application_check.",
+            "verdict": "pass"
+          }
+        },
+        "repair": {
+          "count": 0
+        },
+        "revision_targets": [],
+        "verdict": "advance",
+        "verdict_layer": "soft_judgment"
+      },
+      "rapid_validation": {
+        "baseline_code": {
+          "comparison_label": "paper-report comparison not established",
+          "eval_entrypoint": "replace-eval-entrypoint",
+          "locked": true,
+          "resolved_path": "/replace/with/local/baseline/path",
+          "revision": "replace-with-immutable-revision",
+          "source_ref": "https://replace.invalid/baseline",
+          "train_entrypoint": "replace-train-entrypoint"
+        },
+        "claim_intent": "candidate_screening",
+        "dataset": {
+          "name": "replace-dataset",
+          "proxy_rationale": "Replace with the smallest protocol-aligned proxy rationale.",
+          "split": "replace-locked-split"
+        },
+        "decision_class": "falsify_core_mechanism",
+        "evaluation_command": "replace-with-evaluation-command",
+        "evidence_tier": "pilot_only",
+        "expected_decision_change": "Replace with the decision changed by this pilot.",
+        "metric_policy": {
+          "direction": "higher",
+          "locked": true,
+          "primary_metric": "replace-primary-metric"
+        },
+        "outcome_routes": {
+          "implementation_failure": "no hypothesis belief change",
+          "infrastructure_failure": "no hypothesis belief change",
+          "protocol_invalid": "no hypothesis belief change",
+          "valid_inconclusive": "allow at most one decision-changing discriminator",
+          "valid_negative": "lower belief or retire",
+          "valid_positive_candidate": "survivor only; require matched confirmation and ablation"
+        },
+        "resource_request": {
+          "compute_backend": "local_gpu",
+          "estimated_gpu_hours": 0.5,
+          "execution_route": "local",
+          "gpu_count": 1,
+          "smoke_minutes": 5,
+          "walltime_minutes": 30
+        },
+        "seed_policy": {
+          "max_random_seeds": 3,
+          "planned_seed_count": 1,
+          "retry_reuses_seed": true,
+          "seed": 1005
+        }
+      },
+      "research_question": "Replace with one falsifiable research question.",
+      "status": "candidate",
+      "title": "Replace synthetic candidate 05"
+    },
+    {
+      "collision_audit": {
+        "alias_terms": [
+          "replace-alias-term"
+        ],
+        "alias_window_months": 48,
+        "claim_limit": "No novelty certificate.",
+        "query_trace": [
+          {
+            "channel": "signature",
+            "provider": "replace-with-non-PaperNexus-provider",
+            "query": "replace signature query",
+            "result_refs": [
+              "replace-target-1"
+            ],
+            "searched_at": "replace-with-UTC-timestamp"
+          },
+          {
+            "channel": "alias",
+            "provider": "replace-with-non-PaperNexus-provider",
+            "query": "replace alias query",
+            "result_refs": [
+              "replace-near-1"
+            ],
+            "searched_at": "replace-with-UTC-timestamp"
+          }
+        ],
+        "search_limitations": "Synthetic template; repeat bounded live retrieval before use.",
+        "signature_terms": [
+          "replace-signature-term"
+        ],
+        "signature_window_months": 10,
+        "status": "no_threat_found"
+      },
+      "contribution_type": "ALGO",
+      "gap_closures": [
+        {
+          "expected_artifact": "Replace with the method artifact.",
+          "gap_ref": "replace-gap-additive",
+          "main_pattern": "reframe_as_solvable_object",
+          "recipe_application": "Replace with the concrete pattern recipe application.",
+          "role": "primary",
+          "structural_fit": "Replace with source-bound structural fit.",
+          "subpattern": "C00"
+        },
+        {
+          "expected_artifact": "Replace with the isolating ablation.",
+          "gap_ref": "replace-gap-subtractive",
+          "main_pattern": "assumption_audit_and_pivot",
+          "recipe_application": "Replace with the assumption relaxation procedure.",
+          "role": "secondary",
+          "structural_fit": "Replace with the shared-assumption fit.",
+          "subpattern": "C01"
+        }
+      ],
+      "id": "replace-candidate-06",
+      "implementability_audit": {
+        "enriched_steps": [
+          {
+            "build_procedure": "Replace with exact procedure.",
+            "id": "step-1",
+            "inputs": [
+              "replace-input"
+            ],
+            "outputs": [
+              "replace-output"
+            ],
+            "what_changes": "Replace with exact change."
+          },
+          {
+            "build_procedure": "Replace with exact procedure.",
+            "id": "step-2",
+            "inputs": [
+              "replace-input"
+            ],
+            "outputs": [
+              "replace-output"
+            ],
+            "what_changes": "Replace with exact change."
+          }
+        ],
+        "generation_context_id": "replace-generation-06",
+        "protected_commitments_present": false,
+        "reviewer_context_id": "replace-independent-review-06",
+        "reviewer_role": "skeptical_engineer",
+        "status": "passed",
+        "underspecified_points": [
+          {
+            "fill": "Replace with concrete fill.",
+            "hole": "Replace with identified hole.",
+            "load_bearing": true,
+            "severity": "filled",
+            "step_id": "step-2"
+          }
+        ]
+      },
+      "mechanism": {
+        "alternative_explanation": "Replace with the strongest alternative explanation.",
+        "falsifier": "Replace with an outcome that falsifies the mechanism.",
+        "intervention": "Replace with one intervention.",
+        "load_bearing_variable": "replace-load-bearing-variable",
+        "method_steps": [
+          {
+            "action": "Replace with the first build action.",
+            "id": "step-1"
+          },
+          {
+            "action": "Replace with the second build action.",
+            "id": "step-2"
+          }
+        ],
+        "one_variable_change": "Replace with one controlled variable change.",
+        "predicted_observation": "Replace with the matched predicted observation."
+      },
+      "negative_control": {
+        "downstream_metric": "replace-primary-metric",
+        "expected_if_mechanism_true": "Replace with the control prediction.",
+        "intervention": "Replace with a non-tautological negative control.",
+        "non_tautology_rationale": "Replace with why the control isolates the mechanism."
+      },
+      "protected_commitments": {
+        "payload": {
+          "baseline": {
+            "comparison_label": "paper-report comparison not established",
+            "revision": "replace-with-immutable-revision",
+            "source_ref": "https://replace.invalid/baseline"
+          },
+          "dataset": {
+            "name": "replace-dataset",
+            "proxy_rationale": "Replace with the smallest protocol-aligned proxy rationale.",
+            "split": "replace-locked-split"
+          },
+          "evidence_tier": "pilot_only",
+          "falsifier": "Replace with an outcome that falsifies the mechanism.",
+          "load_bearing_variable": "replace-load-bearing-variable",
+          "metric_policy": {
+            "direction": "higher",
+            "locked": true,
+            "primary_metric": "replace-primary-metric"
+          },
+          "negative_control": {
+            "downstream_metric": "replace-primary-metric",
+            "expected_if_mechanism_true": "Replace with the control prediction.",
+            "intervention": "Replace with a non-tautological negative control.",
+            "non_tautology_rationale": "Replace with why the control isolates the mechanism."
+          },
+          "observable_prediction": "Replace with the matched predicted observation.",
+          "outcome_routes": {
+            "implementation_failure": "no hypothesis belief change",
+            "infrastructure_failure": "no hypothesis belief change",
+            "protocol_invalid": "no hypothesis belief change",
+            "valid_inconclusive": "allow at most one decision-changing discriminator",
+            "valid_negative": "lower belief or retire",
+            "valid_positive_candidate": "survivor only; require matched confirmation and ablation"
+          },
+          "resource_ceiling": {
+            "compute_backend": "local_gpu",
+            "estimated_gpu_hours": 0.5,
+            "execution_route": "local",
+            "gpu_count": 1,
+            "smoke_minutes": 5,
+            "walltime_minutes": 30
+          },
+          "seed_policy": {
+            "max_random_seeds": 3,
+            "planned_seed_count": 1,
+            "retry_reuses_seed": true,
+            "seed": 1006
+          }
+        },
+        "sha256": "8d87a7fc8b466eb0a08c5ca1bc5062e6f6aaf0f7e32240c00602a1616e68d9c6"
+      },
+      "quality_gauntlet": {
+        "checks": {
+          "anti_pattern_check": {
+            "hard_floor_triggered": false,
+            "rationale": "Replace synthetic rationale for anti_pattern_check.",
+            "verdict": "pass"
+          },
+          "falsification_structure_check": {
+            "hard_floor_triggered": false,
+            "rationale": "Replace synthetic rationale for falsification_structure_check.",
+            "verdict": "pass"
+          },
+          "gap_closure_reject_check": {
+            "hard_floor_triggered": false,
+            "rationale": "Replace synthetic rationale for gap_closure_reject_check.",
+            "verdict": "pass"
+          },
+          "paper_pointed_threat": {
+            "hard_floor_triggered": false,
+            "rationale": "Replace synthetic rationale for paper_pointed_threat.",
+            "verdict": "pass"
+          },
+          "recipe_application_check": {
+            "hard_floor_triggered": false,
+            "rationale": "Replace synthetic rationale for recipe_application_check.",
+            "verdict": "pass"
+          }
+        },
+        "repair": {
+          "count": 0
+        },
+        "revision_targets": [],
+        "verdict": "advance",
+        "verdict_layer": "soft_judgment"
+      },
+      "rapid_validation": {
+        "baseline_code": {
+          "comparison_label": "paper-report comparison not established",
+          "eval_entrypoint": "replace-eval-entrypoint",
+          "locked": true,
+          "resolved_path": "/replace/with/local/baseline/path",
+          "revision": "replace-with-immutable-revision",
+          "source_ref": "https://replace.invalid/baseline",
+          "train_entrypoint": "replace-train-entrypoint"
+        },
+        "claim_intent": "candidate_screening",
+        "dataset": {
+          "name": "replace-dataset",
+          "proxy_rationale": "Replace with the smallest protocol-aligned proxy rationale.",
+          "split": "replace-locked-split"
+        },
+        "decision_class": "falsify_core_mechanism",
+        "evaluation_command": "replace-with-evaluation-command",
+        "evidence_tier": "pilot_only",
+        "expected_decision_change": "Replace with the decision changed by this pilot.",
+        "metric_policy": {
+          "direction": "higher",
+          "locked": true,
+          "primary_metric": "replace-primary-metric"
+        },
+        "outcome_routes": {
+          "implementation_failure": "no hypothesis belief change",
+          "infrastructure_failure": "no hypothesis belief change",
+          "protocol_invalid": "no hypothesis belief change",
+          "valid_inconclusive": "allow at most one decision-changing discriminator",
+          "valid_negative": "lower belief or retire",
+          "valid_positive_candidate": "survivor only; require matched confirmation and ablation"
+        },
+        "resource_request": {
+          "compute_backend": "local_gpu",
+          "estimated_gpu_hours": 0.5,
+          "execution_route": "local",
+          "gpu_count": 1,
+          "smoke_minutes": 5,
+          "walltime_minutes": 30
+        },
+        "seed_policy": {
+          "max_random_seeds": 3,
+          "planned_seed_count": 1,
+          "retry_reuses_seed": true,
+          "seed": 1006
+        }
+      },
+      "research_question": "Replace with one falsifiable research question.",
+      "status": "candidate",
+      "title": "Replace synthetic candidate 06"
+    },
+    {
+      "collision_audit": {
+        "alias_terms": [
+          "replace-alias-term"
+        ],
+        "alias_window_months": 48,
+        "claim_limit": "No novelty certificate.",
+        "query_trace": [
+          {
+            "channel": "signature",
+            "provider": "replace-with-non-PaperNexus-provider",
+            "query": "replace signature query",
+            "result_refs": [
+              "replace-target-1"
+            ],
+            "searched_at": "replace-with-UTC-timestamp"
+          },
+          {
+            "channel": "alias",
+            "provider": "replace-with-non-PaperNexus-provider",
+            "query": "replace alias query",
+            "result_refs": [
+              "replace-near-1"
+            ],
+            "searched_at": "replace-with-UTC-timestamp"
+          }
+        ],
+        "search_limitations": "Synthetic template; repeat bounded live retrieval before use.",
+        "signature_terms": [
+          "replace-signature-term"
+        ],
+        "signature_window_months": 10,
+        "status": "no_threat_found"
+      },
+      "contribution_type": "ALGO",
+      "gap_closures": [
+        {
+          "expected_artifact": "Replace with the method artifact.",
+          "gap_ref": "replace-gap-additive",
+          "main_pattern": "reframe_as_solvable_object",
+          "recipe_application": "Replace with the concrete pattern recipe application.",
+          "role": "primary",
+          "structural_fit": "Replace with source-bound structural fit.",
+          "subpattern": "C00"
+        },
+        {
+          "expected_artifact": "Replace with the isolating ablation.",
+          "gap_ref": "replace-gap-subtractive",
+          "main_pattern": "assumption_audit_and_pivot",
+          "recipe_application": "Replace with the assumption relaxation procedure.",
+          "role": "secondary",
+          "structural_fit": "Replace with the shared-assumption fit.",
+          "subpattern": "C01"
+        }
+      ],
+      "id": "replace-candidate-07",
+      "implementability_audit": {
+        "enriched_steps": [
+          {
+            "build_procedure": "Replace with exact procedure.",
+            "id": "step-1",
+            "inputs": [
+              "replace-input"
+            ],
+            "outputs": [
+              "replace-output"
+            ],
+            "what_changes": "Replace with exact change."
+          },
+          {
+            "build_procedure": "Replace with exact procedure.",
+            "id": "step-2",
+            "inputs": [
+              "replace-input"
+            ],
+            "outputs": [
+              "replace-output"
+            ],
+            "what_changes": "Replace with exact change."
+          }
+        ],
+        "generation_context_id": "replace-generation-07",
+        "protected_commitments_present": false,
+        "reviewer_context_id": "replace-independent-review-07",
+        "reviewer_role": "skeptical_engineer",
+        "status": "passed",
+        "underspecified_points": [
+          {
+            "fill": "Replace with concrete fill.",
+            "hole": "Replace with identified hole.",
+            "load_bearing": true,
+            "severity": "filled",
+            "step_id": "step-2"
+          }
+        ]
+      },
+      "mechanism": {
+        "alternative_explanation": "Replace with the strongest alternative explanation.",
+        "falsifier": "Replace with an outcome that falsifies the mechanism.",
+        "intervention": "Replace with one intervention.",
+        "load_bearing_variable": "replace-load-bearing-variable",
+        "method_steps": [
+          {
+            "action": "Replace with the first build action.",
+            "id": "step-1"
+          },
+          {
+            "action": "Replace with the second build action.",
+            "id": "step-2"
+          }
+        ],
+        "one_variable_change": "Replace with one controlled variable change.",
+        "predicted_observation": "Replace with the matched predicted observation."
+      },
+      "negative_control": {
+        "downstream_metric": "replace-primary-metric",
+        "expected_if_mechanism_true": "Replace with the control prediction.",
+        "intervention": "Replace with a non-tautological negative control.",
+        "non_tautology_rationale": "Replace with why the control isolates the mechanism."
+      },
+      "protected_commitments": {
+        "payload": {
+          "baseline": {
+            "comparison_label": "paper-report comparison not established",
+            "revision": "replace-with-immutable-revision",
+            "source_ref": "https://replace.invalid/baseline"
+          },
+          "dataset": {
+            "name": "replace-dataset",
+            "proxy_rationale": "Replace with the smallest protocol-aligned proxy rationale.",
+            "split": "replace-locked-split"
+          },
+          "evidence_tier": "pilot_only",
+          "falsifier": "Replace with an outcome that falsifies the mechanism.",
+          "load_bearing_variable": "replace-load-bearing-variable",
+          "metric_policy": {
+            "direction": "higher",
+            "locked": true,
+            "primary_metric": "replace-primary-metric"
+          },
+          "negative_control": {
+            "downstream_metric": "replace-primary-metric",
+            "expected_if_mechanism_true": "Replace with the control prediction.",
+            "intervention": "Replace with a non-tautological negative control.",
+            "non_tautology_rationale": "Replace with why the control isolates the mechanism."
+          },
+          "observable_prediction": "Replace with the matched predicted observation.",
+          "outcome_routes": {
+            "implementation_failure": "no hypothesis belief change",
+            "infrastructure_failure": "no hypothesis belief change",
+            "protocol_invalid": "no hypothesis belief change",
+            "valid_inconclusive": "allow at most one decision-changing discriminator",
+            "valid_negative": "lower belief or retire",
+            "valid_positive_candidate": "survivor only; require matched confirmation and ablation"
+          },
+          "resource_ceiling": {
+            "compute_backend": "local_gpu",
+            "estimated_gpu_hours": 0.5,
+            "execution_route": "local",
+            "gpu_count": 1,
+            "smoke_minutes": 5,
+            "walltime_minutes": 30
+          },
+          "seed_policy": {
+            "max_random_seeds": 3,
+            "planned_seed_count": 1,
+            "retry_reuses_seed": true,
+            "seed": 1007
+          }
+        },
+        "sha256": "c39142cdaa8b7321e26383c4d02468b20bcedb8949500df456365bfec65e2514"
+      },
+      "quality_gauntlet": {
+        "checks": {
+          "anti_pattern_check": {
+            "hard_floor_triggered": false,
+            "rationale": "Replace synthetic rationale for anti_pattern_check.",
+            "verdict": "pass"
+          },
+          "falsification_structure_check": {
+            "hard_floor_triggered": false,
+            "rationale": "Replace synthetic rationale for falsification_structure_check.",
+            "verdict": "pass"
+          },
+          "gap_closure_reject_check": {
+            "hard_floor_triggered": false,
+            "rationale": "Replace synthetic rationale for gap_closure_reject_check.",
+            "verdict": "pass"
+          },
+          "paper_pointed_threat": {
+            "hard_floor_triggered": false,
+            "rationale": "Replace synthetic rationale for paper_pointed_threat.",
+            "verdict": "pass"
+          },
+          "recipe_application_check": {
+            "hard_floor_triggered": false,
+            "rationale": "Replace synthetic rationale for recipe_application_check.",
+            "verdict": "pass"
+          }
+        },
+        "repair": {
+          "count": 0
+        },
+        "revision_targets": [],
+        "verdict": "advance",
+        "verdict_layer": "soft_judgment"
+      },
+      "rapid_validation": {
+        "baseline_code": {
+          "comparison_label": "paper-report comparison not established",
+          "eval_entrypoint": "replace-eval-entrypoint",
+          "locked": true,
+          "resolved_path": "/replace/with/local/baseline/path",
+          "revision": "replace-with-immutable-revision",
+          "source_ref": "https://replace.invalid/baseline",
+          "train_entrypoint": "replace-train-entrypoint"
+        },
+        "claim_intent": "candidate_screening",
+        "dataset": {
+          "name": "replace-dataset",
+          "proxy_rationale": "Replace with the smallest protocol-aligned proxy rationale.",
+          "split": "replace-locked-split"
+        },
+        "decision_class": "falsify_core_mechanism",
+        "evaluation_command": "replace-with-evaluation-command",
+        "evidence_tier": "pilot_only",
+        "expected_decision_change": "Replace with the decision changed by this pilot.",
+        "metric_policy": {
+          "direction": "higher",
+          "locked": true,
+          "primary_metric": "replace-primary-metric"
+        },
+        "outcome_routes": {
+          "implementation_failure": "no hypothesis belief change",
+          "infrastructure_failure": "no hypothesis belief change",
+          "protocol_invalid": "no hypothesis belief change",
+          "valid_inconclusive": "allow at most one decision-changing discriminator",
+          "valid_negative": "lower belief or retire",
+          "valid_positive_candidate": "survivor only; require matched confirmation and ablation"
+        },
+        "resource_request": {
+          "compute_backend": "local_gpu",
+          "estimated_gpu_hours": 0.5,
+          "execution_route": "local",
+          "gpu_count": 1,
+          "smoke_minutes": 5,
+          "walltime_minutes": 30
+        },
+        "seed_policy": {
+          "max_random_seeds": 3,
+          "planned_seed_count": 1,
+          "retry_reuses_seed": true,
+          "seed": 1007
+        }
+      },
+      "research_question": "Replace with one falsifiable research question.",
+      "status": "candidate",
+      "title": "Replace synthetic candidate 07"
+    },
+    {
+      "collision_audit": {
+        "alias_terms": [
+          "replace-alias-term"
+        ],
+        "alias_window_months": 48,
+        "claim_limit": "No novelty certificate.",
+        "query_trace": [
+          {
+            "channel": "signature",
+            "provider": "replace-with-non-PaperNexus-provider",
+            "query": "replace signature query",
+            "result_refs": [
+              "replace-target-1"
+            ],
+            "searched_at": "replace-with-UTC-timestamp"
+          },
+          {
+            "channel": "alias",
+            "provider": "replace-with-non-PaperNexus-provider",
+            "query": "replace alias query",
+            "result_refs": [
+              "replace-near-1"
+            ],
+            "searched_at": "replace-with-UTC-timestamp"
+          }
+        ],
+        "search_limitations": "Synthetic template; repeat bounded live retrieval before use.",
+        "signature_terms": [
+          "replace-signature-term"
+        ],
+        "signature_window_months": 10,
+        "status": "no_threat_found"
+      },
+      "contribution_type": "ALGO",
+      "gap_closures": [
+        {
+          "expected_artifact": "Replace with the method artifact.",
+          "gap_ref": "replace-gap-additive",
+          "main_pattern": "reframe_as_solvable_object",
+          "recipe_application": "Replace with the concrete pattern recipe application.",
+          "role": "primary",
+          "structural_fit": "Replace with source-bound structural fit.",
+          "subpattern": "C00"
+        },
+        {
+          "expected_artifact": "Replace with the isolating ablation.",
+          "gap_ref": "replace-gap-subtractive",
+          "main_pattern": "assumption_audit_and_pivot",
+          "recipe_application": "Replace with the assumption relaxation procedure.",
+          "role": "secondary",
+          "structural_fit": "Replace with the shared-assumption fit.",
+          "subpattern": "C01"
+        }
+      ],
+      "id": "replace-candidate-08",
+      "implementability_audit": {
+        "enriched_steps": [
+          {
+            "build_procedure": "Replace with exact procedure.",
+            "id": "step-1",
+            "inputs": [
+              "replace-input"
+            ],
+            "outputs": [
+              "replace-output"
+            ],
+            "what_changes": "Replace with exact change."
+          },
+          {
+            "build_procedure": "Replace with exact procedure.",
+            "id": "step-2",
+            "inputs": [
+              "replace-input"
+            ],
+            "outputs": [
+              "replace-output"
+            ],
+            "what_changes": "Replace with exact change."
+          }
+        ],
+        "generation_context_id": "replace-generation-08",
+        "protected_commitments_present": false,
+        "reviewer_context_id": "replace-independent-review-08",
+        "reviewer_role": "skeptical_engineer",
+        "status": "passed",
+        "underspecified_points": [
+          {
+            "fill": "Replace with concrete fill.",
+            "hole": "Replace with identified hole.",
+            "load_bearing": true,
+            "severity": "filled",
+            "step_id": "step-2"
+          }
+        ]
+      },
+      "mechanism": {
+        "alternative_explanation": "Replace with the strongest alternative explanation.",
+        "falsifier": "Replace with an outcome that falsifies the mechanism.",
+        "intervention": "Replace with one intervention.",
+        "load_bearing_variable": "replace-load-bearing-variable",
+        "method_steps": [
+          {
+            "action": "Replace with the first build action.",
+            "id": "step-1"
+          },
+          {
+            "action": "Replace with the second build action.",
+            "id": "step-2"
+          }
+        ],
+        "one_variable_change": "Replace with one controlled variable change.",
+        "predicted_observation": "Replace with the matched predicted observation."
+      },
+      "negative_control": {
+        "downstream_metric": "replace-primary-metric",
+        "expected_if_mechanism_true": "Replace with the control prediction.",
+        "intervention": "Replace with a non-tautological negative control.",
+        "non_tautology_rationale": "Replace with why the control isolates the mechanism."
+      },
+      "protected_commitments": {
+        "payload": {
+          "baseline": {
+            "comparison_label": "paper-report comparison not established",
+            "revision": "replace-with-immutable-revision",
+            "source_ref": "https://replace.invalid/baseline"
+          },
+          "dataset": {
+            "name": "replace-dataset",
+            "proxy_rationale": "Replace with the smallest protocol-aligned proxy rationale.",
+            "split": "replace-locked-split"
+          },
+          "evidence_tier": "pilot_only",
+          "falsifier": "Replace with an outcome that falsifies the mechanism.",
+          "load_bearing_variable": "replace-load-bearing-variable",
+          "metric_policy": {
+            "direction": "higher",
+            "locked": true,
+            "primary_metric": "replace-primary-metric"
+          },
+          "negative_control": {
+            "downstream_metric": "replace-primary-metric",
+            "expected_if_mechanism_true": "Replace with the control prediction.",
+            "intervention": "Replace with a non-tautological negative control.",
+            "non_tautology_rationale": "Replace with why the control isolates the mechanism."
+          },
+          "observable_prediction": "Replace with the matched predicted observation.",
+          "outcome_routes": {
+            "implementation_failure": "no hypothesis belief change",
+            "infrastructure_failure": "no hypothesis belief change",
+            "protocol_invalid": "no hypothesis belief change",
+            "valid_inconclusive": "allow at most one decision-changing discriminator",
+            "valid_negative": "lower belief or retire",
+            "valid_positive_candidate": "survivor only; require matched confirmation and ablation"
+          },
+          "resource_ceiling": {
+            "compute_backend": "local_gpu",
+            "estimated_gpu_hours": 0.5,
+            "execution_route": "local",
+            "gpu_count": 1,
+            "smoke_minutes": 5,
+            "walltime_minutes": 30
+          },
+          "seed_policy": {
+            "max_random_seeds": 3,
+            "planned_seed_count": 1,
+            "retry_reuses_seed": true,
+            "seed": 1008
+          }
+        },
+        "sha256": "955164595aa6a839f064a101ef9970c18957c6b8a71a1008d004c5ae8f220005"
+      },
+      "quality_gauntlet": {
+        "checks": {
+          "anti_pattern_check": {
+            "hard_floor_triggered": false,
+            "rationale": "Replace synthetic rationale for anti_pattern_check.",
+            "verdict": "pass"
+          },
+          "falsification_structure_check": {
+            "hard_floor_triggered": false,
+            "rationale": "Replace synthetic rationale for falsification_structure_check.",
+            "verdict": "pass"
+          },
+          "gap_closure_reject_check": {
+            "hard_floor_triggered": false,
+            "rationale": "Replace synthetic rationale for gap_closure_reject_check.",
+            "verdict": "pass"
+          },
+          "paper_pointed_threat": {
+            "hard_floor_triggered": false,
+            "rationale": "Replace synthetic rationale for paper_pointed_threat.",
+            "verdict": "pass"
+          },
+          "recipe_application_check": {
+            "hard_floor_triggered": false,
+            "rationale": "Replace synthetic rationale for recipe_application_check.",
+            "verdict": "pass"
+          }
+        },
+        "repair": {
+          "count": 0
+        },
+        "revision_targets": [],
+        "verdict": "advance",
+        "verdict_layer": "soft_judgment"
+      },
+      "rapid_validation": {
+        "baseline_code": {
+          "comparison_label": "paper-report comparison not established",
+          "eval_entrypoint": "replace-eval-entrypoint",
+          "locked": true,
+          "resolved_path": "/replace/with/local/baseline/path",
+          "revision": "replace-with-immutable-revision",
+          "source_ref": "https://replace.invalid/baseline",
+          "train_entrypoint": "replace-train-entrypoint"
+        },
+        "claim_intent": "candidate_screening",
+        "dataset": {
+          "name": "replace-dataset",
+          "proxy_rationale": "Replace with the smallest protocol-aligned proxy rationale.",
+          "split": "replace-locked-split"
+        },
+        "decision_class": "falsify_core_mechanism",
+        "evaluation_command": "replace-with-evaluation-command",
+        "evidence_tier": "pilot_only",
+        "expected_decision_change": "Replace with the decision changed by this pilot.",
+        "metric_policy": {
+          "direction": "higher",
+          "locked": true,
+          "primary_metric": "replace-primary-metric"
+        },
+        "outcome_routes": {
+          "implementation_failure": "no hypothesis belief change",
+          "infrastructure_failure": "no hypothesis belief change",
+          "protocol_invalid": "no hypothesis belief change",
+          "valid_inconclusive": "allow at most one decision-changing discriminator",
+          "valid_negative": "lower belief or retire",
+          "valid_positive_candidate": "survivor only; require matched confirmation and ablation"
+        },
+        "resource_request": {
+          "compute_backend": "local_gpu",
+          "estimated_gpu_hours": 0.5,
+          "execution_route": "local",
+          "gpu_count": 1,
+          "smoke_minutes": 5,
+          "walltime_minutes": 30
+        },
+        "seed_policy": {
+          "max_random_seeds": 3,
+          "planned_seed_count": 1,
+          "retry_reuses_seed": true,
+          "seed": 1008
+        }
+      },
+      "research_question": "Replace with one falsifiable research question.",
+      "status": "candidate",
+      "title": "Replace synthetic candidate 08"
+    }
+  ],
+  "claim_limits": [
+    "All rapid runs are pilot_only; paper-report comparison not established."
+  ],
+  "constraints": {
+    "candidate_count_max": 12,
+    "candidate_count_min": 8,
+    "max_admitted_tracks": 4,
+    "max_candidate_gpu_hours": 1,
+    "max_random_seeds": 3,
+    "quick_campaign_gpu_hours": 4,
+    "shortlist_max": 5,
+    "shortlist_min": 3
+  },
+  "deck_aggregate_sha256": "1e4057c6fe2b1eb8a3b630adad3ffd96d56039ce085e82d80b8c120e9434ebb2",
+  "direction": "replace-with-research-direction",
+  "evidence_readiness": "not_ready",
+  "evidence_records": [
+    {
+      "citable": true,
+      "evidence_level": "method_section",
+      "excerpt": "SYNTHETIC AUTHORING PLACEHOLDER for replace-target-1; replace from a verified source.",
+      "excerpt_sha256": "0ab566366e79a57da9468e3fa292b5990181d71cd9b83370786e5de9f10c30a7",
+      "full_text_status": "method_section_acquired",
+      "id": "replace-target-1",
+      "lane": "target_domain",
+      "locator": "replace-with-exact-method-locator",
+      "provider": "replace-with-non-PaperNexus-provider",
+      "roles": [
+        "bottleneck_support",
+        "closest_anchor"
+      ],
+      "source_ref": "https://replace.invalid/replace-target-1",
+      "source_type": "paper",
+      "source_verification_limit": "Synthetic template only; replace and independently verify.",
+      "source_verification_status": "verified_against_source",
+      "title": "Replace synthetic target_domain evidence"
+    },
+    {
+      "citable": true,
+      "evidence_level": "method_section",
+      "excerpt": "SYNTHETIC AUTHORING PLACEHOLDER for replace-target-2; replace from a verified source.",
+      "excerpt_sha256": "d0979e1e08f2daa9347b9aea0c69e73f830e8271300051cbe341f8a3c27ef556",
+      "full_text_status": "method_section_acquired",
+      "id": "replace-target-2",
+      "lane": "target_domain",
+      "locator": "replace-with-exact-method-locator",
+      "provider": "replace-with-non-PaperNexus-provider",
+      "roles": [
+        "bottleneck_support",
+        "negative_evidence"
+      ],
+      "source_ref": "https://replace.invalid/replace-target-2",
+      "source_type": "paper",
+      "source_verification_limit": "Synthetic template only; replace and independently verify.",
+      "source_verification_status": "verified_against_source",
+      "title": "Replace synthetic target_domain evidence"
+    },
+    {
+      "citable": true,
+      "evidence_level": "method_section",
+      "excerpt": "SYNTHETIC AUTHORING PLACEHOLDER for replace-near-1; replace from a verified source.",
+      "excerpt_sha256": "de06ef10c8b1505857573107ff927cdb08ca50e95a6c8d46b6fcf9ddb8aea51e",
+      "full_text_status": "method_section_acquired",
+      "id": "replace-near-1",
+      "lane": "near_neighbor",
+      "locator": "replace-with-exact-method-locator",
+      "provider": "replace-with-non-PaperNexus-provider",
+      "roles": [
+        "mechanism",
+        "transfer_bridge"
+      ],
+      "source_ref": "https://replace.invalid/replace-near-1",
+      "source_type": "paper",
+      "source_verification_limit": "Synthetic template only; replace and independently verify.",
+      "source_verification_status": "verified_against_source",
+      "title": "Replace synthetic near_neighbor evidence"
+    },
+    {
+      "citable": true,
+      "evidence_level": "method_section",
+      "excerpt": "SYNTHETIC AUTHORING PLACEHOLDER for replace-far-1; replace from a verified source.",
+      "excerpt_sha256": "c5a8dd399c6deffbede4d0cb87f0a2b5d0a5e274650225d17942abe6f12419ef",
+      "full_text_status": "method_section_acquired",
+      "id": "replace-far-1",
+      "lane": "far_neighbor",
+      "locator": "replace-with-exact-method-locator",
+      "provider": "replace-with-non-PaperNexus-provider",
+      "roles": [
+        "mechanism",
+        "transfer_bridge"
+      ],
+      "source_ref": "https://replace.invalid/replace-far-1",
+      "source_type": "paper",
+      "source_verification_limit": "Synthetic template only; replace and independently verify.",
+      "source_verification_status": "verified_against_source",
+      "title": "Replace synthetic far_neighbor evidence"
+    }
+  ],
+  "literature_search_trace": [
+    {
+      "covered_time_range": "replace-with-covered-range",
+      "full_text_status": "method_sections_cached",
+      "provider": "replace-with-non-PaperNexus-provider",
+      "query": "replace with exact search query",
+      "result_refs": [
+        "replace-target-1",
+        "replace-target-2",
+        "replace-near-1",
+        "replace-far-1"
+      ],
+      "searched_at": "replace-with-UTC-timestamp",
+      "source_verification_limit": "Synthetic authoring-only trace; replace completely."
+    }
+  ],
+  "method_lineage": {
+    "edges": [
+      {
+        "evidence_refs": [
+          "replace-target-1",
+          "replace-target-2"
+        ],
+        "relation": "replace-explicit-relation",
+        "source": "replace-method-a",
+        "target": "replace-method-b"
+      }
+    ],
+    "nodes": [
+      {
+        "citable": true,
+        "evidence_refs": [
+          "replace-target-1"
+        ],
+        "id": "replace-method-a",
+        "label": "Replace citable method A",
+        "provenance": "external_citable"
+      },
+      {
+        "citable": true,
+        "evidence_refs": [
+          "replace-target-2"
+        ],
+        "id": "replace-method-b",
+        "label": "Replace citable method B",
+        "provenance": "external_citable"
+      }
+    ]
+  },
+  "method_reference": {
+    "official_repo": "https://github.com/microsoft/ResearchStudio",
+    "paper": "arXiv:2607.04439",
+    "paper_version": "v1",
+    "repo_commit": "868f0e9c30685b72ebd475f0dada1492a1982168",
+    "workflow": "ResearchStudio-Idea Phase 0-4 plus local bounded GPU handoff"
+  },
+  "papernexus_used": false,
+  "parent_campaign_sha256": null,
+  "schema_version": 1,
+  "shortlisted_candidate_ids": [],
+  "source_mode": "external_material",
+  "status": "draft",
+  "structural_gaps": [
+    {
+      "description": "Replace with a source-backed missing leaf.",
+      "evidence_refs": [
+        "replace-target-1",
+        "replace-target-2"
+      ],
+      "id": "replace-gap-additive",
+      "lineage_node_refs": [
+        "replace-method-b"
+      ],
+      "missing_leaf": "replace-missing-leaf",
+      "type": "additive_leaf"
+    },
+    {
+      "description": "Replace with a source-backed shared assumption.",
+      "evidence_refs": [
+        "replace-target-1",
+        "replace-target-2"
+      ],
+      "id": "replace-gap-subtractive",
+      "lineage_node_refs": [
+        "replace-method-a",
+        "replace-method-b"
+      ],
+      "shared_assumption": "replace-shared-assumption",
+      "type": "subtractive_shared_assumption"
+    }
+  ]
+}

@@ -8,15 +8,16 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 
-from blocker_triage import classify
+from blocker_triage import classify_typed
 
 
 CASES = [
-    ("missing_negative_evidence", "negative evidence missing"),
-    ("import_wait", "PaperNexus import queue running"),
-    ("dry_run_fail", "dry-run failed three times"),
-    ("review_high_issue", "open high review findings"),
-    ("budget_exceeded", "budget exceeded for proposed experiment"),
+    ("infrastructure_failure", "remote experiment runtime failed", "infrastructure_failure", "auto_repairable", "repair_or_reconcile_infrastructure", "operational"),
+    ("valid_negative", "matched falsifier refuted the mechanism", "valid_negative", "scientific_transition", "apply_research_decision", "scientific_revision"),
+    ("protocol_invalid", "locked evaluator drifted", "protocol_invalid", "auto_repairable", "repair_protocol", "operational"),
+    ("import_wait", "PaperNexus graph import queue running", "", "async_wait", "schedule_async_poll", "none"),
+    ("review_high_issue", "open high review findings", "", "auto_repairable", "schedule_repair", "operational"),
+    ("budget_exceeded", "budget exceeded for proposed experiment", "", "hard_stop", "rollback_or_negative_result_route", "none"),
 ]
 
 
@@ -40,9 +41,26 @@ def main() -> None:
     args = parser.parse_args()
     base = ar(args.project)
     out = []
-    for name, reason in CASES:
-        klass, action = classify(reason)
-        row = {"ts": now(), "stage": "simulation", "case": name, "reason": reason, "class": klass, "recommended_action": action}
+    for name, reason, failure_class, expected_class, expected_action, expected_repair_kind in CASES:
+        klass, action, repair_kind = classify_typed(reason, failure_class)
+        if (klass, action, repair_kind) != (expected_class, expected_action, expected_repair_kind):
+            raise AssertionError(
+                {
+                    "case": name,
+                    "actual": [klass, action, repair_kind],
+                    "expected": [expected_class, expected_action, expected_repair_kind],
+                }
+            )
+        row = {
+            "ts": now(),
+            "stage": "simulation",
+            "case": name,
+            "reason": reason,
+            "failure_class": failure_class or "untyped_legacy_blocker",
+            "class": klass,
+            "recommended_action": action,
+            "repair_kind": repair_kind,
+        }
         append_jsonl(base / "blocker_ledger.jsonl", row)
         out.append(row)
     print(json.dumps({"ok": True, "cases": out}, indent=2, ensure_ascii=False))

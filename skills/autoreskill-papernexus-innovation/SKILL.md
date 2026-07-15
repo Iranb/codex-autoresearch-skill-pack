@@ -7,7 +7,7 @@ metadata:
 
 # PaperNexus Innovation
 
-Use this skill before experiment planning and whenever live PaperNexus evidence is needed. During ideation, PaperNexus owns the pre-idea evidence expansion gate and now provides the preferred idea-generation substrate through `agent_materials(operation="proposal_graph_session")`: target-domain, near-neighbor, and far-neighbor discovery must be attempted, actively screened, converted into split-reading evidence, and then used to run a committed proposal graph session before the ideation panel writes the 12-15 idea pool when the remote MCP exposes that operation.
+Use this skill before experiment planning and whenever live PaperNexus evidence is needed. During ideation, PaperNexus owns the pre-idea evidence expansion gate and provides the preferred idea-generation substrate through `agent_materials(operation="proposal_graph_session")`: target-domain, near-neighbor, and far-neighbor discovery must be attempted, actively screened, converted into split-reading evidence, and then used to run a committed proposal graph session before the ideation panel writes its tiered causal-hypothesis pool when the remote MCP exposes that operation.
 
 Also use this skill after ideation whenever a later stage exposes a concrete evidence gap: selected-idea closest-prior closure, baseline/protocol norms, target-domain absence evidence, negative/contradictory evidence, reviewer novelty/citation objections, or manuscript related-work citation gaps. Later-stage discovery should be targeted and source-backed rather than a broad rerun unless the earlier discovery was demonstrably too narrow.
 
@@ -126,7 +126,7 @@ Before a selected idea can enter `experiment_plan`, collect:
 
 Write materials under `.autoreskill/papernexus/` and evidence ids to `.autoreskill/evidence_cart.jsonl`.
 
-This skill supplies source-backed evidence and PaperNexus material packs. It must not substitute a small set of high-level directions for the experiment idea pool, and it must not force every brainstormed idea to be launch-ready. The 12-15 optimization ideas are produced during ideation by `autoreskill-ideation-panel` as `.autoreskill/ideation/EXPERIMENT_IDEA_POOL.json`, using `INNOVATION_SLOT_MAP.json` as the direct input. Hard selected-idea evidence closure still moves to `autoreskill-experiment-plan`.
+This skill supplies source-backed evidence and PaperNexus material packs. It must not substitute high-level directions for causal hypotheses, and it must not force every brainstormed idea to be launch-ready. The default 8-12 lightweight hypotheses are produced by `autoreskill-ideation-panel` as `.autoreskill/ideation/EXPERIMENT_IDEA_POOL.json`, using `INNOVATION_SLOT_MAP.json` as the direct input. Only the 3-5 idea shortlist is deeply specified; hard selected-idea evidence closure still moves to `autoreskill-experiment-plan`.
 
 When a committed proposal graph session exists, `INNOVATION_SLOT_MAP.json` remains the evidence-slot input, while the proposal bundle becomes the primary PaperNexus idea seed and critique trace. Ideation should expand, vary, and score around the committed proposal instead of treating `idea_fragments` as the highest-authority idea source.
 

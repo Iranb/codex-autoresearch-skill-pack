@@ -39,6 +39,12 @@ REQUIRED_FEATURE_PROTOCOL = [
     "metric_parser",
     "evidence_scope",
 ]
+VALID_PARAMETER_ROLES = {
+    "baseline_protocol",
+    "innovation_load_bearing",
+    "innovation_derived",
+    "diagnostic_only",
+}
 
 
 def ar(project: str) -> Path:
@@ -62,6 +68,10 @@ def present(value: Any) -> bool:
     if isinstance(value, (list, tuple, set, dict)):
         return bool(value)
     return True
+
+
+def safe_component(value: str) -> bool:
+    return bool(value) and value not in {".", ".."} and Path(value).name == value
 
 
 def text_blob(value: Any) -> str:
@@ -126,6 +136,51 @@ def validate_feature_protocol(protocol: Any, baseline_code: dict[str, Any], miss
         )
     if evidence_scope == "diagnostic_only":
         warnings.append("pre_registered_feature_protocol is diagnostic_only; it cannot support candidate/promotion evidence")
+
+
+def validate_parameter_roles(
+    base: Path,
+    review: dict[str, Any],
+    candidate: dict[str, Any] | None,
+    missing: list[str],
+) -> None:
+    program = read_json(base / "orchestrator/PROGRAM_CLAIM_CONTRACT.json", {}) or {}
+    if str(program.get("enforcement_mode") or "legacy") != "enforced":
+        return
+    if str(program.get("claim_scope") or "") != "cross_dataset_method":
+        return
+    if str(review.get("claim_role") or "") != "method_candidate":
+        return
+    inventory = review.get("parameter_role_inventory")
+    if not isinstance(inventory, list) or not inventory:
+        missing.append("EXPERIMENT_REVIEW_PACKET.parameter_role_inventory")
+        return
+    load_bearing: list[dict[str, Any]] = []
+    for index, row in enumerate(inventory):
+        if not isinstance(row, dict):
+            missing.append(f"parameter_role_inventory[{index}] must be an object")
+            continue
+        role = str(row.get("parameter_role") or "")
+        if role not in VALID_PARAMETER_ROLES:
+            missing.append(f"parameter_role_inventory[{index}].parameter_role is invalid")
+        if not present(row.get("parameter_name")):
+            missing.append(f"parameter_role_inventory[{index}].parameter_name")
+        if role == "baseline_protocol" and row.get("dataset_specific_allowed") is not True:
+            missing.append(f"parameter_role_inventory[{index}] baseline_protocol must declare dataset_specific_allowed=true")
+        if role == "innovation_load_bearing":
+            load_bearing.append(row)
+    contract = review.get("parameter_transfer_contract")
+    if len(load_bearing) != 1 or not isinstance(contract, dict):
+        missing.append("exactly one classified innovation_load_bearing parameter and its transfer contract are required")
+        return
+    if load_bearing[0].get("parameter_name") != contract.get("parameter_name"):
+        missing.append("classified innovation_load_bearing parameter must match parameter_transfer_contract.parameter_name")
+    if load_bearing[0].get("parameter_transfer_contract_sha256") != contract.get("parameter_transfer_contract_sha256"):
+        missing.append("classified innovation_load_bearing parameter must bind parameter_transfer_contract_sha256")
+    if candidate:
+        candidate_name = candidate.get("load_bearing_parameter_name") or candidate.get("innovation_parameter_name")
+        if present(candidate_name) and str(candidate_name) != str(contract.get("parameter_name") or ""):
+            missing.append("candidate_run load-bearing parameter is not the reviewed innovation parameter")
 
 
 def existing_off_protocol(base: Path) -> list[str]:
@@ -224,15 +279,50 @@ def validate_candidate(
     return status in ALIGNED_STATUSES
 
 
-def lint(project: str, candidate_run: str | None) -> dict[str, Any]:
+def lint(project: str, candidate_run: str | None, track_id: str | None = None) -> dict[str, Any]:
     base = ar(project)
-    review = read_json(base / "planner/EXPERIMENT_REVIEW_PACKET.json", {}) or {}
-    innovation = read_json(base / "orchestrator/INNOVATION_PACKET.json", {}) or {}
-    manifests = [read_json(path, {}) or {} for path in sorted(base.glob("coder/experiments/**/EXPERIMENT_MANIFEST.json"))]
+    candidate_payload = read_json(Path(candidate_run).expanduser(), None) if candidate_run else None
+    resolved_track_id = str(
+        track_id
+        or ((candidate_payload or {}).get("track_id") if isinstance(candidate_payload, dict) else "")
+        or ""
+    ).strip()
+    if resolved_track_id and not safe_component(resolved_track_id):
+        return {
+            "complete": False,
+            "status": "incomplete",
+            "missing": ["track_id must be one safe path component"],
+            "warnings": [],
+            "candidate_run": candidate_run,
+        }
+    review_ref = (
+        f"planner/tracks/{resolved_track_id}/EXPERIMENT_REVIEW_PACKET.json"
+        if resolved_track_id
+        else "planner/EXPERIMENT_REVIEW_PACKET.json"
+    )
+    innovation_ref = (
+        f"orchestrator/tracks/{resolved_track_id}/INNOVATION_PACKET.json"
+        if resolved_track_id
+        else "orchestrator/INNOVATION_PACKET.json"
+    )
+    review = read_json(base / review_ref, {}) or {}
+    innovation = read_json(base / innovation_ref, {}) or {}
+    manifests = [
+        payload
+        for path in sorted(base.glob("coder/experiments/**/EXPERIMENT_MANIFEST.json"))
+        if isinstance((payload := read_json(path, {}) or {}), dict)
+        and (not resolved_track_id or str(payload.get("track_id") or "").strip() == resolved_track_id)
+    ]
     missing: list[str] = []
     warnings: list[str] = []
 
     baseline_code = review.get("baseline_code") if isinstance(review.get("baseline_code"), dict) else {}
+    if resolved_track_id and str(review.get("track_id") or "").strip() != resolved_track_id:
+        missing.append(f"{review_ref}.track_id must match requested track")
+    role = str(review.get("track_role") or innovation.get("track_role") or "").strip().lower()
+    ceiling = str(review.get("evidence_tier_ceiling") or innovation.get("evidence_tier_ceiling") or "").strip()
+    if role in {"alternate", "risk_repair"} and ceiling != "pilot_only":
+        missing.append(f"{review_ref}.evidence_tier_ceiling must be pilot_only for non-primary tracks")
     if baseline_code.get("locked") is not True:
         missing.append("EXPERIMENT_REVIEW_PACKET.baseline_code.locked must be true")
     for key in ["code_id", "resolved_path", "train_entrypoint", "eval_entrypoint"]:
@@ -247,16 +337,21 @@ def lint(project: str, candidate_run: str | None) -> dict[str, Any]:
     candidate_aligned = False
     candidate_run_used = candidate_run
     if candidate_run:
-        candidate_path = Path(candidate_run).expanduser()
-        candidate = read_json(candidate_path, None)
+        candidate = candidate_payload
         if not isinstance(candidate, dict):
             missing.append(f"candidate_run invalid JSON: {candidate_run}")
         else:
+            if resolved_track_id and str(candidate.get("track_id") or "").strip() != resolved_track_id:
+                missing.append("candidate_run.track_id must match the selected per-track packet")
+            if role in {"alternate", "risk_repair"} and candidate.get("evidence_tier") != "pilot_only":
+                missing.append("non-primary candidate_run.evidence_tier must be pilot_only")
             candidate_aligned = validate_candidate(candidate, review, baseline_code, feature_protocol, missing, warnings)
     else:
         for candidate_path in sorted(base.glob("coder/experiments/**/*CANDIDATE_RUN*.json")):
             candidate = read_json(candidate_path, None)
             if not isinstance(candidate, dict):
+                continue
+            if resolved_track_id and str(candidate.get("track_id") or "").strip() != resolved_track_id:
                 continue
             trial_missing: list[str] = []
             trial_warnings: list[str] = []
@@ -269,6 +364,13 @@ def lint(project: str, candidate_run: str | None) -> dict[str, Any]:
                     candidate_run_used = str(candidate_path)
                 warnings.append(f"auto-detected corrective candidate_run: {candidate_run_used}")
                 break
+
+    validate_parameter_roles(
+        base,
+        review,
+        candidate_payload if isinstance(candidate_payload, dict) else None,
+        missing,
+    )
 
     off_protocol_hits = existing_off_protocol(base)
     if off_protocol_hits and not candidate_aligned:
@@ -299,8 +401,9 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--project", required=True)
     parser.add_argument("--candidate-run")
+    parser.add_argument("--track-id")
     args = parser.parse_args()
-    out = lint(args.project, args.candidate_run)
+    out = lint(args.project, args.candidate_run, args.track_id)
     print(json.dumps(out, indent=2, ensure_ascii=False))
     raise SystemExit(0 if out["complete"] else 1)
 

@@ -1,12 +1,16 @@
 # Blocker Repair Matrix
 
-| Reason pattern | Class | Action |
-| --- | --- | --- |
-| `negative_evidence_missing` | `auto_repairable` | run `negative_evidence_pack`; if empty, write `absence_confidence` |
-| `research_controller_unavailable` | `degradable` | use `research_material_pack + idea_catalyst + ideation-panel` |
-| `import_wait` | `async_wait` | poll `import_workflow status` until timeout, then use discovery evidence as provisional |
-| `dry_run_failed` | `auto_repairable` | repair up to 3 times, then shrink experiment or rollback plan |
-| `single_seed_only` | `degradable` | run up to three total random seeds if budget allows, else downgrade claim |
-| `review_high_issue_open` | `auto_repairable` | create repair packet; after 3 rounds downgrade/delete claim |
-| `budget_exceeded` | `hard_stop` | shrink task or stop current route |
-| `data_license_blocked` | `hard_stop` | switch dataset or stop route |
+| Evidence / reason | Workflow class | Belief effect | Action |
+| --- | --- | --- | --- |
+| `negative_evidence_missing` | `auto_repairable` | none | run `negative_evidence_pack`; if empty, write `absence_confidence` |
+| `research_controller_unavailable` | `degradable` | none | use the documented fallback and preserve claim limits |
+| live import/runtime/resource wait | `async_wait` | none | poll authoritative state; continue independent local/experiment work |
+| `infrastructure_failure` | `auto_repairable` or `async_wait` | none | reconcile or retry the same signature at most twice |
+| `implementation_failure` | `auto_repairable` | none | make one bounded implementation repair; stop at signature budget |
+| `protocol_invalid` | `auto_repairable` | none | quarantine evidence and repair the plan/protocol |
+| `valid_negative` | scientific transition | weaken/refute/scope | pivot, retire, scope, or conclude; do not code-repair by default |
+| `valid_inconclusive` | scientific transition | inconclusive | run one decision-changing discriminator or retire/conclude |
+| `valid_positive_candidate` | scientific transition | support increased | queue linked ablation/confirmation; do not promote directly |
+| `single_seed_only` | `degradable` | none | use up to three total random seeds only for a stability question; otherwise downgrade |
+| `budget_exceeded` | `hard_stop` | none | shrink task, conclude with claim limits, or stop current route |
+| `data_license_blocked` | `hard_stop` | none | switch dataset or stop route |

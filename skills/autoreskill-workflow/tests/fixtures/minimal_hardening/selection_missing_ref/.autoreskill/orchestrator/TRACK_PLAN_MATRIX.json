@@ -1,0 +1,11 @@
+{
+  "selected_idea_id": "idea-a",
+  "tracks": [
+    {
+      "idea_id": "idea-a",
+      "track_id": "track-main",
+      "track_role": "primary",
+      "launch_status": "ready"
+    }
+  ]
+}

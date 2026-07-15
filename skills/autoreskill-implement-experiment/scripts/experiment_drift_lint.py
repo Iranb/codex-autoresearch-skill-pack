@@ -52,6 +52,14 @@ def manifest_track_id(path: Path, manifest: dict[str, Any]) -> str:
     return ""
 
 
+def review_for_plan(base: Path, plan: dict[str, Any], primary_review: dict[str, Any]) -> tuple[dict[str, Any], str]:
+    ref = str(plan.get("review_packet_ref") or "").strip()
+    if ref:
+        packet = read_json(base / ref)
+        return (packet if isinstance(packet, dict) else {}), ref
+    return primary_review, "planner/EXPERIMENT_REVIEW_PACKET.json"
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--project", required=True)
@@ -80,14 +88,67 @@ def main() -> None:
             continue
         active_manifest_count += 1
         plan = active_plan_by_track.get(track_id, {})
-        expected_metric = plan.get("primary_metric") or review.get("primary_metric")
-        expected_dataset = plan.get("dataset") or review.get("dataset")
+        track_review, review_ref = review_for_plan(base, plan, review)
+        if not track_review:
+            missing.append(f"{manifest_path}: missing current review packet {review_ref}")
+            continue
+        expected_metric = plan.get("primary_metric") or track_review.get("primary_metric")
+        expected_dataset = plan.get("dataset") or track_review.get("dataset")
         if expected_metric and manifest.get("primary_metric") != expected_metric:
             missing.append(f"{manifest_path}: primary_metric drift")
         if expected_dataset and manifest.get("dataset") != expected_dataset:
             missing.append(f"{manifest_path}: dataset drift")
         if manifest.get("one_variable_change") is not True:
             missing.append(f"{manifest_path}: one_variable_change not true")
+        for field in [
+            "track_role",
+            "evidence_tier_ceiling",
+            "selection_fingerprint",
+            "project_execution_passport_ref",
+            "project_execution_passport_index_sha256",
+            "execution_profile_id",
+            "execution_profile_sha256",
+            "innovation_delta_sha256",
+            "resolved_execution_contract_projection_sha256",
+        ]:
+            expected = plan.get(field) or track_review.get(field)
+            if present(expected) and manifest.get(field) != expected:
+                missing.append(f"{manifest_path}: {field} drift")
+        passport_ref = str(track_review.get("project_execution_passport_ref") or "").strip()
+        if passport_ref:
+            passport = read_json(base / passport_ref) or {}
+            if not passport:
+                missing.append(f"{manifest_path}: project execution passport missing")
+            elif str(passport.get("index_semantic_sha256") or "") != str(
+                track_review.get("project_execution_passport_index_sha256") or ""
+            ):
+                missing.append(f"{manifest_path}: project execution passport index drift")
+            else:
+                profile = next(
+                    (
+                        item
+                        for item in passport.get("execution_profiles", [])
+                        if isinstance(item, dict)
+                        and str(item.get("profile_id") or "") == str(track_review.get("execution_profile_id") or "")
+                    ),
+                    None,
+                )
+                if profile is None or str(profile.get("execution_profile_sha256") or "") != str(
+                    track_review.get("execution_profile_sha256") or ""
+                ):
+                    missing.append(f"{manifest_path}: execution profile drift")
+        expected_matrix_sha = matrix.get("semantic_sha256") if isinstance(matrix, dict) else None
+        if present(expected_matrix_sha) and manifest.get("track_plan_matrix_sha256") != expected_matrix_sha:
+            missing.append(f"{manifest_path}: track_plan_matrix_sha256 drift")
+        expected_seed_sha = plan.get("source_track_seed_sha256") or track_review.get("source_track_seed_sha256")
+        if present(expected_seed_sha) and manifest.get("source_track_seed_sha256") != expected_seed_sha:
+            missing.append(f"{manifest_path}: source_track_seed_sha256 drift")
+        expected_packet_sha = plan.get("review_packet_sha256") or track_review.get("semantic_sha256")
+        if present(expected_packet_sha) and manifest.get("review_packet_sha256") != expected_packet_sha:
+            missing.append(f"{manifest_path}: review_packet_sha256 drift")
+        if str(plan.get("track_role") or track_review.get("track_role") or "").lower() in {"alternate", "risk_repair"}:
+            if manifest.get("evidence_tier") != "pilot_only" or manifest.get("evidence_tier_ceiling") != "pilot_only":
+                missing.append(f"{manifest_path}: non-primary manifest must remain pilot_only")
     if not manifest_paths:
         missing.append("coder/experiments/**/EXPERIMENT_MANIFEST.json")
     elif active_track_ids and active_manifest_count == 0:

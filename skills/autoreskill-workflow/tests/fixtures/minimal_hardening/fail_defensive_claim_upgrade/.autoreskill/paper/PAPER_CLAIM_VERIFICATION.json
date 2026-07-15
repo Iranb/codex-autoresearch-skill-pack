@@ -1,0 +1,23 @@
+{
+  "claim_drift_status": {
+    "status": "passed"
+  },
+  "scientific_alignment_status": {
+    "status": "passed"
+  },
+  "numeric_grounding_status": {
+    "status": "passed"
+  },
+  "non_defensive_writing_status": {
+    "status": "passed",
+    "necessary_limitations_preserved": false,
+    "evidence_boundary_preserved": true,
+    "claim_upgrades_blocked": false,
+    "unsupported_claim_upgrades": true,
+    "top_tier_claim_posture": "Over-polished front matter removes a real validation-only boundary.",
+    "high_impact_positions_checked": [
+      "abstract",
+      "introduction"
+    ]
+  }
+}

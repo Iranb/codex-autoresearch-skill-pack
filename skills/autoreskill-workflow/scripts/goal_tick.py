@@ -4,7 +4,9 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
+import os
 import re
 import shlex
 import uuid
@@ -12,8 +14,12 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
-from contract_lint import lint
+from contract_lint import lint, validate_terminal_program_decision
+from control_plane_lease import acquire as acquire_control_lease
+from control_plane_lease import release as release_control_lease
+from experiment_next_actions import frontier_status, select_launch_batch
 from goal_state import NEXT_ACTIONS, OWNERS, STAGES, ar, load_state, next_stage, save_state
+from research_decision import program_recovery_status, replenishment_proposal
 
 
 SKILLS_ROOT = Path(__file__).resolve().parents[2]
@@ -291,6 +297,7 @@ EXPERIMENT_ACTIVE_STATUSES = {
     "pending",
     "submitted",
     "submitting",
+    "needs_sync",
     "launching",
     "starting",
     "started",
@@ -412,7 +419,6 @@ EXPERIMENT_REBUILD_ACTIONS = {
     "change_innovation",
     "negative_result_route",
 }
-MAX_FAILED_EXPERIMENT_REPAIRS = 2
 
 
 def parse_float(value: Any) -> float | None:
@@ -1090,38 +1096,6 @@ def experiment_entry_identity(entry: dict[str, Any]) -> tuple[str, str]:
     return idea_id, track_id
 
 
-def experiment_repair_attempt_value(entry: dict[str, Any]) -> int:
-    for key in ["repair_attempt", "repair_attempt_index", "repair_iteration", "same_branch_repair_attempt"]:
-        parsed = parse_int(entry.get(key))
-        if parsed is not None:
-            return max(0, parsed)
-    return 0
-
-
-def experiment_repair_attempt_count(base: Path, latest: dict[str, Any]) -> int:
-    entries = experiment_ledger_entries(base)
-    idea_id, track_id = experiment_entry_identity(latest)
-    explicit_max = experiment_repair_attempt_value(latest)
-    tagged_repairs = 0
-    failure_like_same_route = 0
-    for entry in entries:
-        entry_idea, entry_track = experiment_entry_identity(entry)
-        if idea_id and entry_idea and entry_idea != idea_id:
-            continue
-        if track_id and entry_track and entry_track != track_id:
-            continue
-        explicit_max = max(explicit_max, experiment_repair_attempt_value(entry))
-        attempt_type = normalized_state(entry.get("attempt_type"), entry.get("run_type"), entry.get("role"))
-        if "repair" in attempt_type or entry.get("is_repair") is True:
-            tagged_repairs += 1
-        if experiment_entry_failure_like(entry):
-            failure_like_same_route += 1
-    # If the ledger does not explicitly mark repair attempts, treat repeated terminal
-    # failures on the same idea/track after the first failure as repair attempts.
-    inferred_repairs = max(0, failure_like_same_route - 1)
-    return max(explicit_max, tagged_repairs, inferred_repairs)
-
-
 def experiment_text_fields(payload: dict[str, Any]) -> list[str]:
     fields: list[str] = []
     for key in [
@@ -1280,6 +1254,39 @@ def active_experiment_run_exists(base: Path) -> bool:
     return False
 
 
+def parallel_experiment_launch_available(base: Path) -> dict[str, Any] | None:
+    """Return the shared scheduler proposal or a signal to refresh resources."""
+    queue = read_json(base / "experiment/NEXT_EXPERIMENT_QUEUE.json", {})
+    if not isinstance(queue, dict):
+        return None
+    proposal = select_launch_batch(queue)
+    if not proposal.get("ok"):
+        return None
+    if not proposal.get("selected_count") and not proposal.get("requires_resource_refresh"):
+        return None
+    snapshot = proposal.get("resource_snapshot") if isinstance(proposal.get("resource_snapshot"), dict) else {}
+    policy = queue.get("policy") if isinstance(queue.get("policy"), dict) else {}
+    admission_scope = str(policy.get("admission_scope") or "project").strip().lower()
+    return {
+        **proposal,
+        "admission_scope": admission_scope,
+        "global_admission_required": admission_scope == "global",
+        "idle_slots": snapshot.get("idle_gpu_slots"),
+        "skipped_reasons": [
+            f"{item.get('row_id')}: {item.get('reason')}"
+            for item in proposal.get("rejected", [])[:5]
+            if isinstance(item, dict)
+        ],
+    }
+
+
+def experiment_frontier_signal(base: Path) -> dict[str, Any] | None:
+    queue = read_json(base / "experiment/NEXT_EXPERIMENT_QUEUE.json", {})
+    if not isinstance(queue, dict) or not queue:
+        return None
+    return frontier_status(queue, project=base.parent)
+
+
 def write_experiment_negative_blocker(base: Path, payload: dict[str, Any]) -> None:
     write_json(base / "coder/EXPERIMENT_NEGATIVE_BLOCKER.json", payload)
 
@@ -1312,64 +1319,27 @@ def experiment_failure_route(base: Path) -> dict[str, Any] | None:
     latest = latest_failed_experiment_entry(base, active_selection)
     if not latest:
         return None
-    next_action = experiment_entry_next_action(latest)
-    next_action_kind = experiment_next_action_kind(next_action)
-    repair_attempts = experiment_repair_attempt_count(base, latest)
     idea_id, track_id = experiment_entry_identity(latest)
-    failure_class = str(latest.get("failure_class") or "").strip()
-    no_more_same_branch_repairs = repair_attempts >= MAX_FAILED_EXPERIMENT_REPAIRS
-    wants_rebuild = next_action_kind == "rebuild" or no_more_same_branch_repairs
-    if wants_rebuild:
-        if (
-            next_action in {"switch_track", "track_switch"}
-            or "switch_track" in next_action
-            or "track_switch" in next_action
-            or "structural" in next_action
-            or "positive_redesign" in next_action
-        ):
-            target_stage = "experiment_plan"
-        elif next_action in {"leap_idea", "rebuild_idea", "change_idea", "change_innovation"}:
-            target_stage = "ideation"
-        else:
-            target_stage = "idea_gate"
-        return {
-            "route_kind": "rollback",
-            "required_next_action": "change_idea_or_innovation",
-            "target_stage": target_stage,
-            "status": "change_idea_or_innovation_required",
-            "reason": (
-                "experiment produced terminal negative/regressed evidence and "
-                f"{repair_attempts} same-idea repair attempts did not yield promoted improvement"
-            ),
-            "repair_attempts": repair_attempts,
-            "max_same_idea_repairs": MAX_FAILED_EXPERIMENT_REPAIRS,
-            "selected_idea_id": idea_id,
-            "track_id": track_id,
-            "failure_class": failure_class,
-            "ledger_next_action": next_action,
-            "latest_failure_entry": latest,
-        }
+    next_action = experiment_entry_next_action(latest)
     return {
-        "route_kind": "repair",
-        "required_next_action": "repair_failed_experiment",
-        "status": "repair_required",
+        "route_kind": "adjudicate",
+        "required_next_action": "adjudicate_scientific_outcome",
+        "status": "scientific_adjudication_required",
         "reason": (
-            "experiment produced terminal negative/regressed evidence; analyze the failure cause and execute a bounded repair attempt "
-            f"{repair_attempts + 1}/{MAX_FAILED_EXPERIMENT_REPAIRS}"
+            "legacy or untyped terminal experiment evidence cannot determine whether the cause is operational, "
+            "protocol-invalid, scientifically negative, or inconclusive"
         ),
-        "repair_attempts": repair_attempts,
-        "max_same_idea_repairs": MAX_FAILED_EXPERIMENT_REPAIRS,
         "selected_idea_id": idea_id,
         "track_id": track_id,
-        "failure_class": failure_class,
-        "ledger_next_action": next_action or "repair_same_branch",
+        "failure_class": str(latest.get("failure_class") or "untyped_terminal_outcome").strip(),
+        "ledger_next_action": next_action,
         "latest_failure_entry": latest,
     }
 
 
-def sync_experiment_negative_route_artifacts(base: Path, route: dict[str, Any]) -> None:
+def sync_experiment_route_artifacts(base: Path, route: dict[str, Any]) -> None:
     blocker = {
-        "schema_version": 1,
+        "schema_version": 2,
         "status": route["status"],
         "created_at": iso(now()),
         "selected_idea_id": route.get("selected_idea_id"),
@@ -1382,42 +1352,115 @@ def sync_experiment_negative_route_artifacts(base: Path, route: dict[str, Any]) 
         "reason": route.get("reason"),
         "latest_failure_entry": route.get("latest_failure_entry"),
     }
-    if route.get("route_kind") == "rollback":
-        blocker["target_stage"] = route.get("target_stage")
-        blocker["negative_result_manuscript_allowed"] = False
     write_experiment_negative_blocker(base, blocker)
-    if route.get("route_kind") == "rollback":
-        target_stage = str(route.get("target_stage") or "idea_gate")
-        write_json(
-            base / "orchestrator/NEGATIVE_RESULT_ROUTE_DECISION.json",
-            {
-                "schema_version": 1,
-                "decision": "change_idea_or_innovation_after_two_repairs",
-                "created_at": iso(now()),
-                "reason": route.get("reason"),
-                "source": "coder/EXPERIMENT_LEDGER.json",
-                "selected_idea_id": route.get("selected_idea_id"),
-                "track_id": route.get("track_id"),
-                "repair_attempts": route.get("repair_attempts"),
-                "max_same_idea_repairs": route.get("max_same_idea_repairs"),
-                "required_replan": {
-                    "stage": target_stage,
-                    "next_action": NEXT_ACTIONS.get(target_stage),
-                    "requirements": [
-                        "Analyze failed/regressed experiment evidence and its failure_class.",
-                        "Do not run a third same-idea repair without changing the idea, innovation point, or selected track.",
-                        "Update IDEA_DECISION_LEDGER.json for the failed idea lifecycle.",
-                        "Select an alternate idea or rebuild the innovation bundle before returning to experiment_plan.",
-                    ],
-                },
-            },
-        )
+
+
+def latest_typed_experiment_outcome(base: Path) -> dict[str, Any] | None:
+    ledger = read_json(base / "coder/EXPERIMENT_LEDGER.json", {})
+    entries = ledger.get("entries") if isinstance(ledger, dict) else None
+    if not isinstance(entries, list):
+        return None
+    active_selection = current_active_selection(base)
+    for row in reversed(entries):
+        if not isinstance(row, dict) or not row.get("outcome_class"):
+            continue
+        if not experiment_entry_matches_active_selection(row, active_selection):
+            continue
+        if str(row.get("scientific_outcome_status") or "") in {
+            "accepted",
+            "pending_decision",
+            "awaiting_adjudication",
+        }:
+            return row
+    return None
+
+
+def all_recorded_tracks_terminal(base: Path) -> bool:
+    ledger = read_json(base / "ideation/IDEA_DECISION_LEDGER.json", {})
+    states = ledger.get("track_states") if isinstance(ledger, dict) else None
+    if not isinstance(states, list) or not states:
+        return False
+    return all(
+        isinstance(row, dict)
+        and str(row.get("lifecycle_status") or "").strip().lower() in {"retired", "concluded", "refuted", "terminal"}
+        for row in states
+    )
+
+
+def automatic_portfolio_replenishment_allowed(base: Path, frontier: dict[str, Any]) -> bool:
+    """Allow capacity-triggered research only for an unresolved bounded paper route."""
+
+    program = read_json(base / "orchestrator/PROGRAM_CLAIM_CONTRACT.json", {})
+    if str(program.get("enforcement_mode") or "legacy") == "enforced":
+        return replenishment_proposal(base, frontier).get("complete") is True
+
+    if str(frontier.get("portfolio_blocker_code") or "") != "shortlist_missing_or_exhausted":
+        return False
+    if int(frontier.get("portfolio_admission_deficit") or 0) <= 0:
+        return False
+    if int(frontier.get("active_nonterminal_track_count") or 0) <= 0:
+        return False
+    if int(frontier.get("fresh_fitting_idle_slots") or 0) <= 0:
+        return False
+    if all_recorded_tracks_terminal(base):
+        return False
+
+    state = read_json(base / "goal_state.json", {})
+    policy = read_json(base / "autopilot_policy.json", {})
+    autonomy = str(state.get("autonomy_level") or policy.get("autonomy_level") or "").strip()
+    goal_type = str(state.get("goal_type") or policy.get("goal_type") or "paper_producing_top_tier").strip()
+    if autonomy != "full_auto_bounded" or not goal_type.startswith("paper_producing_"):
+        return False
+    return policy.get("allow_autonomous_candidate_replenishment") is not False
 
 
 def classify(stage: str, reason: str, base: Path) -> tuple[str, str]:
     if stage == "topic_search":
         return classify_topic_search(base)
     text = reason.lower()
+    if stage == "experiment":
+        typed = latest_typed_experiment_outcome(base)
+        if typed:
+            outcome_class = str(typed.get("outcome_class") or "")
+            outcome_status = str(typed.get("scientific_outcome_status") or "")
+            if outcome_status in {"pending_decision", "awaiting_adjudication"}:
+                return "auto_repairable", "apply_research_decision"
+            if outcome_class == "infrastructure_failure":
+                return "auto_repairable", "repair_or_reconcile_infrastructure"
+            if outcome_class == "implementation_failure":
+                return "auto_repairable", "refine_implementation"
+            if outcome_class == "protocol_invalid":
+                return "auto_repairable", "repair_experiment_protocol"
+            if all_recorded_tracks_terminal(base):
+                return "auto_repairable", "write_terminal_program_decision"
+            if outcome_class == "valid_positive_candidate":
+                return "auto_repairable", "queue_ablation_or_confirmation"
+            return "auto_repairable", "reconcile_scientific_transition"
+        frontier = experiment_frontier_signal(base)
+        if frontier and frontier.get("portfolio_actionable"):
+            return "auto_repairable", "batch_fill_experiment_portfolio"
+        if frontier and int(frontier.get("portfolio_admission_deficit") or 0) > 0:
+            portfolio_blocker = str(frontier.get("portfolio_blocker_code") or "")
+            if automatic_portfolio_replenishment_allowed(base, frontier):
+                return "auto_repairable", "replenish_experiment_portfolio"
+            if portfolio_blocker in {"shortlist_candidates_blocked", "no_set_feasible_shortlist_candidate"}:
+                return "hard_stop", "portfolio_admission_requires_scientific_repair"
+        if frontier and frontier.get("frontier_underfilled"):
+            blocker = str(frontier.get("frontier_blocker_code") or "")
+            if frontier.get("frontier_actionable") and blocker in {
+                "missing_track_packet",
+                "admissible_frontier_deficit",
+            }:
+                return "auto_repairable", "materialize_experiment_frontier"
+            if blocker == "scientific_dependency_wait":
+                if active_experiment_run_exists(base):
+                    return "async_wait", "poll_experiment_run"
+                return "hard_stop", "scientific_dependency_without_live_run"
+            if blocker == "no_admissible_frontier_candidate" and not active_experiment_run_exists(base):
+                return "hard_stop", "no_admissible_experiment_frontier"
+        parallel = parallel_experiment_launch_available(base)
+        if parallel and parallel.get("global_admission_required"):
+            return "hard_stop", "global_admission_required"
     if stage == "code" and active_backend_remap_request(base):
         return "hard_stop", "rollback_to_experiment_plan_backend_remap"
     if "selected_negative_evidence:" in text:
@@ -1466,6 +1509,11 @@ def classify(stage: str, reason: str, base: Path) -> tuple[str, str]:
             return "auto_repairable", "schedule_repair"
     if stage == "experiment" and ("promoted best_run" in text or "ready_for_analysis" in text):
         if active_experiment_run_exists(base):
+            parallel = parallel_experiment_launch_available(base)
+            if parallel and parallel.get("global_admission_required"):
+                return "hard_stop", "global_admission_required"
+            if parallel:
+                return "auto_repairable", "launch_parallel_experiment"
             return "async_wait", "poll_experiment_run"
         negative_blocker = read_json(base / "coder/EXPERIMENT_NEGATIVE_BLOCKER.json", {})
         status = str(negative_blocker.get("status") or "").strip().lower() if isinstance(negative_blocker, dict) else ""
@@ -1479,10 +1527,8 @@ def classify(stage: str, reason: str, base: Path) -> tuple[str, str]:
             return "hard_stop", "rollback_or_negative_result_route"
         failure_route = experiment_failure_route(base)
         if failure_route:
-            sync_experiment_negative_route_artifacts(base, failure_route)
-            if failure_route.get("route_kind") == "repair":
-                return "auto_repairable", "repair_failed_experiment"
-            return "hard_stop", "rollback_or_negative_result_route"
+            sync_experiment_route_artifacts(base, failure_route)
+            return "auto_repairable", "adjudicate_scientific_outcome"
         launch_candidate = experiment_launch_candidate(base)
         negative_blocker = read_json(base / "coder/EXPERIMENT_NEGATIVE_BLOCKER.json", {})
         status = str(negative_blocker.get("status") or "").strip().lower() if isinstance(negative_blocker, dict) else ""
@@ -1548,6 +1594,29 @@ def next_due_job(
     return None
 
 
+def repair_metadata(base: Path, kind: str, stage: str, action: str, reason: str) -> dict[str, Any]:
+    outcome = latest_typed_experiment_outcome(base) if stage == "experiment" else None
+    failure_class = str((outcome or {}).get("outcome_class") or "untyped_contract_blocker")
+    scientific_actions = {
+        "apply_research_decision",
+        "reconcile_scientific_transition",
+        "write_terminal_program_decision",
+        "queue_ablation_or_confirmation",
+        "recover_replenishment_route",
+    }
+    repair_kind = "none" if kind == "async" else "scientific_revision" if action in scientific_actions else "operational"
+    normalized_reason = re.sub(r"\s+", " ", reason.strip().lower())
+    signature_payload = f"{failure_class}|{stage}|{action}|{normalized_reason}"
+    return {
+        "failure_class": failure_class,
+        "failure_signature": "failure-" + hashlib.sha256(signature_payload.encode("utf-8")).hexdigest()[:16],
+        "repair_kind": repair_kind,
+        "operational_attempt": int((outcome or {}).get("operational_attempt") or 0),
+        "scientific_revision": int((outcome or {}).get("scientific_revision") or 0),
+        "max_scientific_revisions": 2,
+    }
+
+
 def mark_job_running(base: Path, queue_name: str, job: dict[str, Any]) -> None:
     path = base / queue_name
     data = rows(path)
@@ -1555,12 +1624,23 @@ def mark_job_running(base: Path, queue_name: str, job: dict[str, Any]) -> None:
         if row.get("job_id") == job.get("job_id"):
             row["status"] = "running"
             row["attempts"] = int(row.get("attempts", 0)) + 1
+            if row.get("repair_kind") == "operational":
+                row["operational_attempt"] = int(row.get("operational_attempt") or 0) + 1
             row["updated_at"] = iso(now())
     write_rows(path, data)
 
 
 def job_contract(project: str, job: dict[str, Any]) -> dict[str, Any]:
     stage = str(job.get("stage", "init"))
+    if stage == "idea_gate" and str(job.get("action") or "") == "recover_replenishment_route":
+        recovery = program_recovery_status(ar(project))
+        return {
+            "complete": False,
+            "stage": stage,
+            "contract_source": "program_recovery_status",
+            "missing": [str(recovery.get("reason") or "replacement program recovery incomplete")],
+            "program_recovery": recovery,
+        }
     return lint(project, stage)
 
 
@@ -1570,6 +1650,7 @@ def queue_job(base: Path, kind: str, stage: str, action: str, reason: str, polic
     data = rows(path)
     delay_key = "next_poll_at" if kind == "async" else "next_retry_at"
     current = now()
+    metadata = repair_metadata(base, kind, stage, action, reason)
     if kind == "async":
         delay_minutes, delay_reason = async_poll_delay_minutes(base, policy, stage, action, reason)
     else:
@@ -1579,11 +1660,20 @@ def queue_job(base: Path, kind: str, stage: str, action: str, reason: str, polic
             f"retry interval from policy applies after failed attempts: {delay_minutes} minutes"
         )
     for row in data:
+        if row.get("failure_signature") != metadata["failure_signature"]:
+            continue
+        if int(row.get("attempts") or 0) >= int(row.get("max_attempts") or (3 if kind == "async" else 2)):
+            existing = dict(row)
+            existing["_reused"] = True
+            existing["_budget_exhausted"] = True
+            existing["_reuse_reason"] = "failure-signature retry budget exhausted"
+            return existing
+    for row in data:
         if (
             row.get("status") in {"pending", "retry", "running"}
             and row.get("stage") == stage
             and row.get("action") == action
-            and row.get("reason") == reason
+            and (row.get("failure_signature") == metadata["failure_signature"] or row.get("reason") == reason)
         ):
             if kind == "async":
                 existing_due_at = parse_iso_datetime(row.get(delay_key))
@@ -1635,7 +1725,7 @@ def queue_job(base: Path, kind: str, stage: str, action: str, reason: str, polic
             row.get("status") == "failed"
             and row.get("stage") == stage
             and row.get("action") == action
-            and row.get("reason") == reason
+            and (row.get("failure_signature") == metadata["failure_signature"] or row.get("reason") == reason)
         ):
             retry_at = parse_iso_datetime(row.get(delay_key))
             if retry_at is not None and retry_at > current:
@@ -1645,7 +1735,7 @@ def queue_job(base: Path, kind: str, stage: str, action: str, reason: str, polic
                 return existing
     next_due_at = current + timedelta(minutes=delay_minutes) if kind == "async" else current
     row = {
-        "schema_version": 1,
+        "schema_version": 2,
         "job_id": f"job_{uuid.uuid4().hex[:12]}",
         "kind": kind,
         "stage": stage,
@@ -1653,10 +1743,23 @@ def queue_job(base: Path, kind: str, stage: str, action: str, reason: str, polic
         "reason": reason,
         "status": "pending",
         "attempts": 0,
-        "max_attempts": int(policy.get("max_repair_attempts_per_blocker", 3)),
+        "max_attempts": (
+            3
+            if kind == "async"
+            else min(
+                2,
+                int(
+                    policy.get(
+                        "max_operational_attempts_per_signature",
+                        policy.get("max_repair_attempts_per_blocker", 2),
+                    )
+                ),
+            )
+        ),
         "created_at": iso(current),
         delay_key: iso(next_due_at),
         "fallback_action": "degrade_or_rollback",
+        **metadata,
     }
     if kind == "async":
         row["poll_interval_minutes"] = delay_minutes
@@ -1889,6 +1992,18 @@ def async_wait_gate(
                 "reason": f"latest experiment monitor reports no active live experiment: {idle.get('reason')}",
             }
         if active_experiment_run_exists(base):
+            parallel = parallel_experiment_launch_available(base)
+            if parallel:
+                return {
+                    "allowed": False,
+                    "wait_kind": "experiment_runtime_or_resource",
+                    "decision": "denied_local_parallel_launch_available",
+                    "reason": (
+                        "active experiment runtime exists, but independent ready experiment rows require a local resource-fit check before waiting: "
+                        f"scheduler_reason={parallel.get('reason')}, selected_row_ids={parallel.get('selected_row_ids')}, "
+                        f"idle_slots={parallel.get('idle_slots')}, requires_resource_refresh={parallel.get('requires_resource_refresh')}"
+                    ),
+                }
             return {
                 "allowed": True,
                 "wait_kind": "experiment_runtime_or_resource",
@@ -2079,7 +2194,7 @@ def obsolete_experiment_repair_reason(base: Path, job: dict[str, Any]) -> str | 
         if isinstance(negative_blocker, dict)
         else ""
     )
-    if action in {"launch_or_reconcile_experiment", "repair_failed_experiment", "schedule_repair"} and blocker_status in {
+    if action in {"launch_or_reconcile_experiment", "launch_parallel_experiment", "repair_failed_experiment", "schedule_repair"} and blocker_status in {
         "blocked_without_promoted_evidence",
         "no_promoted_evidence",
         "negative_result_route",
@@ -2090,6 +2205,13 @@ def obsolete_experiment_repair_reason(base: Path, job: dict[str, Any]) -> str | 
             "obsolete experiment repair superseded because coder/EXPERIMENT_NEGATIVE_BLOCKER.json "
             f"already requests negative-result routing: status={blocker_status}"
         )
+    if action == "launch_parallel_experiment":
+        if parallel_experiment_launch_available(base):
+            return None
+        return (
+            "obsolete parallel experiment launch repair superseded because no independent ready queue row "
+            "currently fits the non-blocked resource/dependency constraints"
+        )
     if action != "launch_or_reconcile_experiment":
         return None
     if active_experiment_run_exists(base):
@@ -2097,7 +2219,7 @@ def obsolete_experiment_repair_reason(base: Path, job: dict[str, Any]) -> str | 
     failure_route = experiment_failure_route(base)
     if not failure_route:
         return None
-    sync_experiment_negative_route_artifacts(base, failure_route)
+    sync_experiment_route_artifacts(base, failure_route)
     route_kind = str(failure_route.get("route_kind") or "")
     required = str(failure_route.get("required_next_action") or "")
     return (
@@ -2135,6 +2257,17 @@ def obsolete_repair_reason(project: str, base: Path, state: dict[str, Any], job:
             f"obsolete repair for stage {job_stage} superseded because current workflow stage is "
             f"{current_stage}"
         )
+
+    if current_stage == "idea_gate":
+        recovery = program_recovery_status(base)
+        recovery_action = str(recovery.get("action") or "")
+        if recovery.get("applicable") and recovery.get("class") == "auto_repairable":
+            if str(job.get("action") or "") != recovery_action:
+                return (
+                    "obsolete idea-gate repair superseded by the current replacement-program recovery phase: "
+                    f"phase={recovery.get('phase')}, action={recovery_action}"
+                )
+            return None
 
     contract = job_contract(project, job)
     if contract.get("complete"):
@@ -2179,7 +2312,7 @@ def async_wakeup_recommendation(project: str, job: dict[str, Any], reason: str) 
         "If tick dispatches this async poll job, execute the rendered packet through the named child skill, "
         "capture PaperNexus progress/report artifacts, update the job, and then run the bounded continuation loop while progress is locally actionable. "
         "If the external wait is terminal, superseded, or locally actionable and you delete the heartbeat, do not stop at cleanup; run status, reconcile, and tick again, then continue one bounded successor cycle if local work is exposed. "
-        "The loop budget is max_tick_actions=5 or about 10 minutes of active work; stop at hard_stop, queued_async_wait, repair_already_queued without a due packet, external live wait, terminal completion, user/budget/credential gate, or budget exhaustion. "
+        "The loop budget is max_tick_actions=5 or about 10 minutes of active work; stop at hard_stop, queued_async_wait, repair_already_queued without a due packet, external live wait with no eligible parallel experiment launch, terminal completion, user/budget/credential gate, or budget exhaustion. "
         "If PaperNexus discovery/import is still running, do not sleep in-thread; record the status and create or update the next heartbeat from the new tick output. "
         "For PaperNexus graph import waits, recompute the interval from live graph status: queued depth, active fast-commit percent, authoritative-sync state, terminal completion, and stale wait condition. "
         f"Target job_id={job_id}, stage={stage}, due_at={due_at}, poll_interval_minutes={interval_minutes}, interval_reason={interval_reason}, blocker={reason}"
@@ -2206,7 +2339,7 @@ def continuation_wakeup_recommendation(project: str, from_stage: str, to_stage: 
         "If tick returns a ready repair or async job, dispatch it through the named child skill, "
         "write the required artifacts, update the job, and then continue the bounded loop while progress is locally actionable. "
         "If a stale heartbeat is deleted as cleanup, immediately run status, reconcile, and tick again before deciding to stop. "
-        "The loop budget is max_tick_actions=5 or about 10 minutes of active work; stop at hard_stop, queued_async_wait, repair_already_queued without a due packet, external live wait, terminal completion, user/budget/credential gate, or budget exhaustion. "
+        "The loop budget is max_tick_actions=5 or about 10 minutes of active work; stop at hard_stop, queued_async_wait, repair_already_queued without a due packet, external live wait with no eligible parallel experiment launch, terminal completion, user/budget/credential gate, or budget exhaustion. "
         "If tick returns queued_async_wait, create or update the async heartbeat from its wakeup recommendation. "
         "Do not sleep in-thread and do not treat raw literature discovery rows as graph-grounded evidence. "
         f"Continuation target: advanced from {from_stage} to {to_stage}."
@@ -2222,6 +2355,135 @@ def continuation_wakeup_recommendation(project: str, from_stage: str, to_stage: 
         "stage": to_stage,
         "from_stage": from_stage,
     }
+
+
+def evidence_source_mode(base: Path | None) -> str:
+    """Resolve papernexus, external_material, or an explicit unknown mode."""
+    if base is None:
+        return "papernexus"
+    gate_path = base / "ideation/PRE_IDEA_EVIDENCE_GATE.json"
+    if gate_path.exists():
+        gate = read_json(gate_path, {})
+        if not isinstance(gate, dict):
+            return "unknown"
+        mode = str(gate.get("evidence_source_mode") or "").strip()
+        return mode if mode in {"papernexus", "external_material"} else ("papernexus" if not mode else "unknown")
+    campaign_path = base / "ideation/NON_PAPERNEXUS_IDEA_CAMPAIGN.json"
+    if campaign_path.exists():
+        campaign = read_json(campaign_path, {})
+        if not isinstance(campaign, dict):
+            return "unknown"
+        if campaign.get("source_mode") == "external_material" and campaign.get("papernexus_used") is False:
+            return "external_material"
+        return "unknown"
+    return "papernexus"
+
+
+def external_material_route(base: Path | None) -> bool:
+    return evidence_source_mode(base) == "external_material"
+
+
+def safe_external_gate_ref(base: Path, raw_ref: Any) -> Path | None:
+    ref = str(raw_ref or "").strip()
+    relative = Path(ref)
+    if not ref or relative.is_absolute() or ".." in relative.parts or "\\" in ref:
+        return None
+    try:
+        resolved = (base / relative).resolve()
+        resolved.relative_to(base.resolve())
+    except (OSError, ValueError):
+        return None
+    return resolved
+
+
+def committed_external_gate(base: Path | None) -> bool:
+    if base is None:
+        return False
+    gate = read_json(base / "ideation/PRE_IDEA_EVIDENCE_GATE.json", {})
+    if not (
+        isinstance(gate, dict)
+        and gate.get("evidence_source_mode") == "external_material"
+        and gate.get("status") == "passed"
+    ):
+        return False
+    if (
+        gate.get("lane_attempts_satisfied") is not True
+        or gate.get("screening_completed") is not True
+        or gate.get("allowed_next_action") != "generate_experiment_idea_pool"
+        or gate.get("commit_layout") != "content_addressed_v1"
+        or gate.get("campaign_ref") != "ideation/NON_PAPERNEXUS_IDEA_CAMPAIGN.json"
+    ):
+        return False
+
+    campaign_path = base / "ideation/NON_PAPERNEXUS_IDEA_CAMPAIGN.json"
+    campaign_sha = str(gate.get("campaign_sha256") or "").strip().lower()
+    if not re.fullmatch(r"[0-9a-f]{64}", campaign_sha) or not campaign_path.is_file():
+        return False
+    if hashlib.sha256(campaign_path.read_bytes()).hexdigest() != campaign_sha:
+        return False
+    campaign = read_json(campaign_path, {})
+    campaign_id = str(gate.get("campaign_id") or "").strip()
+    campaign_revision = gate.get("campaign_revision")
+    if not (
+        isinstance(campaign, dict)
+        and campaign.get("source_mode") == "external_material"
+        and campaign.get("papernexus_used") is False
+        and campaign.get("campaign_id") == campaign_id
+        and campaign.get("campaign_revision") == campaign_revision
+        and campaign_id
+        and isinstance(campaign_revision, int)
+        and not isinstance(campaign_revision, bool)
+        and campaign_revision >= 1
+    ):
+        return False
+
+    lint_sha = str(gate.get("lint_sha256") or "").strip().lower()
+    slot_sha = str(gate.get("slot_map_sha256") or "").strip().lower()
+    if not re.fullmatch(r"[0-9a-f]{64}", lint_sha) or not re.fullmatch(r"[0-9a-f]{64}", slot_sha):
+        return False
+    lint_ref = str(gate.get("lint_ref") or "")
+    slot_ref = str(gate.get("innovation_slot_map_path") or "")
+    if lint_ref != f"ideation/committed/NON_PAPERNEXUS_IDEA_LINT.{lint_sha}.json":
+        return False
+    if slot_ref != f"ideation/committed/INNOVATION_SLOT_MAP.{slot_sha}.json":
+        return False
+    if gate.get("slot_map_ref") != slot_ref:
+        return False
+    lint_path = safe_external_gate_ref(base, lint_ref)
+    slot_path = safe_external_gate_ref(base, slot_ref)
+    if lint_path is None or slot_path is None or not lint_path.is_file() or not slot_path.is_file():
+        return False
+    if hashlib.sha256(lint_path.read_bytes()).hexdigest() != lint_sha:
+        return False
+    if hashlib.sha256(slot_path.read_bytes()).hexdigest() != slot_sha:
+        return False
+    lint_payload = read_json(lint_path, {})
+    slot_payload = read_json(slot_path, {})
+    if not isinstance(lint_payload, dict) or not isinstance(slot_payload, dict):
+        return False
+    expected_lint = {
+        "complete": True,
+        "status": "passed",
+        "campaign_ref": "ideation/NON_PAPERNEXUS_IDEA_CAMPAIGN.json",
+        "campaign_sha256": campaign_sha,
+        "campaign_id": campaign_id,
+        "campaign_revision": campaign_revision,
+        "slot_map_ref": slot_ref,
+        "slot_map_sha256": slot_sha,
+    }
+    if any(lint_payload.get(key) != value for key, value in expected_lint.items()):
+        return False
+    expected_slot = {
+        "source_mode": "external_material",
+        "campaign_ref": "ideation/NON_PAPERNEXUS_IDEA_CAMPAIGN.json",
+        "campaign_sha256": campaign_sha,
+        "campaign_id": campaign_id,
+        "campaign_revision": campaign_revision,
+    }
+    if any(slot_payload.get(key) != value for key, value in expected_slot.items()):
+        return False
+    admitted = gate.get("admitted_candidate_ids")
+    return isinstance(admitted, list) and admitted == lint_payload.get("admitted_candidate_ids")
 
 
 def execution_spec(stage: str, state: dict[str, Any], contract: dict[str, Any], job: dict[str, Any] | None = None, base: Path | None = None) -> dict[str, Any]:
@@ -2469,7 +2731,7 @@ def execution_spec(stage: str, state: dict[str, Any], contract: dict[str, Any], 
         "ideation": {
             "skill": "autoreskill-ideation-panel",
             "role": "Researcher",
-            "goal": "Generate a broad 12-15 item academic-paper-oriented experiment idea pool only after the pre-idea evidence gate passes. Trigger target-domain, near-neighbor, and far-neighbor discovery through papernexus-remote; use target-domain evidence to anchor problem/baseline/protocol and overlap risk, and use near/far-neighbor or cross-lane transfer as the preferred primary method source for top-tier ideas. Actively screen raw discovery; satisfy the venue-agnostic breadth lint, not just one attempt per lane; submit actionable import/supplement work for roughly 60-80% of the high-signal eligible set through PaperNexus import_workflow with progressive batching, wait for completed task/stage plus authoritative sync before graph-grounded use, record source-limited exceptions plus claim limits for exhausted no-fulltext rows, and split-read/materialize the selected evidence roles; build INNOVATION_SLOT_MAP.json; write PRE_IDEA_EVIDENCE_GATE.json status=passed; then generate ideas tied to innovation_slot_refs. Every paper idea must include at least three mutually necessary innovation points covering problem/protocol/evaluation, method/mechanism, and training/integration/analysis/validation, plus a coherent paper storyline; score every idea against target/near/far evidence before idea_gate selection.",
+            "goal": "After the pre-idea evidence gate passes, generate 8-12 lightweight causal hypothesis cards by default; 6-15 is allowed only with an explicit breadth or niche-topic exception. Ground them in screened target-, near-, and far-neighbor PaperNexus evidence, reject duplicate causal signatures, and keep one-variable intervention, mechanism, predicted pattern, falsifier, alternative explanation, and cheapest discriminator explicit. Deepen only the top 3-5 candidates, then construct one core scientific contribution plus only necessary evidence-backed supports and one coherent paper storyline.",
             "mcp_calls": [
                 {"tool": "literature_discovery", "args": {"operation": "submit", "corpus": corpus, "topic": lane_topics["target_domain"], **broad_metadata_discovery}},
                 {"tool": "literature_discovery", "args": {"operation": "submit", "corpus": corpus, "topic": lane_topics["near_neighbor"], **broad_metadata_discovery}},
@@ -2572,7 +2834,7 @@ def execution_spec(stage: str, state: dict[str, Any], contract: dict[str, Any], 
         "idea_gate": {
             "skill": "autoreskill-ideation-panel",
             "role": "Reviewer",
-            "goal": "Run Professor/Postdoc/PhDStudent/Critic gate after the post-idea novelty and venue scorecard exists, select one idea from the ideation-stage experiment idea pool, and assign every idea a lifecycle decision. Write IDEA_DECISION_LEDGER.json so selected, alternate, risk-repair, repair_needed, parked, killed, and degraded speculative ideas all have decision reasons, failure classes, claim scopes, and reentry conditions. Reject or repair ideas whose three-or-more innovation bundle does not form one paper storyline, even if one module looks promising. Trigger targeted PaperNexus discovery if top ideas still lack closest-prior comparison, overlap-risk closure, negative evidence, or a credible near/far-neighbor transfer bridge.",
+            "goal": "Pairwise-compare the deeply reviewed shortlist by novelty separation, falsifiability, decision value, feasibility, and evidence quality. Select one paper thesis, assign lifecycle decisions to every idea, and seed one primary plus two alternates by default with a hard maximum of four active tracks. Require one defensible core scientific contribution and reject renamed mechanisms or optional supports presented as novelty. Trigger targeted PaperNexus discovery only for unresolved closest-prior, overlap, negative-evidence, or transfer-bridge blockers.",
             "mcp_calls": [
                 {"tool": "literature_discovery", "args": {"operation": "submit", "corpus": corpus, "topic": f"{goal_topic}\n\nSearch purpose: selected/top idea novelty gate, closest priors, overlap risk, negative evidence, and transfer-bridge validation.", **broad_metadata_discovery}},
                 {"tool": "agent_materials", "args": {"operation": "research_material_pack", "corpus": corpus}},
@@ -2602,7 +2864,7 @@ def execution_spec(stage: str, state: dict[str, Any], contract: dict[str, Any], 
         "experiment_plan": {
             "skill": "autoreskill-experiment-plan",
             "role": "Orchestrator",
-            "goal": "Materialize an INNOVATION_PACKET, TRACK_PLAN_MATRIX, and reviewed experiment plan from the selected ideation-stage optimization idea while preserving its three-or-more paper innovation bundle and complete storyline. Consume IDEA_DECISION_LEDGER.json and IDEA_TRACK_SEEDS.json so primary, alternate, and risk-repair tracks carry lifecycle refs, launch status, and bounded B/I/E search settings: B=branch budget, I=search iterations, E=versions per branch under the locked protocol. Record stability_seed_policy with max_random_seeds=3; IDEA_TRACK_SEEDS are track candidates, not experiment random seeds. Build dataset_runtime_plan with per-dataset runtime estimates and choose a small/medium multi-class feasibility-first dataset for innovation viability before any largest/full-scale dataset unless no smaller proxy exists or the user explicitly approves starting large. Before launch, trigger targeted PaperNexus discovery/material closure for selected-idea novelty, current-field overlap risk, baseline/protocol/metric norms, negative evidence, and target-domain absence evidence when required.",
+            "goal": "Materialize INNOVATION_PACKET, TRACK_PLAN_MATRIX, and EXPERIMENT_REVIEW_PACKET from the selected thesis. Preserve one core contribution and each track's causal signature, prediction, falsifier, alternative explanation, four outcome routes, belief state, and decision-changing experiment. Use bounded B/I/E search under the locked protocol, cap stability at three total random seeds including scouts, plan cross-dataset single-mechanism evidence before supported combinations, and attach hard launch identity plus acquisition class to every ready queue row.",
             "mcp_calls": [
                 {"tool": "literature_discovery", "args": {"operation": "submit", "corpus": corpus, "topic": f"{goal_topic}\n\nSearch purpose: selected idea experiment-plan closure, novelty risk, baseline/protocol/metric norms, negative evidence, and current-field absence evidence if the method is target-domain-only.", **broad_metadata_discovery}},
                 {"tool": "agent_materials", "args": {"operation": "research_material_pack", "corpus": corpus}},
@@ -2649,7 +2911,7 @@ def execution_spec(stage: str, state: dict[str, Any], contract: dict[str, Any], 
         "experiment": {
             "skill": "autoreskill-run-experiment",
             "role": "Coder",
-            "goal": "Launch or reconcile candidate, ablation, and confirmation runs only after baseline-protocol preflight passes. Preserve selected_idea_id, track_id, branch_id, search_iteration, and version_index lineage from TRACK_PLAN_MATRIX into every REMOTE_RUN and EXPERIMENT_LEDGER entry. For remote runs, sync non-checkpoint training logs and lightweight result metadata back to the local experiment directory on every reconcile, recording local_log_paths and log_sync while excluding checkpoints/model weights unless explicitly requested. Failed, regressed, budget-stopped, spec-violating, or diagnostic-only runs must record failure_class and next_action such as repair_same_branch, switch_track, leap_idea, negative_result_route, or hard_stop. Do not substitute a small model or unregistered feature pilot for the locked baseline; off-protocol probes must stop after one diagnostic run and stay not_promoted.",
+            "goal": "Claim ready queue rows atomically, launch independent rows up to verified resource limits, and reconcile runtime truth without treating one running row as a global barrier. Preserve full selection, track, branch, queue, and launch identity. For every terminal run, retain canonical results and record a typed SCIENTIFIC_OUTCOME: operational defects do not change belief, protocol-invalid evidence is quarantined, valid negative or inconclusive evidence updates the track rather than triggering code repair, and positive candidates require linked ablation or confirmation before promotion.",
             "mcp_calls": [],
             "capture": [
                 script_cmd("autoreskill-implement-experiment", "baseline_clone_lint.py", "--project <project-root>"),
@@ -2661,7 +2923,7 @@ def execution_spec(stage: str, state: dict[str, Any], contract: dict[str, Any], 
         "analysis": {
             "skill": "autoreskill-analyze-results",
             "role": "Analyzer",
-            "goal": "Convert experiment proof into claim-evidence matrix, track verdicts, idea outcome summary, unsupported claims, and narrative report. Consume IDEA_DECISION_LEDGER, TRACK_PLAN_MATRIX, EXPERIMENT_LEDGER, BEST_RUN_SELECTION, SCORE_VERIFICATION, and SPEC_VIOLATION_AUDIT so every idea is classified as promoted evidence, candidate/pilot-only, failed/regressed negative evidence, parked, killed, or downgraded. IDEA_OUTCOME_SUMMARY must enumerate effective_innovation_points with at least three accepted, evidence-backed, mutually necessary paper-story points covering problem/protocol/evaluation, method/mechanism, and training/integration/analysis/validation; parameter tuning, diagnostics, future work, and terminal negative ideas cannot count. After every analysis pass, IDEA_OUTCOME_SUMMARY must include post_analysis_self_audit.least_confident_point and post_analysis_self_audit.largest_possible_misunderstanding, answering where the current conclusion is least certain and what global misunderstanding or blind spot may remain. This self-audit is a claim-boundary guard and cannot upgrade weak evidence. Trigger targeted PaperNexus discovery when results contradict the expected mechanism, expose a hidden confound, or need source-backed negative evidence or limitation framing.",
+            "goal": "Convert canonical experiment evidence and applied track decisions into the claim-evidence matrix, verdicts, idea outcome summary, unsupported claims, and narrative report. A positive paper needs one accepted evidence-backed core scientific contribution; optional supports count only when counterfactually necessary, while parameter tuning, diagnostics, and engineering do not count. A validated terminal negative/inconclusive program may complete with no promoted run and no effective positive contribution, but must set improvement_claim_allowed=false and preserve explicit claim limits. Keep the post-analysis uncertainty self-audit and trigger targeted literature work only for a concrete evidence or framing gap.",
             "mcp_calls": [
                 {"tool": "literature_discovery", "args": {"operation": "submit", "corpus": corpus, "topic": f"{goal_topic}\n\nSearch purpose: post-result claim repair, contradictory evidence, negative results, limitations, failure modes, and mechanism diagnosis.", **broad_metadata_discovery}},
                 {"tool": "agent_materials", "args": {"operation": "research_material_pack", "corpus": corpus}},
@@ -2708,7 +2970,7 @@ def execution_spec(stage: str, state: dict[str, Any], contract: dict[str, Any], 
         "writing": {
             "skill": "autoreskill-paper-write",
             "role": "Academic Writer",
-            "goal": "Write evidence-bound manuscript material from approved claims, literature, review guidance, and IDEA_OUTCOME_SUMMARY. The manuscript must preserve the three-effective-innovation storyline from IDEA_OUTCOME_SUMMARY.effective_innovation_points and may not promote parameter tuning, failed/regressed/killed/parked ideas, unsupported future work, or claim-downgraded material as a core contribution. Promoted runs may support strong improvement claims; failed, regressed, killed, or parked ideas may only appear as negative evidence, limitations, future work, or downgraded claims. Run final paper forensics so numeric/statistical inconsistencies and exact presentation residues are repaired before marking writing complete; AIS style impressions are zero-weight and are not authorship evidence. Trigger targeted literature discovery when related-work contrast, must-cite papers, citation ids, or claim support are missing.",
+            "goal": "Write only from approved claims and IDEA_OUTCOME_SUMMARY. Center one accepted core scientific contribution when positive evidence exists; do not promote parameter tuning, rejected tracks, unsupported future work, or claim-downgraded material. Terminal negative/inconclusive programs may report bounded negative evidence and limitations but no improvement claim. Run numeric, statistical, citation, and presentation forensics; AIS style impressions remain zero-weight.",
             "mcp_calls": [
                 {"tool": "literature_discovery", "args": {"operation": "submit", "corpus": corpus, "topic": f"{goal_topic}\n\nSearch purpose: manuscript related-work and citation closure, closest-prior contrast, must-cite papers, and claim support.", **broad_metadata_discovery}},
                 {"tool": "research_briefing", "args": {"operation": "research_brief", "corpus": corpus}},
@@ -2729,7 +2991,7 @@ def execution_spec(stage: str, state: dict[str, Any], contract: dict[str, Any], 
         "submission_ready": {
             "skill": "autoreskill-review-gate",
             "role": "WorkflowGuard",
-            "goal": "Verify final submission package, citation integrity, front matter, target-venue readiness, final paper forensics, the three-effective-innovation story gate, and the multi-round review gate. Do not mark submission_ready unless PAPER_CLAIM_VERIFICATION passes, PAPER_FORENSICS_REPORT has no blocking verdict-bearing findings, IDEA_OUTCOME_SUMMARY has at least three accepted effective innovation points, and MULTI_ROUND_REVIEW_GATE records at least two complete review-repair cycles with no unresolved blockers. Trigger final targeted discovery only for citation/source blockers that prevent readiness.",
+            "goal": "Verify final package, citations, venue constraints, paper forensics, core-contribution evidence, and the multi-round review gate. Positive manuscripts require one accepted core scientific contribution; terminal negative/inconclusive manuscripts require explicit claim downgrade and no improvement claim. Do not mark submission_ready while claim verification, forensics, citation integrity, or unresolved high/critical review findings fail.",
             "mcp_calls": [
                 {"tool": "literature_discovery", "args": {"operation": "submit", "corpus": corpus, "topic": f"{goal_topic}\n\nSearch purpose: final citation/source verification and unresolved bibliography blockers before submission.", **broad_metadata_discovery}},
             ],
@@ -2763,13 +3025,360 @@ def execution_spec(stage: str, state: dict[str, Any], contract: dict[str, Any], 
             "outputs": contract.get("missing", []),
         },
     )
-    if stage == "experiment" and job_action == "repair_failed_experiment":
+    source_mode = evidence_source_mode(base)
+    external_route = source_mode == "external_material"
+    if source_mode == "unknown" and stage in {"ideation", "idea_gate", "experiment_plan", "experiment"}:
+        spec = {
+            "skill": "autoreskill-workflow",
+            "role": "WorkflowGuard",
+            "goal": (
+                "Stop and reconcile the unknown or conflicting evidence source mode. Do not invoke PaperNexus, "
+                "materialize an external campaign, claim a GPU, prepare a launch intent, or advance the stage until "
+                "the canonical pre-idea gate and campaign source declarations select one supported route."
+            ),
+            "mcp_calls": [],
+            "capture": [],
+            "outputs": [],
+        }
+        spec.update(common)
+        return spec
+    if (
+        external_route
+        and stage in {"idea_gate", "experiment_plan", "experiment"}
+        and not committed_external_gate(base)
+    ):
+        spec = {
+            "skill": "autoreskill-gpu-idea-validation",
+            "role": "WorkflowGuard",
+            "goal": (
+                "Repair the torn or stale external-material pre-idea commit before continuing this later stage. "
+                "Revalidate the campaign, require NON_PAPERNEXUS_IDEA_LINT.complete=true, and materialize the "
+                "content-addressed lint and slot map with compare-and-swap. Do not invoke PaperNexus, select or "
+                "plan an idea, claim resources, record preflight, prepare launch intent, or launch work until the "
+                "full committed gate and all bound hashes validate."
+            ),
+            "mcp_calls": [],
+            "capture": [
+                script_cmd(
+                    "autoreskill-gpu-idea-validation",
+                    "idea_campaign.py",
+                    "check --project <project-root> --write-result",
+                ),
+                script_cmd(
+                    "autoreskill-gpu-idea-validation",
+                    "idea_campaign.py",
+                    "materialize --project <project-root> --expected-current-gate-sha256 <current-gate-sha256-or-absent>",
+                ),
+            ],
+            "outputs": [
+                ".autoreskill/ideation/NON_PAPERNEXUS_IDEA_CAMPAIGN.json",
+                ".autoreskill/ideation/committed/NON_PAPERNEXUS_IDEA_LINT.*.json",
+                ".autoreskill/ideation/committed/INNOVATION_SLOT_MAP.*.json",
+                ".autoreskill/ideation/PRE_IDEA_EVIDENCE_GATE.json",
+            ],
+        }
+        spec.update(common)
+        return spec
+    if stage == "ideation" and external_route:
+        if not committed_external_gate(base):
+            spec = {
+                "skill": "autoreskill-gpu-idea-validation",
+                "role": "Researcher",
+                "goal": (
+                    "Construct or repair the explicit non-PaperNexus external-material campaign with the "
+                    "ResearchStudio-Idea Phase 0-4 contract. Validate evidence readiness, explicit lineage and "
+                    "structural gaps, counted gap closures, mechanism-level collision, five-check audit, independent "
+                    "implementability, and protected pilot commitments. Then materialize only the pre-idea gate and "
+                    "slot map with compare-and-swap. Do not invoke PaperNexus or advance canonical selection state."
+                ),
+                "mcp_calls": [],
+                "capture": [
+                    script_cmd(
+                        "autoreskill-gpu-idea-validation",
+                        "idea_campaign.py",
+                        "check --project <project-root> --write-result",
+                    ),
+                    script_cmd(
+                        "autoreskill-gpu-idea-validation",
+                        "idea_campaign.py",
+                        "materialize --project <project-root> --expected-current-gate-sha256 <sha256-or-absent>",
+                    ),
+                ],
+                "outputs": [
+                    ".autoreskill/ideation/NON_PAPERNEXUS_IDEA_CAMPAIGN.json",
+                    ".autoreskill/ideation/committed/NON_PAPERNEXUS_IDEA_LINT.*.json",
+                    ".autoreskill/ideation/committed/INNOVATION_SLOT_MAP.*.json",
+                    ".autoreskill/ideation/PRE_IDEA_EVIDENCE_GATE.json",
+                ],
+            }
+        else:
+            spec = dict(spec)
+            spec["goal"] = (
+                "Consume the committed external-material campaign and passed pre-idea gate without invoking "
+                "PaperNexus. Generate the canonical 8-12 idea pool, debate and score 3-5 deep candidates, preserve "
+                "campaign/candidate/commitment identity, and produce no more than four admitted tracks under the "
+                "normal ideation-panel authority."
+            )
+            spec["mcp_calls"] = []
+            spec["capture"] = [
+                script_cmd("autoreskill-gpu-idea-validation", "idea_campaign.py", "check --project <project-root>"),
+                script_cmd("autoreskill-ideation-panel", "pre_idea_evidence_gate_lint.py", "--project <project-root>"),
+                script_cmd(
+                    "autoreskill-experiment-plan",
+                    "idea_pool_lint.py",
+                    "--project <project-root> --pool ideation/EXPERIMENT_IDEA_POOL.json",
+                ),
+                script_cmd("autoreskill-ideation-panel", "idea_scorecard_lint.py", "--project <project-root>"),
+                script_cmd(
+                    "autoreskill-gpu-idea-validation",
+                    "external_alignment_lint.py",
+                    "--project <project-root> --stage ideation",
+                ),
+                script_cmd("autoreskill-workflow", "innovation_story_lint.py", "--project <project-root> --stage ideation"),
+            ]
+            spec["outputs"] = [
+                ".autoreskill/ideation/NON_PAPERNEXUS_IDEA_CAMPAIGN.json",
+                ".autoreskill/ideation/committed/NON_PAPERNEXUS_IDEA_LINT.*.json",
+                ".autoreskill/ideation/committed/INNOVATION_SLOT_MAP.*.json",
+                ".autoreskill/ideation/PRE_IDEA_EVIDENCE_GATE.json",
+                ".autoreskill/ideation/EXPERIMENT_IDEA_POOL.json",
+                ".autoreskill/ideation/IDEA_NOVELTY_VENUE_SCORECARD.json",
+                ".autoreskill/ideation/IDEA_NOVELTY_VENUE_SCORECARD.md",
+                ".autoreskill/user_view/innovation_story/00_STORYLINE_DESIGN.md",
+            ]
+    elif stage == "idea_gate" and external_route:
         spec = dict(spec)
         spec["goal"] = (
-            "Analyze the latest failed/regressed/budget-stopped/spec-violating experiment before launching any new run. "
-            "Read EXPERIMENT_LEDGER, REMOTE_RUN metadata, synced logs, TRACK_PLAN_MATRIX, and the selected idea refs; write a concise failure analysis that names the root cause, failure_class, affected selected_idea_id/track_id/branch_id/version, and whether the issue is implementation, data/protocol, insufficient ablation/confirmation, or idea/mechanism failure. "
-            f"If fewer than {MAX_FAILED_EXPERIMENT_REPAIRS} same-idea repair attempts have been used, execute exactly one bounded repair run under the locked protocol, increment repair_attempt or repair_iteration in the ledger, and record next_action plus promotion decision. "
-            f"If {MAX_FAILED_EXPERIMENT_REPAIRS} same-idea repairs have already failed to produce promoted improvement, do not launch another same-idea repair; write coder/EXPERIMENT_NEGATIVE_BLOCKER.json with status=change_idea_or_innovation_required so WorkflowGuard can return to experiment_plan, idea_gate, or ideation."
+            "Pairwise-review the external-material shortlist under the canonical idea-gate authority without "
+            "PaperNexus calls. Preserve exact campaign, candidate, fragment, track, and protected-commitment "
+            "identity; require the independent panel design review and external alignment before selection."
+        )
+        spec["mcp_calls"] = []
+        spec["capture"] = append_unique(
+            list(spec.get("capture") or []),
+            [
+                script_cmd(
+                    "autoreskill-gpu-idea-validation",
+                    "idea_campaign.py",
+                    "template --kind panel-design-review",
+                ),
+                script_cmd(
+                    "autoreskill-gpu-idea-validation",
+                    "idea_campaign.py",
+                    "write-panel-design-review --project <project-root> --input <absolute-independent-panel-review.json> --expected-current-panel-sha256 <current-panel-sha256-or-absent>",
+                ),
+                script_cmd(
+                    "autoreskill-gpu-idea-validation",
+                    "external_alignment_lint.py",
+                    "--project <project-root> --stage idea_gate",
+                )
+            ],
+        )
+    elif stage == "experiment_plan" and external_route:
+        spec = dict(spec)
+        spec["goal"] = (
+            "Materialize the reviewed external-material thesis into canonical innovation/review packets without "
+            "PaperNexus calls or fabricated provenance. Preserve distinct campaign candidate, idea fragment, and "
+            "track identities plus the exact protected commitment, local_gpu compute class, and reviewed execution route."
+        )
+        spec["mcp_calls"] = []
+        spec["capture"] = append_unique(
+            list(spec.get("capture") or []),
+            [
+                script_cmd(
+                    "autoreskill-gpu-idea-validation",
+                    "external_alignment_lint.py",
+                    "--project <project-root> --stage experiment_plan",
+                )
+            ],
+        )
+    if stage == "idea_gate" and job_action == "recover_replenishment_route":
+        spec = dict(spec)
+        spec["skill"] = "autoreskill-workflow"
+        spec["goal"] = (
+            "Recover one project-nonterminal replenishment route as a local, idempotent scientific-control transaction. "
+            "Start with research_decision.py --program-recovery-status --check and execute only the reported missing phases. "
+            "Phase 1, when the current contract is superseded: use the direct-user authorization from "
+            "REPLENISHMENT_INTERVENTION_REQUEST.json to name one unresolved paper decision, draft a genuinely changed-basis "
+            "algorithmic/non-evaluator PROGRAM_CLAIM_CONTRACT, complete role-separated novelty, implementability, and scientific-contract "
+            "review, then CAS-commit only when the approving review hash and authorized cap match. Phase 2: run "
+            "research_decision.py --activate-program-revision --check and then --write; archive the old terminal route, quarantine old "
+            "selection authority, and never restore a retired candidate. Phase 3: run one --replenishment --write only if no event exists "
+            "for the current basis, then generate exactly one 8-12-card pool, merge equal causal_signature values, and screen one 3-5 item "
+            "shortlist. Bind EXPERIMENT_IDEA_POOL and IDEA_NOVELTY_VENUE_SCORECARD to active_program_revision.program_revision_id and "
+            "program_claim_contract_sha256. When an unchanged-basis event already exists, materialize its missing supply without consuming "
+            "another transaction. Do not infer or raise a budget, generate IDEA_TRACK_SEEDS, admit a track, select or change a primary, write experiment rows, call resource APIs, "
+            "launch jobs, or change any paper claim in this repair. Values 0 and exhausted budgets remain hard stops."
+        )
+        spec["mcp_calls"] = []
+        spec["capture"] = append_unique(
+            list(spec.get("capture") or []),
+            [
+                script_cmd("autoreskill-workflow", "research_decision.py", "--project <project-root> --program-recovery-status --check"),
+                script_cmd("autoreskill-workflow", "program_claim_contract.py", "check --project <project-root> --require-replacement-authority"),
+                script_cmd("autoreskill-workflow", "research_decision.py", "--project <project-root> --activate-program-revision --check"),
+                script_cmd("autoreskill-workflow", "research_decision.py", "--project <project-root> --activate-program-revision --write"),
+                script_cmd("autoreskill-workflow", "research_decision.py", "--project <project-root> --replenishment --write"),
+                script_cmd("autoreskill-experiment-plan", "idea_pool_lint.py", "--project <project-root>"),
+                script_cmd("autoreskill-ideation-panel", "idea_scorecard_lint.py", "--project <project-root>"),
+            ],
+        )
+        spec["outputs"] = append_unique(
+            list(spec.get("outputs") or []),
+            [
+                ".autoreskill/control/UNRESOLVED_PAPER_DECISION*.json",
+                ".autoreskill/control/PROGRAM_CLAIM_CONTRACT_REPLACEMENT_DRAFT*.json",
+                ".autoreskill/reviewer/PROGRAM_CLAIM_CONTRACT_REPLACEMENT_REVIEW*.json",
+                ".autoreskill/orchestrator/PROGRAM_CLAIM_CONTRACT.json",
+                ".autoreskill/ideation/IDEA_DECISION_LEDGER.json",
+                ".autoreskill/ideation/EXPERIMENT_IDEA_POOL.json",
+                ".autoreskill/ideation/IDEA_NOVELTY_VENUE_SCORECARD.json",
+                ".autoreskill/decision_log.jsonl",
+            ],
+        )
+    if stage == "experiment" and job_action in {"repair_failed_experiment", "adjudicate_scientific_outcome"}:
+        spec = dict(spec)
+        spec["goal"] = (
+            "Adjudicate the latest untyped terminal run before any relaunch. Read the locked track hypothesis, REMOTE_RUN, canonical result, evaluator/spec/protocol evidence, and selection identity; write SCIENTIFIC_OUTCOME.json with one allowed outcome class and run research_decision.py --check. "
+            "Only infrastructure or implementation defects may enter bounded operational repair, protocol-invalid runs must be quarantined, and valid negative or inconclusive outcomes must update belief and follow their predeclared scientific route. Absence of improvement is not evidence of a code defect."
+        )
+    if stage == "experiment" and job_action in {
+        "apply_research_decision",
+        "reconcile_scientific_transition",
+        "write_terminal_program_decision",
+        "queue_ablation_or_confirmation",
+    }:
+        spec = dict(spec)
+        if job_action == "write_terminal_program_decision":
+            spec["goal"] = (
+                "Validate that every active track is terminal, no launchable or live queue row remains, and every terminal run has an applied scientific outcome. "
+                "Run research_decision.py --all-terminal --check, then --write only when it passes; reconcile the experiment ledger. "
+                "A negative or inconclusive program must set improvement_claim_allowed=false and carry explicit claim downgrade before advancing."
+            )
+        elif job_action == "queue_ablation_or_confirmation":
+            spec["goal"] = (
+                "Treat the positive result as candidate evidence only. Reconcile its scientific decision, then queue the linked ablation or confirmation under the same locked protocol and current selection identity; do not promote it directly."
+            )
+        else:
+            spec["goal"] = (
+                "Read the latest SCIENTIFIC_OUTCOME.json and canonical result, run research_decision.py --check for its stable run id, and apply it once with --write when valid. "
+                "Regenerate the track matrix and experiment queue from the updated belief/lifecycle state; do not launch work in this decision step."
+            )
+        spec["capture"] = append_unique(
+            list(spec.get("capture") or []),
+            [
+                script_cmd("autoreskill-workflow", "research_decision.py", "--project <project-root> --run-id <run-id> --check"),
+                script_cmd("autoreskill-run-experiment", "dataset_group_hpo.py", "reconcile --project <project-root> --write"),
+                script_cmd("autoreskill-workflow", "stage_transition_materialize.py", "--project <project-root> --dry-run"),
+                script_cmd("autoreskill-workflow", "stage_transition_materialize.py", "--project <project-root> --expected-queue-revision <dry-run-queue-revision>"),
+                script_cmd("autoreskill-workflow", "experiment_next_actions.py", "check --project <project-root>"),
+            ],
+        )
+        spec["outputs"] = append_unique(
+            list(spec.get("outputs") or []),
+            [
+                ".autoreskill/ideation/IDEA_DECISION_LEDGER.json",
+                ".autoreskill/orchestrator/TRACK_PLAN_MATRIX.json",
+                ".autoreskill/experiment/NEXT_EXPERIMENT_QUEUE.json",
+                ".autoreskill/coder/EXPERIMENT_LEDGER.json",
+            ],
+        )
+    if stage == "experiment" and job_action == "replenish_experiment_portfolio":
+        spec = dict(spec)
+        spec["skill"] = "autoreskill-workflow"
+        spec["goal"] = (
+            "Replenish hypothesis supply without reselecting the current primary or changing any live run identity. "
+            "First rerun frontier, then run research_decision.py --replenishment --write. This ledger transaction must "
+            "authorize the current changed basis before generation; if it rejects or is idempotent, stop this action. "
+            "The enforced gate requires a full_auto_bounded paper goal, positive method_admission_deficit, no fillable "
+            "committed method candidate for the active program revision, no "
+            "decision-bearing ready/live row, unresolved program status, remaining contract budget, and no terminal closure. "
+            "Zero active tracks are eligible when these conditions hold. After authorization, preserve the active "
+            "selection_fingerprint, reuse the canonical evidence_source_mode and existing audited corpus, and record the "
+            "shortlist-exhausted/invalid/superseded lifecycle trigger through existing decision authorities. Reuse raw hits, "
+            "static code evidence, and reviewed decisions before any search; run only targeted incremental discovery needed "
+            "to close named evidence roles. Generate 8-12 lightweight causal hypothesis cards once, merge equal "
+            "causal_signature candidates, deterministically screen one 3-5 item shortlist, and emit track seeds for the "
+            "new shortlist supply revision. Do not change the selected primary, admit tracks, write experiment rows, submit "
+            "jobs, create a parallel schema, or repeat the action when its lifecycle/evidence/resource fingerprint is unchanged. "
+            "The next bounded tick owns batch admission and minimum pilot packet materialization."
+        )
+        spec["capture"] = append_unique(
+            list(spec.get("capture") or []),
+            [
+                script_cmd("autoreskill-workflow", "experiment_next_actions.py", "frontier --project <project-root>"),
+                script_cmd("autoreskill-workflow", "research_decision.py", "--project <project-root> --replenishment --write"),
+                script_cmd("autoreskill-ideation-panel", "pre_idea_evidence_gate_lint.py", "--project <project-root>"),
+                script_cmd("autoreskill-experiment-plan", "idea_pool_lint.py", "--project <project-root>"),
+                script_cmd("autoreskill-ideation-panel", "idea_scorecard_lint.py", "--project <project-root>"),
+                script_cmd("autoreskill-ideation-panel", "idea_track_seeds.py", "--project <project-root> --check"),
+            ],
+        )
+        spec["outputs"] = append_unique(
+            list(spec.get("outputs") or []),
+            [
+                ".autoreskill/ideation/EXPERIMENT_IDEA_POOL.json",
+                ".autoreskill/ideation/IDEA_NOVELTY_VENUE_SCORECARD.json",
+                ".autoreskill/ideation/IDEA_TRACK_SEEDS.json",
+                ".autoreskill/ideation/IDEA_DECISION_LEDGER.json",
+                ".autoreskill/decision_log.jsonl",
+            ],
+        )
+    if stage == "experiment" and job_action in {"materialize_experiment_frontier", "batch_fill_experiment_portfolio"}:
+        spec = dict(spec)
+        spec["skill"] = "autoreskill-workflow" if job_action == "batch_fill_experiment_portfolio" else "autoreskill-experiment-plan"
+        if job_action == "batch_fill_experiment_portfolio":
+            spec["goal"] = (
+                "Consume the exact portfolio_fillable_candidate_ids from the committed shortlist in one synchronous, "
+                "journaled batch. Run portfolio_batch.py in dry-run mode, then apply the same operation id after source "
+                "hashes still match. Do not regenerate/rescore ideas, exceed four nonterminal tracks, submit jobs, or "
+                "promote alternate pilot evidence."
+            )
+        else:
+            spec["goal"] = (
+                "Close the current bounded launch-frontier deficit synchronously. Materialize only admitted per-track "
+                "packets and packet-enumerated, dependency-unlocked rows; alternates remain pilot_only. Do not infer work "
+                "from idle GPU count, add random seeds, submit a backend job, or create an experiment heartbeat."
+            )
+        materialize_commands = (
+            [
+                script_cmd("autoreskill-workflow", "portfolio_batch.py", "--project <project-root> --dry-run"),
+                script_cmd("autoreskill-workflow", "portfolio_batch.py", "--project <project-root> --operation-id <dry-run-operation-id>"),
+            ]
+            if job_action == "batch_fill_experiment_portfolio"
+            else [
+                script_cmd("autoreskill-experiment-plan", "experiment_materialize.py", "--project <project-root> --all-admitted"),
+                script_cmd("autoreskill-experiment-plan", "track_plan_matrix.py", "--project <project-root>"),
+                script_cmd("autoreskill-run-experiment", "dataset_group_hpo.py", "reconcile --project <project-root> --write"),
+                script_cmd("autoreskill-workflow", "stage_transition_materialize.py", "--project <project-root> --dry-run"),
+                script_cmd("autoreskill-workflow", "stage_transition_materialize.py", "--project <project-root> --expected-queue-revision <dry-run-queue-revision>"),
+            ]
+        )
+        spec["capture"] = append_unique(
+            list(spec.get("capture") or []),
+            materialize_commands + [
+                script_cmd("autoreskill-workflow", "experiment_next_actions.py", "frontier --project <project-root>"),
+                script_cmd("autoreskill-workflow", "experiment_next_actions.py", "check --project <project-root>"),
+            ],
+        )
+        spec["outputs"] = append_unique(
+            list(spec.get("outputs") or []),
+            [
+                ".autoreskill/orchestrator/tracks/*/INNOVATION_PACKET.json",
+                ".autoreskill/planner/tracks/*/EXPERIMENT_REVIEW_PACKET.json",
+                ".autoreskill/orchestrator/TRACK_PLAN_MATRIX.json",
+                ".autoreskill/experiment/NEXT_EXPERIMENT_QUEUE.json",
+            ],
+        )
+    if stage == "experiment" and job_action in {
+        "repair_or_reconcile_infrastructure",
+        "refine_implementation",
+        "repair_experiment_protocol",
+    }:
+        spec = dict(spec)
+        spec["goal"] = (
+            "Repair only the typed operational defect recorded by the latest SCIENTIFIC_OUTCOME. Preserve hypothesis belief, selection identity, and the locked scientific comparison. "
+            "Use the same failure_signature for retries, stop after two operational attempts by default, and do not reinterpret an invalid run as scientific evidence."
         )
         spec["capture"] = append_unique(
             list(spec.get("capture") or []),
@@ -2787,6 +3396,105 @@ def execution_spec(stage: str, state: dict[str, Any], contract: dict[str, Any], 
                 ".autoreskill/coder/TRACK_RANKING.json",
                 ".autoreskill/coder/experiments/**/REMOTE_RUN.json",
                 ".autoreskill/coder/experiments/**/results/*",
+            ],
+        )
+    if stage == "experiment" and job_action == "launch_parallel_experiment":
+        spec = dict(spec)
+        if external_route:
+            spec["goal"] = (
+                "Do not invent an experiment to fill an idle GPU. Reconcile the canonical queue, normalize a fresh "
+                "captured SSH/BJTU resource observation, schedule read-only, and process only the first deterministic "
+                "external-material pilot assignment for the current revision. Bind its row and physical pool atomically "
+                "with claim-assignment, preserve the candidate protected commitment, verify the derived budget and exact "
+                "one-GPU launch spec, run route-specific preflight, and persist the queue submit intent before any remote "
+                "side effect. A scan, schedule, lease, preflight, or intent is not launch permission; all current-action, "
+                "project-policy, and backend-policy authorities must pass. Release unlaunched failures, stale the snapshot, "
+                "record the receipt and authoritative observation, refresh, and reschedule. Never preclaim a batch, "
+                "kill/preempt work, or retry an ambiguous prepared attempt."
+            )
+        else:
+            spec["goal"] = (
+                "Do not treat the currently running experiment as a project-wide barrier. "
+                "Read .autoreskill/experiment/NEXT_EXPERIMENT_QUEUE.json, reconcile submitting/needs_sync/running rows, "
+                "refresh live GPU/HPC resource pools with the backend skill or gpu-idle-scan, persist that snapshot, and run experiment_next_actions.py schedule. "
+                "Use only its deterministic ready-row assignments: scientific admission precedes resource placement, acquisition priority does not globally block lower-priority work from otherwise incompatible idle pools, and no experiment may be invented to fill a GPU. "
+                "Atomically claim only the current first assignment with its expected queue revision and this worker owner; only the lease winner may launch. Verify project/capability profile fit, run exact backend preflight, persist submit intent before the side effect, record the native receipt, and accept running/terminal state only from authoritative observation. "
+                "Then refresh resource evidence and repeat until no fitting row or the bounded wake cap remains. Never retry an ambiguous prepared attempt. Release only an unlaunched lease or one with explicit no-live-run proof. "
+                "For BJTU, admit one physical submission per fresh snapshot/preflight/verification checkpoint, then refresh before the next assignment. If no row fits, preserve the scheduler rejection reasons and only then allow the normal experiment heartbeat to wait."
+            )
+        claim_command = (
+            script_cmd(
+                "autoreskill-workflow",
+                "experiment_next_actions.py",
+                "claim-assignment --project <project-root> --row-id <row-id> --pool-id <pool-id> --owner <thread-or-worker-id> --expected-revision <queue-revision>",
+            )
+            if external_route
+            else script_cmd(
+                "autoreskill-workflow",
+                "experiment_next_actions.py",
+                "claim --project <project-root> --row-id <row-id> --owner <thread-or-worker-id> --expected-revision <queue-revision>",
+            )
+        )
+        if external_route:
+            spec["capture"] = [
+                script_cmd("autoreskill-workflow", "experiment_next_actions.py", "check --project <project-root>"),
+                script_cmd(
+                    "autoreskill-gpu-idea-validation",
+                    "resource_adapter.py",
+                    "normalize-for-row --project <project-root> --row-id <row-id> --input <absolute-route-matched-captured-resource-observation.json> --output <absolute-resource-snapshot-proposal.json>",
+                ),
+                script_cmd(
+                    "autoreskill-workflow",
+                    "experiment_next_actions.py",
+                    "commit-resource-snapshot --project <project-root> --input <absolute-resource-snapshot-proposal.json> --owner <thread-or-worker-id> --expected-revision <queue-revision-before-snapshot-commit>",
+                ),
+                script_cmd("autoreskill-workflow", "experiment_next_actions.py", "schedule --project <project-root>"),
+                claim_command,
+                script_cmd("autoreskill-implement-experiment", "baseline_clone_lint.py", "--project <project-root>"),
+                script_cmd("autoreskill-run-experiment", "baseline_protocol_launch_lint.py", "--project <project-root>"),
+                script_cmd(
+                    "autoreskill-gpu-idea-validation",
+                    "resource_adapter.py",
+                    "launch-spec-digest --input <absolute-launch-spec.json>",
+                ),
+                script_cmd(
+                    "autoreskill-workflow",
+                    "experiment_next_actions.py",
+                    "record-backend-preflight --project <project-root> --row-id <row-id> --owner <thread-or-worker-id> --expected-revision <queue-revision-after-claim> --input <absolute-route-specific-backend-preflight.json>",
+                ),
+                script_cmd(
+                    "autoreskill-gpu-idea-validation",
+                    "resource_adapter.py",
+                    "budget-check --project <project-root> --candidate-id <external-candidate-id> --reserve-gpu-hours <hours>",
+                ),
+                script_cmd(
+                    "autoreskill-gpu-idea-validation",
+                    "resource_adapter.py",
+                    "prepare-launch-intent --project <project-root> --row-id <row-id> --pool-id <pool-id> --run-dir <project-root>/.autoreskill/coder/experiments/<track-id>/<experiment-id> --launch-spec <absolute-launch-spec.json> --approval-ref <current-action-approval-ref>",
+                ),
+                script_cmd("autoreskill-workflow", "experiment_next_actions.py", "render --project <project-root>"),
+            ]
+        else:
+            spec["capture"] = append_unique(
+                list(spec.get("capture") or []),
+                [
+                    script_cmd("autoreskill-workflow", "experiment_next_actions.py", "check --project <project-root>"),
+                    script_cmd("autoreskill-workflow", "experiment_next_actions.py", "schedule --project <project-root>"),
+                    claim_command,
+                    script_cmd("autoreskill-implement-experiment", "baseline_clone_lint.py", "--project <project-root>"),
+                    script_cmd("autoreskill-run-experiment", "baseline_protocol_launch_lint.py", "--project <project-root>"),
+                    script_cmd("autoreskill-workflow", "experiment_next_actions.py", "render --project <project-root>"),
+                ],
+            )
+        spec["outputs"] = append_unique(
+            list(spec.get("outputs") or []),
+            [
+                ".autoreskill/experiment/NEXT_EXPERIMENT_QUEUE.json",
+                ".autoreskill/experiment/RESOURCE_SNAPSHOT_PROPOSAL.json",
+                ".autoreskill/experiment/BACKEND_PREFLIGHT.json",
+                ".autoreskill/coder/EXPERIMENT_LEDGER.json",
+                ".autoreskill/coder/EXPERIMENT_INDEX.md",
+                ".autoreskill/coder/experiments/**/REMOTE_RUN.json",
             ],
         )
     spec.update(common)
@@ -2879,12 +3587,27 @@ def write_job_packet(
                 ".autoreskill/paper/AIS_STYLE_IMPRESSIONS.json",
             ],
         )
-    constraints = [
-        "Use PaperNexus live graph work only through papernexus-remote MCP.",
-        "Do not use local PaperNexus CLI, raw HTTP, local graph files, local MCP, or SSH graph commands as substitutes.",
-        "Do not invent citations, evidence, or experiment results.",
-        "After producing artifacts, rerun the relevant linter before marking this job complete.",
-    ]
+    packet_source_mode = evidence_source_mode(base)
+    if packet_source_mode == "unknown" and stage in {"ideation", "idea_gate", "experiment_plan", "experiment"}:
+        constraints = [
+            "Fail closed: the evidence source mode is unknown or conflicting.",
+            "Do not invoke PaperNexus, materialize external evidence, claim resources, prepare intent, launch, or advance state.",
+            "Reconcile the canonical gate/campaign source declaration before dispatching a scientific child skill.",
+        ]
+    elif packet_source_mode == "external_material" and stage in {"ideation", "idea_gate", "experiment_plan", "experiment"}:
+        constraints = [
+            "Do not invoke PaperNexus or relabel PaperNexus artifacts as external_material for this campaign.",
+            "Preserve the committed external campaign, candidate, fragment, track, and protected-commitment identity chain.",
+            "Do not invent citations, evidence, experiment results, resource availability, or launch authority.",
+            "After producing artifacts, rerun the relevant external alignment and stage linters before marking this job complete.",
+        ]
+    else:
+        constraints = [
+            "Use PaperNexus live graph work only through papernexus-remote MCP.",
+            "Do not use local PaperNexus CLI, raw HTTP, local graph files, local MCP, or SSH graph commands as substitutes.",
+            "Do not invent citations, evidence, or experiment results.",
+            "After producing artifacts, rerun the relevant linter before marking this job complete.",
+        ]
     acceptance_criteria = [
         "Required outputs exist under .autoreskill/",
         "contract_lint.py or the stage linter reports complete",
@@ -2932,16 +3655,16 @@ def write_job_packet(
     if stage in {"ideation", "idea_gate", "experiment_plan"}:
         constraints.extend(
             [
-                "Every paper idea or selected paper plan must preserve at least three mutually necessary innovation points.",
-                "The innovation bundle must cover problem/protocol/evaluation, method/mechanism, and training/integration/analysis/validation; three module names are not sufficient.",
+                "Require one falsifiable core scientific contribution; supporting contributions are optional and count only when removing them invalidates the core claim.",
+                "Validation, analysis, parameter tuning, and engineering support cannot be relabeled as independent scientific contributions.",
                 "At least one innovation point must be grounded in near-neighbor, far-neighbor, proposal-graph, external-domain, or cross-lane transfer evidence unless current-field absence evidence is explicitly source-backed.",
                 "The storyline must explain the opening tension, hidden cause, method-as-resolution, proof ladder, reviewer risk/defense, and a sequential narrative spine.",
             ]
         )
         acceptance_criteria.extend(
             [
-                "Machine-readable artifacts preserve the three-or-more innovation bundle and complete storyline",
-                "The selected idea would not remain a coherent paper if any one innovation point were removed",
+                "Machine-readable artifacts preserve the core contribution, causal hypothesis, and complete storyline",
+                "Every counted supporting scientific contribution records counterfactual necessity",
             ]
         )
     if paper_code_transfer_requested:
@@ -2968,21 +3691,20 @@ def write_job_packet(
             ]
         )
         acceptance_criteria.append("baseline_report_alignment_lint.py reports complete for the current stage")
-    if stage == "experiment" and str(job.get("action") or "") == "repair_failed_experiment":
+    if stage == "experiment" and str(job.get("action") or "") in {"repair_failed_experiment", "adjudicate_scientific_outcome"}:
         constraints.extend(
             [
-                "Analyze the failed or regressed run before launching a repair; do not blindly rerun the same command.",
-                "Write EXPERIMENT_FAILURE_ANALYSIS.json with root_cause, failure_class, selected_idea_id, track_id, branch/version lineage, evidence refs, and the chosen repair action.",
-                f"Run at most {MAX_FAILED_EXPERIMENT_REPAIRS} same-idea repair attempts. After that, write EXPERIMENT_NEGATIVE_BLOCKER.json status=change_idea_or_innovation_required instead of launching another same-idea run.",
-                "A repaired run must preserve the locked protocol unless the job routes back to experiment_plan with an explicit route decision.",
-                "Candidate-supported or diagnostic-only results are not promoted evidence; record them as pilot/negative evidence with next_action.",
+                "Write SCIENTIFIC_OUTCOME.json against canonical evidence and the predeclared falsifier before choosing repair, pivot, retire, scope, or confirmation.",
+                "Operational retries preserve scientific belief and stop after two attempts for the same failure signature by default.",
+                "Scientific revisions use their separate per-track budget; valid negative evidence is never repaired as code solely because the score did not improve.",
+                "Candidate-supported or diagnostic-only results are not promoted evidence.",
             ]
         )
         acceptance_criteria.extend(
             [
-                "EXPERIMENT_FAILURE_ANALYSIS.json explains the failure cause and repair decision",
-                "EXPERIMENT_LEDGER.json records repair_attempt or repair_iteration, failure_class, next_action, selected_idea_id, and track_id",
-                "If two same-idea repairs have already failed, EXPERIMENT_NEGATIVE_BLOCKER.json requests change_idea_or_innovation_required and no third same-idea repair is launched",
+                "SCIENTIFIC_OUTCOME.json records identity, validity gates, outcome class, belief effect, and recommended transition",
+                "EXPERIMENT_LEDGER.json preserves the applied decision and separate operational/scientific counters",
+                "No launch occurs during scientific adjudication",
             ]
         )
     acceptance_contract = acceptance_contract_for_packet(
@@ -2994,6 +3716,19 @@ def write_job_packet(
         literature_search=literature_search,
         paper_code_transfer_requested=paper_code_transfer_requested,
     )
+    allowed_writes = stage_write_scopes(stage)
+    if packet_source_mode == "unknown" and stage in {"ideation", "idea_gate", "experiment_plan", "experiment"}:
+        allowed_writes = []
+    elif packet_source_mode == "external_material":
+        allowed_writes = [path for path in allowed_writes if path != ".autoreskill/papernexus/"]
+        if spec["skill"] == "autoreskill-gpu-idea-validation" and stage == "ideation":
+            allowed_writes = [
+                ".autoreskill/ideation/NON_PAPERNEXUS_IDEA_CAMPAIGN.json",
+                ".autoreskill/ideation/committed/",
+                ".autoreskill/ideation/PRE_IDEA_EVIDENCE_GATE.json",
+                ".autoreskill/evidence_cart.jsonl",
+                ".autoreskill/artifacts_index.json",
+            ]
     path = base / "job_packets" / f"{job['job_id']}.json"
     packet = {
         "schema_version": 1,
@@ -3012,7 +3747,7 @@ def write_job_packet(
         "missing": spec["missing"],
         "mcp_calls": mcp_calls,
         "capture_commands": capture_commands,
-        "allowed_writes": stage_write_scopes(stage),
+        "allowed_writes": allowed_writes,
         "constraints": constraints,
         "outputs": outputs,
         "acceptance_contract": acceptance_contract,
@@ -3057,7 +3792,7 @@ def stage_write_scopes(stage: str) -> list[str]:
         "idea_gate": [".autoreskill/ideation/", ".autoreskill/reviewer/", ".autoreskill/literature/", ".autoreskill/papernexus/", ".autoreskill/user_view/"],
         "experiment_plan": [".autoreskill/orchestrator/", ".autoreskill/planner/", ".autoreskill/literature/", ".autoreskill/papernexus/", ".autoreskill/user_view/"],
         "code": [".autoreskill/coder/"],
-        "experiment": [".autoreskill/coder/"],
+        "experiment": [".autoreskill/coder/", ".autoreskill/experiment/"],
         "analysis": [".autoreskill/analyzer/", ".autoreskill/literature/", ".autoreskill/papernexus/", ".autoreskill/user_view/"],
         "review_pressure": [".autoreskill/reviewer/", ".autoreskill/literature/", ".autoreskill/papernexus/", ".autoreskill/user_view/"],
         "writing": [".autoreskill/paper/", ".autoreskill/literature/", ".autoreskill/papernexus/", ".autoreskill/user_view/"],
@@ -3127,6 +3862,25 @@ def complete_current_stage(project: str, state: dict[str, Any], contract: dict[s
         "continue_now": str(state.get("autonomy_level") or "") == "full_auto_bounded",
         "heartbeat_decision": "not_created_local_progress_available",
     }
+
+
+def terminal_program_route(base: Path) -> dict[str, Any] | None:
+    ledger = read_json(base / "ideation/IDEA_DECISION_LEDGER.json", {})
+    decision = ledger.get("program_decision") if isinstance(ledger, dict) else None
+    if not isinstance(decision, dict):
+        return None
+    missing, _, _ = validate_terminal_program_decision(base, decision)
+    return None if missing else decision
+
+
+def supersede_terminal_experiment_jobs(base: Path, decision: dict[str, Any]) -> None:
+    reason = f"terminal scientific program decision {decision.get('decision_id')} supersedes experiment repair/wait"
+    for job in rows(base / "repair_queue.jsonl"):
+        if str(job.get("stage") or "") == "experiment" and str(job.get("status") or "") in {"pending", "retry", "running"}:
+            supersede_repair_job(base, job, reason)
+    for job in rows(base / "async_jobs.jsonl"):
+        if str(job.get("stage") or "") == "experiment" and str(job.get("status") or "") in {"pending", "retry", "running"}:
+            supersede_async_job(base, job, reason)
 
 
 def current_active_selection(base: Path) -> dict[str, set[str]]:
@@ -3212,8 +3966,25 @@ def route_stale_for_active_selection(route: dict[str, Any], active: dict[str, se
 
     active_ideas = active.get("idea_ids") or set()
     active_tracks = active.get("track_ids") or set()
-    route_idea = route.get("selected_idea_id") or route.get("idea_id")
-    route_track = route.get("track_id")
+    nested_selection: dict[str, Any] = {}
+    for key in ["failed_selection", "selection", "current_selection"]:
+        value = route.get(key)
+        if isinstance(value, dict):
+            nested_selection.update(value)
+    route_idea = (
+        route.get("selected_idea_id")
+        or route.get("idea_id")
+        or nested_selection.get("selected_idea_id")
+        or nested_selection.get("idea_id")
+    )
+    route_track = (
+        route.get("selected_track_id")
+        or route.get("track_id")
+        or nested_selection.get("selected_track_id")
+        or nested_selection.get("track_id")
+    )
+    if (active_ideas or active_tracks) and not (route_idea or route_track):
+        return True
     if route_idea and active_ideas and str(route_idea) not in active_ideas:
         return True
     if route_track and active_tracks and str(route_track) not in active_tracks:
@@ -3238,18 +4009,22 @@ def negative_result_rollback_target(base: Path) -> dict[str, Any] | None:
             "next_action": blocker.get("next_action") or NEXT_ACTIONS.get(target),
             "source": "coder/EXPERIMENT_NEGATIVE_BLOCKER.json",
             "decision": "change_idea_or_innovation_after_two_repairs",
-            "reason": blocker.get("reason") or "same-idea repair budget exhausted without promoted improvement",
+            "reason": blocker.get("reason") or "legacy route requires a new causal hypothesis after bounded scientific revisions",
             "required_reentry_conditions": [
                 "Update IDEA_DECISION_LEDGER.json for the failed idea lifecycle.",
-                "Select an alternate idea or rebuild the innovation bundle before returning to experiment_plan.",
-                "Do not launch a third same-idea repair without changing the idea, innovation point, or track.",
+                "Select an alternate track or change one causal assumption before returning to experiment_plan.",
+                "Do not relaunch the same falsified hypothesis under a renamed method or parameter-only change.",
             ],
         }
 
     positive_routes = sorted(base.glob("orchestrator/POSITIVE_ONLY_STRUCTURAL_LEAP_ROUTE*.json"))
     for path in reversed(positive_routes):
         positive_route = read_json(path, {})
-        if isinstance(positive_route, dict) and positive_route.get("target_stage_after_decision") in STAGES:
+        if (
+            isinstance(positive_route, dict)
+            and positive_route.get("target_stage_after_decision") in STAGES
+            and not route_stale_for_active_selection(positive_route, active_selection)
+        ):
             target = str(positive_route["target_stage_after_decision"])
             return {
                 "target_stage": target,
@@ -3261,7 +4036,11 @@ def negative_result_rollback_target(base: Path) -> dict[str, Any] | None:
             }
 
     evidence_route = read_json(base / "orchestrator/EVIDENCE_GATE_ROUTE_DECISION.json", {})
-    if isinstance(evidence_route, dict) and evidence_route.get("target_stage_after_decision") in STAGES:
+    if (
+        isinstance(evidence_route, dict)
+        and evidence_route.get("target_stage_after_decision") in STAGES
+        and not route_stale_for_active_selection(evidence_route, active_selection)
+    ):
         target = str(evidence_route["target_stage_after_decision"])
         return {
             "target_stage": target,
@@ -3290,7 +4069,11 @@ def negative_result_rollback_target(base: Path) -> dict[str, Any] | None:
         }
 
     rollback_route = read_json(base / "orchestrator/TRACK_SWITCH_ROLLBACK_DECISION.json", {})
-    if isinstance(rollback_route, dict) and rollback_route.get("decision") == "rollback_to_experiment_plan":
+    if (
+        isinstance(rollback_route, dict)
+        and rollback_route.get("decision") == "rollback_to_experiment_plan"
+        and not route_stale_for_active_selection(rollback_route, active_selection)
+    ):
         target = "experiment_plan"
         return {
             "target_stage": target,
@@ -3362,12 +4145,12 @@ def negative_reentry_repair_required(base: Path) -> dict[str, Any] | None:
         "active_track_ids": sorted(active_selection.get("track_ids") or []),
         "reason": (
             f"positive-only reentry has not materially changed the failed selection "
-            f"{failed_idea}/{failed_track}; select an alternate idea or rebuild the innovation bundle before continuing"
+            f"{failed_idea}/{failed_track}; select an alternate track or change one causal assumption before continuing"
         ),
         "required_reentry_conditions": route.get("required_reentry_conditions")
         or [
             "Update IDEA_DECISION_LEDGER.json for the failed idea lifecycle.",
-            "Select an alternate idea or rebuild the innovation bundle before returning to experiment_plan.",
+            "Select an alternate track or change one causal assumption before returning to experiment_plan.",
         ],
     }
 
@@ -3635,8 +4418,8 @@ def selected_negative_evidence_rollback_target(base: Path) -> dict[str, Any]:
         "active_track_ids": sorted(gate_selection.get("track_ids") or []),
         "required_reentry_conditions": [
             "Update IDEA_DECISION_LEDGER.json so the failed selected idea/track is parked or killed with failure_class and next_action.",
-            "Select a non-equivalent alternate idea/track or rebuild the innovation bundle from PaperNexus evidence.",
-            "Do not generate a negative-result manuscript.",
+            "Select a non-equivalent alternate track or change one causal assumption using evidence.",
+            "Do not make a positive improvement claim; a validated all-terminal program may report bounded negative evidence.",
             "Do not return to experiment_plan/code until the new selected idea has no unresolved same-track terminal negative evidence.",
         ],
     }
@@ -3699,7 +4482,7 @@ def apply_selected_negative_evidence_rollback(project: str, state: dict[str, Any
     }
 
 
-def run_tick(args: argparse.Namespace) -> None:
+def run_tick_owned(args: argparse.Namespace) -> None:
     base = ar(args.project)
     state = load_state(args.project)
     policy = read_json(base / "autopilot_policy.json", {})
@@ -3707,6 +4490,40 @@ def run_tick(args: argparse.Namespace) -> None:
     async_queue = rows(base / "async_jobs.jsonl")
     retry_override = active_retry_override(base, args)
     current_stage = str(state.get("stage", "init"))
+    program_route = terminal_program_route(base) if current_stage == "experiment" else None
+    if program_route:
+        supersede_terminal_experiment_jobs(base, program_route)
+        repair_queue = rows(base / "repair_queue.jsonl")
+        async_queue = rows(base / "async_jobs.jsonl")
+        if program_route.get("target_stage") == "idea_gate":
+            state.update(
+                {
+                    "stage": "idea_gate",
+                    "owner": OWNERS.get("idea_gate", state.get("owner")),
+                    "next_action": NEXT_ACTIONS.get("idea_gate"),
+                    "blocking_reason": None,
+                }
+            )
+            save_state(
+                args.project,
+                state,
+                "terminal_program_route",
+                {"from": "experiment", "to": "idea_gate", "program_decision": program_route},
+            )
+            print(
+                json.dumps(
+                    {
+                        "action": "terminal_program_route",
+                        "from": "experiment",
+                        "to": "idea_gate",
+                        "program_decision": program_route,
+                        "heartbeat_decision": "not_created_local_progress_available",
+                    },
+                    indent=2,
+                    ensure_ascii=False,
+                )
+            )
+            return
 
     due_async = next_due_job(async_queue, include_running=True, kind="async", retry_override=retry_override)
     while due_async:
@@ -3749,12 +4566,25 @@ def run_tick(args: argparse.Namespace) -> None:
     reentry_repair = negative_reentry_repair_required(base)
     if reentry_repair and stage == reentry_repair.get("target_stage"):
         contract = apply_negative_reentry_gate(contract, reentry_repair)
-    if contract["complete"]:
+    recovery = program_recovery_status(base) if stage == "idea_gate" else {"applicable": False}
+    if contract["complete"] and not recovery.get("applicable"):
         print(json.dumps(complete_current_stage(args.project, state, contract), indent=2, ensure_ascii=False))
         return
 
-    reason = contract_reason(contract, stage)
-    klass, recommended_action = classify(stage, reason, base)
+    if recovery.get("applicable"):
+        reason = str(recovery.get("reason") or "replacement program recovery incomplete")
+        klass = str(recovery.get("class") or "hard_stop")
+        recommended_action = str(recovery.get("action") or "repair_replenishment_authority")
+        contract = {
+            **contract,
+            "complete": False,
+            "missing": [reason],
+            "contract_source": "program_recovery_status",
+            "program_recovery": recovery,
+        }
+    else:
+        reason = contract_reason(contract, stage)
+        klass, recommended_action = classify(stage, reason, base)
     blocker = {
         "schema_version": 1,
         "ts": iso(now()),
@@ -3787,6 +4617,8 @@ def run_tick(args: argparse.Namespace) -> None:
         if due_stage == stage and due_action in ASYNC_HEARTBEAT_ACTIONS:
             due_async["heartbeat_decision"] = "not_dispatched_local_progress_available"
             due_async["heartbeat_decision_reason"] = reason
+
+    blocker.update(repair_metadata(base, "async" if klass == "async_wait" else "repair", stage, recommended_action, reason))
 
     append_jsonl(base / "blocker_ledger.jsonl", blocker)
 
@@ -3881,7 +4713,7 @@ def run_tick(args: argparse.Namespace) -> None:
 
     if (
         stage == "experiment"
-        and recommended_action in {"launch_or_reconcile_experiment", "repair_failed_experiment", "schedule_repair"}
+        and recommended_action in {"launch_or_reconcile_experiment", "launch_parallel_experiment", "repair_failed_experiment", "schedule_repair"}
         and not active_experiment_run_exists(base)
     ):
         supersede_matching_async_jobs(
@@ -3896,6 +4728,25 @@ def run_tick(args: argparse.Namespace) -> None:
         )
 
     job = queue_job(base, "repair", stage, recommended_action, reason, policy)
+    if job.get("_budget_exhausted"):
+        fallback = (
+            "write_terminal_program_decision"
+            if job.get("repair_kind") == "scientific_revision" and all_recorded_tracks_terminal(base)
+            else "retire_or_pivot_track"
+            if job.get("repair_kind") == "scientific_revision"
+            else "rollback_or_request_intervention"
+        )
+        state["blocking_reason"] = f"{reason}; {job.get('_reuse_reason')}"
+        state["next_action"] = fallback
+        save_state(args.project, state, "repair_budget_exhausted", {"blocker": blocker, "job": job, "fallback": fallback})
+        print(
+            json.dumps(
+                {"action": "repair_budget_exhausted", "blocker": blocker, "job": job, "next_action": fallback},
+                indent=2,
+                ensure_ascii=False,
+            )
+        )
+        return
     handoff = None if job.get("_reused") else handoff_for_stage(base, state, contract)
     packet = None if job.get("_reused") else write_job_packet(base, state, job, contract, blocker, "repair_queue.jsonl")
     action = "repair_already_queued" if job.get("_reused") else "queued_repair_handoff"
@@ -3922,6 +4773,42 @@ def run_tick(args: argparse.Namespace) -> None:
     )
 
 
+def run_tick(args: argparse.Namespace) -> None:
+    owner = str(
+        getattr(args, "control_owner", None)
+        or os.environ.get("AUTOSKILL_CONTROL_OWNER")
+        or f"goal-tick:{os.getpid()}"
+    ).strip()
+    lease_args = argparse.Namespace(
+        project=args.project,
+        lease_file=None,
+        scope="project-control",
+        owner=owner,
+        operation="goal_tick",
+        ttl_minutes=int(getattr(args, "control_lease_minutes", 10)),
+        reason="goal tick control-plane mutation complete",
+    )
+    code, lease = acquire_control_lease(lease_args)
+    if code != 0:
+        print(
+            json.dumps(
+                {
+                    "action": "project_control_busy",
+                    "owner": owner,
+                    "lease": lease,
+                    "heartbeat_decision": "not_created_control_plane_busy",
+                },
+                indent=2,
+                ensure_ascii=False,
+            )
+        )
+        return
+    try:
+        run_tick_owned(args)
+    finally:
+        release_control_lease(lease_args)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--project", required=True)
@@ -3934,6 +4821,8 @@ def main() -> None:
         "--force-job-id",
         help="limit --force-due-repair or ACTIVE_RETRY_OVERRIDE dispatch to one job id",
     )
+    parser.add_argument("--control-owner", help="Stable project-control lease owner for this tick.")
+    parser.add_argument("--control-lease-minutes", type=int, default=10)
     args = parser.parse_args()
     run_tick(args)
 

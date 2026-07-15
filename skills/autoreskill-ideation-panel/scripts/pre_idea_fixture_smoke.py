@@ -124,6 +124,45 @@ def add_split_pack_and_slots(root: Path) -> None:
     )
 
 
+def add_abstract_screening_audit(root: Path) -> None:
+    scorecard = json.loads(
+        (root / ".autoreskill/papernexus/PAPER_SELECTION_SCORECARD.json").read_text(encoding="utf-8")
+    )
+    discovery = json.loads(
+        (root / ".autoreskill/literature/LITERATURE_DISCOVERY_PACKET.json").read_text(encoding="utf-8")
+    )
+    abstracts_by_title = {
+        str(row.get("title") or ""): str(row.get("abstract") or "")
+        for row in discovery.get("candidates", [])
+        if isinstance(row, dict)
+    }
+    rows = []
+    for index, candidate in enumerate(scorecard.get("candidates", [])):
+        identifiers = candidate.get("identifiers") if isinstance(candidate.get("identifiers"), dict) else {}
+        identifier = next((str(value) for value in identifiers.values() if value), f"fixture-{index}")
+        rows.append(
+            {
+                "candidate_id": identifier,
+                "lane": candidate.get("lane"),
+                "title": candidate.get("title"),
+                "abstract": abstracts_by_title.get(str(candidate.get("title") or "")),
+                "abstract_read": True,
+                "decision": candidate.get("decision"),
+                "reason": "; ".join(candidate.get("score_reasons") or ["fixture screening decision"]),
+                "source": "offline_fixture",
+            }
+        )
+    write(
+        root / ".autoreskill/papernexus/ABSTRACT_SCREENING_AUDIT.json",
+        {
+            "screening_completed": True,
+            "screening_basis": "abstract_or_metadata_when_abstract_missing",
+            "expected_candidate_count": len(rows),
+            "rows": rows,
+        },
+    )
+
+
 def high_signal_rows() -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for index in range(10):
@@ -131,7 +170,7 @@ def high_signal_rows() -> list[dict[str, Any]]:
             {
                 "lane": "target_domain",
                 "title": f"Target GCD closest prior {index + 1}",
-                "abstract": "baseline protocol dataset metric prototype limitation negative evidence source resolvable mechanism",
+                "abstract": "SimGCD baseline protocol dataset metric prototype limitation negative evidence source resolvable mechanism",
                 "identifiers": {"doi": f"10.0000/target{index + 1}"},
             }
         )
@@ -149,7 +188,7 @@ def high_signal_rows() -> list[dict[str, Any]]:
             {
                 "lane": "far_neighbor",
                 "title": f"Far-neighbor adaptive control bridge {index + 1}",
-                "abstract": "external domain control feedback adaptation mechanism transfer analogy challenge limitation source resolvable",
+                "abstract": "representation learning external domain control feedback adaptation mechanism transfer analogy challenge limitation negative evidence source resolvable",
                 "identifiers": {"doi": f"10.0000/far{index + 1}"},
             }
         )
@@ -183,6 +222,7 @@ def case_pass() -> dict[str, Any]:
         scorecard_path = root / ".autoreskill/papernexus/PAPER_SELECTION_SCORECARD.json"
         scorecard = json.loads(scorecard_path.read_text(encoding="utf-8"))
         write(scorecard_path, scorecard)
+        add_abstract_screening_audit(root)
         add_split_pack_and_slots(root)
         gate = run([sys.executable, str(IDEATION_SCRIPTS / "pre_idea_evidence_gate_lint.py"), "--project", str(root), "--write-gate"])
         run([sys.executable, str(IDEATION_SCRIPTS / "pre_idea_evidence_gate_lint.py"), "--project", str(root)])
@@ -300,9 +340,10 @@ def case_misplaced_gate_dry_run() -> dict[str, Any]:
 
 
 def degraded_idea(index: int) -> dict[str, Any]:
-    idea_type = "ALGO" if index < 8 else "CODE"
+    idea_type = "ALGO" if index < 6 else "CODE"
     idea_id = f"DEGRADED-{index + 1:03d}"
-    return {
+    deep = index < 3
+    payload = {
         "id": idea_id,
         "type": idea_type,
         "priority": "HIGH" if index == 0 else "MEDIUM",
@@ -312,10 +353,23 @@ def degraded_idea(index: int) -> dict[str, Any]:
         "paperNexus_evidence_ids": [],
         "description": f"Approved degraded fixture idea {index + 1}.",
         "hypothesis": "Degraded fixture hypothesis with claim limits.",
+        "research_question": f"Does degraded intervention {index + 1} restore the target signal?",
+        "core_scientific_contribution": f"A bounded causal test of degraded mechanism {index + 1}.",
+        "target_domain_anchor": "approved degraded target-domain anchor pending closure",
+        "closest_prior_delta": f"Speculative mechanism delta {index + 1} pending evidence closure.",
+        "intervention": f"degraded intervention {index + 1}",
+        "mechanism": f"restore degraded latent signal {index + 1}",
+        "predicted_pattern": f"metric component {index + 1} changes only under the intervention",
+        "falsifier": f"matched ablation shows no component-{index + 1} change",
+        "alternative_explanation": "capacity or optimization rather than the proposed mechanism",
+        "cheapest_discriminating_experiment": "one-seed matched pilot under the locked evaluator",
+        "causal_signature": f"degraded-{index + 1}|signal-{index + 1}|pattern-{index + 1}",
         "one_variable_change": f"degraded fixture one-variable change {index + 1}",
         "expected_metric_impact": "speculative improvement pending evidence closure",
         "implementation_scope": "fixture implementation scope",
         "evidence_maturity": "promising",
+        "primary_method_source_role": "near_neighbor",
+        "innovation_slot_refs": ["approved-degraded-slot"],
         "missing_materials": ["pre-idea evidence was user-approved degraded"],
         "followup_evidence_plan": ["close PaperNexus evidence before experiment launch"],
         "red_line_audit": {
@@ -338,12 +392,54 @@ def degraded_idea(index: int) -> dict[str, Any]:
             "performance_claim": "speculative performance claim pending closure" if idea_type == "CODE" else "",
             "standalone_engineering": False,
         },
-        "status": "SELECTED" if index == 0 else "PENDING",
+        "paper_potential": {
+            "target_claim": f"degraded mechanism claim {index + 1}",
+            "minimum_experiment_table": "baseline, intervention, matched ablation",
+            "reviewer_risk": "degraded source evidence",
+        },
+        "status": "SELECTED" if index == 0 else "SHORTLISTED" if deep else "PENDING",
     }
+    if deep:
+        payload.update(
+            {
+                "closest_prior_comparison": "Speculative until approved evidence closure.",
+                "claim_boundary": "Pilot-only; no paper claim before evidence closure.",
+                "outcome_routes": {
+                    "positive": "ablation_or_confirmation",
+                    "negative": "weaken_or_retire",
+                    "inconclusive": "one_disambiguator",
+                    "invalid": "repair_protocol",
+                },
+                "goe_path_refs": ["approved-degraded-gate"],
+                "mechanism_source_path": "approved degraded near-neighbor hypothesis",
+                "negative_evidence_refs": ["approved-degraded-gate"],
+                "reviewer_attack_surface": ["missing source-backed novelty closure"],
+                "falsifier_probe": "matched one-seed pilot",
+                "track_seed_spec": {
+                    "track_id": f"degraded-track-{index + 1}",
+                    "one_variable_change": f"degraded fixture one-variable change {index + 1}",
+                    "expected_metric_effect": "pilot-only positive delta",
+                    "baseline_pressure": "locked baseline required",
+                    "locked_or_missing_protocol_fields": ["source evidence"],
+                    "minimum_pilot": ["baseline", "proposed", "ablation"],
+                    "kill_condition": "no matched effect or evidence closure failure",
+                },
+            }
+        )
+    if index == 0:
+        payload["paper_contribution"]["storyline"] = {
+            "opening_tension": "The degraded gate leaves the mechanism uncertain.",
+            "hidden_cause": "A latent signal may be suppressed.",
+            "method_as_resolution": "Test one bounded restoration intervention.",
+            "proof_ladder": ["pilot", "ablation", "evidence closure"],
+            "reviewer_risk_and_defense": "Keep every claim speculative until closure.",
+            "narrative_spine": ["problem", "cause", "method", "pilot", "closure"],
+        }
+    return payload
 
 
 def degraded_score_row(idea: dict[str, Any], index: int) -> dict[str, Any]:
-    return {
+    row = {
         "id": idea["id"],
         "rank": index + 1,
         "scientistone_fast_rank": index + 1,
@@ -360,6 +456,14 @@ def degraded_score_row(idea: dict[str, Any], index: int) -> dict[str, Any]:
             "risk_control": 3,
         },
         "weighted_total": 3,
+        "causal_signature": idea["causal_signature"],
+        "pairwise_comparison": {
+            "closest_competing_idea_id": f"DEGRADED-{(index + 1) % 8 + 1:03d}",
+            "mechanism_difference": "different degraded latent signal",
+            "predicted_pattern_difference": "different metric component",
+            "cheapest_discriminator": "matched one-seed pilot",
+            "verdict": "distinct",
+        },
         "paper_comparison": {
             "closest_prior_papers": ["degraded approval has no source-backed closest prior yet"],
             "innovation_comparison": "speculative comparison pending evidence closure",
@@ -381,6 +485,14 @@ def degraded_score_row(idea: dict[str, Any], index: int) -> dict[str, Any]:
         "next_evidence_closure": "run pre-idea evidence expansion repair",
         "promotion_recommendation": "advance_with_constraints" if index == 0 else "park",
     }
+    if index < 3:
+        row["paper_story_assessment"] = {
+            "core_contribution_verdict": "speculative_but_falsifiable",
+            "storyline_readiness": "ready" if index == 0 else "defer until selected",
+            "weakest_causal_link": "source evidence closure",
+            "required_story_repair": "close PaperNexus evidence before launch",
+        }
+    return row
 
 
 def case_degraded_approval() -> dict[str, Any]:
@@ -406,12 +518,13 @@ def case_degraded_approval() -> dict[str, Any]:
             },
         )
         gate = run([sys.executable, str(IDEATION_SCRIPTS / "pre_idea_evidence_gate_lint.py"), "--project", str(root), "--allow-degraded"])
-        ideas = [degraded_idea(index) for index in range(12)]
+        ideas = [degraded_idea(index) for index in range(8)]
         write(
             root / ".autoreskill/ideation/EXPERIMENT_IDEA_POOL.json",
             {
                 "pre_idea_evidence_gate_path": "ideation/PRE_IDEA_EVIDENCE_GATE.json",
                 "selected_idea_id": "DEGRADED-001",
+                "shortlisted_idea_ids": ["DEGRADED-001", "DEGRADED-002", "DEGRADED-003"],
                 "claim_limits": ["all ideas are speculative until selected evidence closure"],
                 "evidence_boundary": {"speculative": ["approved degraded fixture"], "unsupported": ["paper claims"]},
                 "ideas": ideas,
@@ -426,8 +539,9 @@ def case_degraded_approval() -> dict[str, Any]:
                 "evidence_boundary": {"speculative": ["approved degraded fixture"], "unsupported": ["paper claims"]},
                 "scoring_rubric": "Fixture degraded scorecard rubric.",
                 "weights": {"significance": 1, "novelty_separation": 1, "experiment_defensibility": 1, "feasibility": 1, "evidence_maturity": 1, "risk_control": 1},
-                "top_recommendations": ["DEGRADED-001"],
+                "top_recommendations": ["DEGRADED-001", "DEGRADED-002", "DEGRADED-003"],
                 "top_track_recommendations": ["DEGRADED-001", "DEGRADED-002", "DEGRADED-003"],
+                "shortlisted_idea_ids": ["DEGRADED-001", "DEGRADED-002", "DEGRADED-003"],
                 "selected_primary_idea_id": "DEGRADED-001",
                 "rows": [degraded_score_row(idea, index) for index, idea in enumerate(ideas)],
             },
@@ -498,10 +612,32 @@ def goe_idea(index: int) -> dict[str, Any]:
         "paperNexus_evidence_ids": [f"ev-{index + 1}", "span1"],
         "description": f"Graph-backed fixture idea {index + 1}.",
         "hypothesis": "A transferred mechanism improves under the locked GCD protocol.",
+        "research_question": f"Does transferred mechanism {index + 1} repair the target failure?",
+        "core_scientific_contribution": f"Causal test of transferred mechanism {index + 1} under a locked protocol.",
+        "intervention": f"activate transferred state update {index + 1}",
+        "mechanism": f"restore category-state signal {index + 1}",
+        "predicted_pattern": f"accuracy component {index + 1} rises and disappears under ablation",
+        "falsifier": f"matched ablation preserves the gain for mechanism {index + 1}",
+        "alternative_explanation": "capacity or optimization rather than category-state restoration",
+        "cheapest_discriminating_experiment": "one-seed matched baseline/proposed/ablation pilot",
+        "causal_signature": f"state-update-{index + 1}|category-signal-{index + 1}|ablation-pattern-{index + 1}",
+        "outcome_routes": {
+            "positive": "ablation_or_confirmation",
+            "negative": "weaken_or_retire",
+            "inconclusive": "one_disambiguator",
+            "invalid": "repair_protocol",
+        },
         "one_variable_change": f"replace confidence update with evidence-aware mechanism {index + 1}",
         "expected_metric_impact": "improve clustering accuracy under fixed split",
         "implementation_scope": "single module patch under fixed evaluator",
         "evidence_maturity": "evidence_backed",
+        "closest_prior_comparison": "The closest prior lacks the transferred state-update mechanism.",
+        "claim_boundary": "No generalization or SOTA claim before matched confirmation.",
+        "paper_potential": {
+            "target_claim": f"transferred mechanism claim {index + 1}",
+            "minimum_experiment_table": "baseline, proposed, matched ablation",
+            "reviewer_risk": "closest-prior overlap and causal isolation",
+        },
         "primary_method_source_role": "near_neighbor" if index % 2 == 0 else "far_neighbor",
         "target_domain_anchor": "target-domain closest prior and baseline protocol",
         "neighbor_transfer_mechanism": "prototype/control feedback transfer mechanism",
@@ -543,6 +679,14 @@ def goe_idea(index: int) -> dict[str, Any]:
             "falsifier": "ablation removes the gain or protocol drift appears",
             "performance_claim": "performance-bearing method claim" if idea_type == "CODE" else "",
             "standalone_engineering": False,
+            "storyline": {
+                "opening_tension": "Current GCD methods do not explain category-state failure.",
+                "hidden_cause": "The target category-state signal is suppressed.",
+                "method_as_resolution": "Transfer one evidence-aware state update.",
+                "proof_ladder": ["pilot", "ablation", "cross-dataset confirmation"],
+                "reviewer_risk_and_defense": "Use locked protocol and closest-prior delta evidence.",
+                "narrative_spine": ["problem", "cause", "transfer", "pilot", "confirmation"],
+            },
         },
         "status": "SELECTED" if index == 0 else "PENDING",
     }
@@ -595,6 +739,7 @@ def case_goe_package() -> dict[str, Any]:
     try:
         add_lane_packets(root, high_signal_rows())
         run([sys.executable, str(PAPER_SCRIPTS / "discovery_metadata_triage.py"), "--project", str(root), "--input", "literature/LITERATURE_DISCOVERY_PACKET.json", "--stage", "pre_idea"])
+        add_abstract_screening_audit(root)
         add_split_pack_and_slots(root)
         gate = run([sys.executable, str(IDEATION_SCRIPTS / "pre_idea_evidence_gate_lint.py"), "--project", str(root), "--write-gate"])
         ideas = [goe_idea(index) for index in range(12)]
@@ -646,6 +791,25 @@ def case_goe_package() -> dict[str, Any]:
         brief = run([sys.executable, str(IDEATION_SCRIPTS / "idea_build_brief.py"), "--project", str(root)])
         seeds = run([sys.executable, str(IDEATION_SCRIPTS / "idea_track_seeds.py"), "--project", str(root)])
         seed_check = run([sys.executable, str(IDEATION_SCRIPTS / "idea_track_seeds.py"), "--project", str(root), "--check"])
+        seed_payload = json.loads(
+            (root / ".autoreskill/ideation/IDEA_TRACK_SEEDS.json").read_text(encoding="utf-8")
+        )
+        write(
+            root / ".autoreskill/ideation/IDEA_DECISION_LEDGER.json",
+            {
+                "selected_primary_idea_id": "GOE-001",
+                "selected_track_id": seed_payload["tracks"][0]["track_id"],
+                "selection_fingerprint": "GOE-001/fixture-selection-v1",
+                "decisions": [
+                    {
+                        "idea_id": row["idea_id"],
+                        "lifecycle_status": "selected_primary" if index == 0 else "alternate",
+                        "selected_primary_ref": "GOE-001/fixture-selection-v1",
+                    }
+                    for index, row in enumerate(seed_payload["tracks"])
+                ],
+            },
+        )
         matrix = run([sys.executable, str(EXPERIMENT_SCRIPTS / "track_plan_matrix.py"), "--project", str(root)])
         matrix_check = run([sys.executable, str(EXPERIMENT_SCRIPTS / "track_plan_matrix.py"), "--project", str(root), "--check"])
         ideation = run([sys.executable, str(IDEATION_SCRIPTS / "ideation_lint.py"), "--project", str(root), "--require-selected"])

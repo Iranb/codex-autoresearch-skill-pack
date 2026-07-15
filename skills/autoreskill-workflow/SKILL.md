@@ -1,6 +1,6 @@
 ---
 name: autoreskill-workflow
-description: Main $autoreskill and /goal workflow conductor for portable AutoResearch + PaperNexus. Use when initializing, resuming, advancing, debugging, or fully driving a .autoreskill workflow; dispatching role/job packets; checking stage completion; recovering stalled state; running bounded full-auto research; or routing paper-code survey, DEHB/HPO planning, writing audit/polish, manuscript integrity, and remote/HPC experiment workflows.
+description: Main $autoreskill and /goal workflow conductor for portable AutoResearch + PaperNexus. Use when initializing, resuming, advancing, debugging, or fully driving a .autoreskill workflow; dispatching role/job packets; checking stage completion; recovering stalled state; organizing project/global Wiki projections and naming; running bounded full-auto research; or routing one-shot global route audits, paper-code surveys, DEHB/HPO planning, writing audit/polish, manuscript integrity, and remote/HPC experiment workflows.
 ---
 
 # AutoResearch Workflow
@@ -22,6 +22,9 @@ policy.
 - Claims follow evidence: diagnostics, smoke tests, source-code inspection, and
   reproduced baselines do not authorize strong paper claims unless the relevant
   contract permits the exact claim boundary.
+- Scientific progress means a result changed a recorded hypothesis, claim, or
+  lifecycle decision. More jobs, retries, tokens, or GPU occupancy are not
+  progress by themselves.
 - Keep this prompt small: if a rule has a dedicated reference or linter, cite
   that authority instead of restating the rule here.
 
@@ -59,6 +62,35 @@ out of scope, record `claim_limits` or `out_of_scope_claim_limits`.
   <stage>`.
 - Work queues: `.autoreskill/repair_queue.jsonl`,
   `.autoreskill/async_jobs.jsonl`, and `.autoreskill/job_packets/`.
+- Experiment next-action planning:
+  `.autoreskill/experiment/NEXT_EXPERIMENT_QUEUE.json`. Rendered wiki
+  dashboards are views only and never complete stages, promote claims, or submit
+  jobs.
+- Per-track planning:
+  `orchestrator/tracks/<track-id>/INNOVATION_PACKET.json` and
+  `planner/tracks/<track-id>/EXPERIMENT_REVIEW_PACKET.json` bind each admitted
+  track. The top-level packet pair is a primary-only compatibility projection.
+- Stable execution compatibility:
+  `.autoreskill/resources/PROJECT_EXECUTION_PASSPORT.json` owns reusable
+  baseline/code/dataset/metric/runtime components and row-specific execution
+  profiles. Each track packet and implementation manifest binds only its
+  profile plus innovation-delta hash. The separate
+  `RESOURCE_CAPABILITY_PASSPORT.json` proves which profiles a pool can run;
+  fresh resource snapshots alone own volatile capacity and queue state.
+- Coordination ownership: `.autoreskill/control/PROJECT_CONTROL_LEASE.json`
+  protects broad project mutations. A hashed global schedule and the global
+  admission lease coordinate shared resources but never replace a project queue
+  or backend launch checks.
+- Scientific lifecycle: `ideation/IDEA_DECISION_LEDGER.json` owns idea/track
+  belief and terminal program decisions; `orchestrator/TRACK_PLAN_MATRIX.json`
+  owns launch-plan hypotheses; `coder/EXPERIMENT_LEDGER.json` owns run/outcome
+  history. `SCIENTIFIC_OUTCOME.json` is per-run evidence, not transition
+  authority.
+- Cross-dataset claim requirements:
+  `orchestrator/PROGRAM_CLAIM_CONTRACT.json` owns target datasets, metrics,
+  comparison requirements, parameter-transfer policy, promotion rules, and
+  bounded search budgets. It never owns result-derived scientific status. A
+  missing contract preserves legacy behavior; `shadow` is read-only.
 - Handoffs: `.autoreskill/handoffs/` and
   `references/handoff_packet_schema.md`.
 - Recovery trace: `.autoreskill/LOOP_TRACE.jsonl`; trace entries explain route
@@ -66,13 +98,21 @@ out of scope, record `claim_limits` or `out_of_scope_claim_limits`.
 - PaperNexus graph work: configured `papernexus-remote` MCP plus captured
   artifacts. Do not replace live graph work with local PaperNexus CLI, raw HTTP,
   local graph files, local MCP, or SSH graph commands.
+- Explicit non-PaperNexus ResearchStudio-style idea campaigns:
+  `$autoreskill-gpu-idea-validation` owns only the external evidence campaign,
+  its deterministic gate/slot-map adapter, identity alignment, and bounded
+  resource-intent helpers. It never replaces the idea ledger, track matrix,
+  experiment queue, runtime controller, or scientific-outcome authority.
 - Remote/HPC work: this skill owns portable project layout; `$bjtu-hpc` owns
   BJTU auth, live queue state, helper defaults, resource scheduling, dataset
   packing, and submit safety.
 
 ## Entry Loop
 
-On every `$autoreskill`, `autoreskill`, or `/goal` entry:
+An explicit one-shot global route audit is routed to
+`$autoreskill-global-route-audit` and skips this entry loop so the audit remains
+read-only. On every other `$autoreskill`, `autoreskill`, or `/goal` workflow
+entry:
 
 1. Resolve `<project-root>` and `<skill-root>`.
 2. Run `scripts/ensure_project_agents.py --project <project-root>`.
@@ -86,7 +126,7 @@ On every `$autoreskill`, `autoreskill`, or `/goal` entry:
 For `full_auto_bounded`, continue for at most 5 tick/job actions or about 10
 minutes of active work. Stop only on terminal completion, `hard_stop`,
 user/budget/credential/safety gate, loop budget exhaustion, or an allowed
-external async wait.
+external async wait with no eligible parallel experiment launch.
 
 Before a final response, run the pre-stop guard: if `status`, `tick`, a due job
 packet, or `contract_lint.py` exposes a concrete local next action, execute one
@@ -107,6 +147,20 @@ bookkeeping. Dispatch async only when `goal.py tick` returns
 `dispatch_async_poll`; a due async row alone is not proof of external blockage.
 After a heartbeat is deleted, updated, or marked stale, run `status`,
 `reconcile`, and `tick` again while local work is actionable.
+
+For experiments, a running job is not a project-wide wait condition. Before
+creating or keeping an experiment heartbeat, check
+`.autoreskill/experiment/NEXT_EXPERIMENT_QUEUE.json` plus live backend capacity.
+If an independent `ready`/`planned` row has no blocker, satisfied dependencies,
+no mutex/resource conflict with running rows, and can fit an idle GPU/resource,
+dispatch `launch_parallel_experiment` instead of waiting.
+
+Also run the queue `frontier` check before waiting. Materialize only its declared
+admissible track packets/rows when the deficit is actionable. If all legal work
+depends on a live run, wait on that run; if no authoritative run exists, return
+the exact blocker instead of using a heartbeat. In `admission_scope=global`, a
+project monitor may reconcile and expose ready work but only the global admission
+controller may claim and physically dispatch it.
 
 Read `references/async_wait_policy.md` for adaptive cadence, result-aware
 polling, stale wait supersession, and managed heartbeat lifecycle.
@@ -140,6 +194,288 @@ Frequent claim constraints:
 For paper-producing workflows, choose experiments by manuscript need, not by GPU
 utilization or candidate-list breadth. Every experiment job must name the paper
 claim, table, figure, ablation, or limitation it can change.
+
+### Per-Dataset Innovation Parameter Coverage
+
+Before stability seeds, every selected human-chosen load-bearing innovation
+parameter normally tests two or three preregistered values on each required
+dataset under exactly one fixed scout seed for that dataset. Build ranges from
+dataset scale, train-only/unlabeled distributions, update count, or measured
+effective strength; copying one raw scalar requires a comparability rationale.
+Several seeds at one value do not satisfy parameter coverage. After a reviewed
+calibration decision, freeze one profile and use at most three paired seeds for
+confirmation.
+
+`shared_absolute` freezes one common raw value. `shared_normalized` freezes one
+common dimensionless setting while its label-free formula may realize different
+raw values. Different selected human-chosen settings by dataset are
+`dataset_calibrated`. A preregistered one-value `zero_shot_only` test remains
+legal but cannot establish calibrated-mechanism validity or refutation. The
+canonical schema and claim ceilings are in
+`references/program_claim_contract.md` and the experiment review packet schema.
+
+## Scientific Decision Loop
+
+Use this bounded loop:
+
+```text
+evidence -> falsifiable track hypothesis -> discriminating experiment
+  -> canonical result -> scientific outcome -> lifecycle update
+  -> proceed, refine, pivot, retire, or conclude
+```
+
+Every active track needs a causal signature, predicted pattern, falsifier,
+alternative explanation, four outcome routes, belief state, and bounded revision
+index. Every ready/running queue row must match the current selection and track
+identity and say which decision it can change. Claim the row atomically before
+backend launch; a running row locks only its dependencies, mutex, and allocated
+resource.
+
+`REMOTE_RUN.json` records runtime truth, canonical result artifacts record numeric
+evidence, and `SCIENTIFIC_OUTCOME.json` proposes interpretation. Apply belief or
+lifecycle changes only through `scripts/research_decision.py` after identity,
+protocol, evaluator, and canonical evidence checks pass. Infrastructure and
+implementation failures have no belief effect; protocol-invalid evidence is
+quarantined; valid negatives pivot/scope/retire/conclude rather than defaulting to
+code repair; positive candidates still require ablation or confirmation.
+
+Keep exactly one paper primary and at most three admitted `alternate` or
+`risk_repair` tracks, for at most four active tracks total. Each admitted track
+needs its own packets before becoming planning-ready. Non-primary rows are
+always `pilot_only`; a positive result records a reselection candidate. It
+becomes claim-eligible only after the idea gate explicitly selects it as primary,
+advances the selection fingerprint, rematerializes the plan, and reruns it
+against the frozen matched baseline.
+
+Operational repairs and scientific revisions have separate budgets. If every
+track is terminal and no launchable/live row or mandatory confirmation remains, a
+validated terminal program decision may advance to analysis with
+`improvement_claim_allowed=false` instead of forcing a positive result.
+
+Read `references/scientific_decision_loop.md` for outcome and transition rules and
+`references/experiment_next_actions.md` for acquisition, readiness, and leases.
+
+## Experiment Portfolio
+
+For each selection revision, generate one broad pool of 8-12 lightweight
+hypothesis cards, merge candidates with the same causal signature, then perform
+one deterministic batch screen to a 3-5 item shortlist. Require distinct
+intervention, mechanism, predicted pattern, or discriminating experiment;
+module-name or parameter-only variants share a track. Build deep causal,
+literature, and experiment packets only for shortlisted candidates. Heartbeats
+consume that committed shortlist and regenerate it only after an explicit
+lifecycle decision says it is exhausted, invalid, or strategically superseded.
+
+In `full_auto_bounded` paper-producing workflows, WorkflowGuard may create that
+lifecycle decision automatically when `portfolio_admission_deficit > 0`, no
+current-revision committed candidate is fillable, at least one named program
+claim remains unresolved, and evidence/compute/revision budgets remain. This is
+local candidate construction and does not require an idle GPU snapshot. It also
+covers zero active tracks: first commit exactly one changed-basis
+`replenishment_event` through `research_decision.py --replenishment --write`, then
+run one bounded targeted replenishment through the current canonical evidence
+source. Preserve any selected primary and its selection fingerprint, and change
+only shortlist supply state. Bind both `EXPERIMENT_IDEA_POOL.json` and
+`IDEA_NOVELTY_VENUE_SCORECARD.json` to the active program revision and contract
+SHA. An unchanged program, selection, evidence, and decision basis must reuse the
+prior event or rejection rather than regenerate candidates.
+
+Keep three quantities separate: direct user authorization, the active contract's
+`max_targeted_replenishments` allocation, and consumed revision-scoped
+`replenishment_event` transactions. The default allocation is one and the hard
+maximum is eight; neither idle GPUs nor a model may raise it. If an old route is
+terminal for its track but explicitly nonterminal for the project, recovery
+requires a matching direct-user intervention, unresolved paper decision,
+semantic-hash-bound approving review, CAS-committed replacement contract, and an
+atomic program-revision activation. Archive the old terminal route before
+resetting only the new revision to `unresolved`. Recovery generates one 8-12-card
+pool and one 3-5-item shortlist; it must not select a primary, generate track
+seeds, admit tracks, create experiment rows, or launch work. If a current-revision
+event already exists, materialize its missing supply without consuming another.
+
+Organize paper experiments around two targets: each core mechanism's best
+matched performance across target datasets, then the best supported combination.
+Run `single_innovation` rows across datasets before deep tuning; a one-dataset
+gain stays dataset-scoped. A `combo` row must cite supported component rows and
+must not include negative, mismatched, or unsupported components. Avoid
+exhaustive power sets. Low-fidelity HPO ranks candidates only; seed is not a
+search axis and the total stability budget remains at most three random seeds.
+
+Use two gates in order. First, scientific admission requires a ready row with a
+falsifier, outcome routes, protocol/baseline identity, decision targets,
+satisfied dependencies, no duplicate, and remaining evidence/seed/compute
+budget. Second, resource placement preserves pools that are the only fit for
+constrained rows, then assigns work to the smallest fitting live pool. Idle
+capacity never creates an experiment.
+
+Maintain a bounded ready frontier from already justified baseline calibration,
+up to four active hypothesis tracks, cross-dataset single-mechanism tests,
+discriminators/controls, required ablations, bounded asynchronous DEHB scouts,
+and paired confirmation seeds. Priorities order fitting work but are not a global
+resource barrier. Baseline calibration may overlap with `pilot_only` innovation
+scouts; freeze the matched baseline and rerun survivors before claim promotion.
+Final confirmation uses the same declared seed set for matched baseline and
+proposed runs, may launch its at-most-three seeds concurrently, and reuses
+existing baseline anchors.
+
+Use one validation ladder: Stage 0 static/config checks; Stage 1 active-path
+smoke or small-batch overfit; Stage 2 first runs
+`stage2_parameter_probe` when value coverage is required, freezes the approved
+profile, then runs `stage2_method_screen` as the cheapest low-fidelity
+paired-dataset single-seed falsifier; Stage 3 primary-dataset full-budget matched
+control; Stage 4 remaining required-dataset full-budget legs, independently
+launchable after the Stage-2 pair completes;
+Stage 5 DEHB only for a supported/ambiguous mechanism with an explicit
+sensitivity question; Stage 6 at most three paired seeds; Stage 7 a small
+greedy/beam combination of independently supported components. Baseline
+calibration is separate `pilot_only` work, not Stage 5. A valid negative retires,
+scopes, or pivots; it does not automatically add seeds or tuning.
+
+After committing scientific evidence, run
+`scripts/stage_transition_materialize.py --dry-run`, then apply the same queue
+revision. The helper may create Stage 3/4 together, one complete Stage-5
+dataset-group trial through `autoreskill-run-experiment/scripts/dataset_group_hpo.py`,
+or the complete Stage-6 dataset-by-arm matrix. It never infers support from row
+existence: Stage 3/4 require a cross-dataset ledger decision, later stages
+require terminal-positive rows plus their applied scientific decisions, and
+Stage 6 requires an explicit one-to-three-seed preregistration. Grouped HPO has
+no optimizer objective until every required dataset leg is valid; finalize only
+full-resource, no-regression-passing groups after the registered search is
+exhausted, or record an explicit bounded early-stop reason. Stage 3/4 cost must
+come from per-dataset runtime estimates or a finite full-budget compute total;
+never inherit a low-fidelity Stage-2 estimate silently.
+
+Keep two frontiers separate. `launch_frontier_*` measures dependency-unlocked
+row supply. `portfolio_capacity_target=4`, `portfolio_active_track_count`,
+`portfolio_admission_deficit`, and `portfolio_fillable_*` measure hypothesis
+supply. `method_portfolio_target=2` is a soft demand signal for real
+`method_candidate` tracks; diagnostic, baseline, and protocol work cannot satisfy
+it or consume hypothesis slots. Select the exact deterministic feasible subset of causally distinct
+shortlist candidates, bounded by aggregate budget and the deficit, then admit
+and materialize all of it in one recoverable batch. Zero active tracks cannot be
+reported as portfolio-satisfied while a fillable shortlist candidate exists.
+Both frontiers are planning signals, not permission to synthesize work; idle
+GPUs never increase track, seed, HPO, or claim budgets.
+
+Treat GPUs as independent slots. A running row blocks only its dependencies,
+mutex group, exclusive resource, shared scheduler limit, or backend/account
+capacity. Reconcile stale/terminal rows, refresh resource pools, then run
+`experiment_next_actions.py schedule` and atomically claim only its deterministic
+assignments. New queues size the batch automatically within useful fitting rows,
+idle slots, in-flight slot/GPU-hour budgets, and an absolute fail-safe cap; they
+do not take an insertion-order prefix. A pending pool blocks only itself unless
+live evidence identifies a shared limit. Record `resource_request`, assigned
+pool, `resource_allocation`, dependencies, and mutexes. Detailed schema and
+selection rules live in `references/experiment_next_actions.md`.
+
+Use `policy.admission_scope=project` for a single project controller. Use
+`admission_scope=global` when several projects share physical GPUs: schedule all
+project queues against one fresh normalized snapshot, acquire global then target
+project control leases, claim only the first hashed assignment, perform one
+backend submit, refresh live resources, and recompute. Advisory assignments
+after the first are visibility only.
+
+After assignment and exact preflight, persist submission in three phases:
+`planned -> submitting` with a durable intent and backend-searchable trace,
+`submitting -> needs_sync` with the backend receipt, then `needs_sync -> running`
+or terminal only after authoritative observation. On recovery, search by the
+intent identity before retrying; an ambiguous prepared attempt must never be
+blindly resubmitted.
+
+### Heartbeat Experiment Opportunity Scan
+
+After reconciliation and before waiting, every experiment heartbeat must apply
+completed scientific outcomes, check both frontiers, compute the portfolio
+deficit, batch-admit the exact feasible shortlist subset, and materialize every
+dependency-unlocked row. Then refresh fitting resources, claim one assignment,
+submit through the durable intent/receipt chain when authorized, refresh, and
+repeat until no fitting assignment remains or the bounded wake limit is reached.
+If the portfolio has an open slot and the current-revision shortlist has no
+fillable candidate, dispatch the bounded shortlist-replenishment route above
+before waiting, regardless of current GPU availability. Reuse existing evidence
+first, perform only targeted incremental discovery for a named evidence gap, and
+batch-screen once. The next bounded tick owns selection, track seeds, admission,
+packet materialization, resource fitting, and launch.
+`one submit before refresh` is a safety boundary, not a one-submit-per-heartbeat
+limit. In global mode the project heartbeat stops before claim/submit and leaves
+physical admission to the designated global controller. Scanning is mandatory,
+submission is conditional: do not tune terminal-negative mechanisms, use seed
+as a search axis, repeat unchanged discovery, or invent idle-GPU work. Record the exact
+scientific, dependency, capability, budget, or capacity rejection when nothing
+can launch. Read
+`references/async_wait_policy.md` for the complete resume and priority contract.
+
+## Experiment Launch Modes
+
+For experiment run, submit, monitor, or result-promotion actions, classify
+`launch_mode` after the entry loop routes the work and before applying heavy
+gates:
+
+- `first_use`: new code export, dataset profile, runtime environment, remote
+  account/host, launcher template, loader/protocol boundary, or resource shape;
+  missing validation evidence also counts as `first_use`.
+- `repeated_variant`: only seed or method hyperparameters change under the same
+  manifest-backed code export, dataset profile, runtime environment, and launcher
+  template and resource shape.
+- `monitor_only`: status, queue, log, metric, or terminal-result sync with no new
+  submit.
+- `claim_promotion`: using results to support paper text, abstract/table numbers,
+  conclusions, review readiness, or submission readiness.
+
+`repeated_variant` must not trigger unrelated paper-readiness gates, broad
+cross-project sync, full dataset/env/code audits, or human wiki/status rewrites
+before launch. Its immediate artifact is the machine-readable run/submit
+manifest or trace. Batch human summaries to first metric, failure, terminal
+state, or explicit user request.
+
+The repeated-variant decision needs explicit identity evidence, not inference
+from prose. Accept either a `launch_identity` object or equivalent run/trace
+fields covering code export ref/hash, dataset profile and manifest ref/hash,
+runtime environment ref/probe, launcher template hash, resource shape, and
+method/data-backend profile. Exclude the intentionally varied seed and
+hyperparameters from the stable identity hash. If these fields are missing,
+treat the launch as `first_use` or append the missing machine-readable identity
+fields before reusing prior validation.
+
+This launch-mode scoping does not relax live submit safety. For BJTU HPC and
+other remote backends, delegate queue state, resource shape, exact-script
+preflight, submission, and post-submit verification to the backend skill. Run
+claim/evidence gates only in `claim_promotion` or the relevant analysis/review
+stage, not as a prerequisite for every repeated launch.
+
+## Experiment Next Actions
+
+When the user asks what experiment to do next, asks to organize active
+experiment threads, or asks for a wiki experiment-status table, read
+`references/experiment_next_actions.md`.
+
+Use `.autoreskill/experiment/NEXT_EXPERIMENT_QUEUE.json` as the durable planning
+queue. It can point to project-specific plans and monitor artifacts, but it does
+not replace stage contracts, launch safety, or claim promotion gates. Render
+wiki dashboards from the queue; do not treat wiki prose as the planning
+authority when JSON exists.
+
+Default wiki dashboards are configurable through `AUTORESEARCH_WIKI_ROOT` and
+otherwise land under `$HOME/Documents/001-WIKI/mypaper/<direction>/...`.
+Before creating or moving any human-facing Wiki artifact, read
+`references/wiki_projection_and_naming.md`. Use one canonical
+`AutoResearch-<project-slug>/` hub per project, keep cross-project material
+under `autoresearch/00-实验总控/`, and isolate all test/fixture rendering from the
+live Wiki root.
+Update the queue only when observations change the next action: terminal
+result, first usable metric, failure/blocker, user-goal change, or explicit
+queue maintenance. Do not rewrite dashboards on every heartbeat.
+
+## Global Route Audit
+
+When the user explicitly asks for a one-time audit of current research status,
+cross-project priorities, or what to do next, dispatch
+`$autoreskill-global-route-audit`. It reads project authorities, ranks a global
+decision-bearing action portfolio, and can save a dated Wiki report. It is a
+read-only cross-stage advisory operation: do not run the entry loop or tick,
+mutate queues/lifecycles, launch jobs, or create a heartbeat as part of the
+audit. If execution is also requested, finish the audit first and then resume
+this workflow from the selected project-local authority.
 
 ## Remote Layout
 
@@ -201,6 +537,14 @@ Default experiment workflow:
 init -> topic_search -> graph_build -> frontier_mapping -> literature_review -> ideation -> idea_gate -> experiment_plan -> code -> experiment -> analysis -> review_pressure -> writing -> submission_ready
 ```
 
+When the user explicitly requests a non-PaperNexus external-material idea
+campaign, dispatch `$autoreskill-gpu-idea-validation` to construct and
+materialize that evidence route before canonical ideation. Then return to
+`$autoreskill-ideation-panel`, `$autoreskill-experiment-plan`,
+`$autoreskill-implement-experiment`, and `$autoreskill-run-experiment` for their
+normal authorities. A missing `evidence_source_mode` remains the legacy
+PaperNexus route; never infer or relabel the external route from absent fields.
+
 Standalone paper-code transfer:
 
 - Read `references/paper_code_innovation_transfer.md`.
@@ -230,6 +574,10 @@ Manuscript writing or polishing:
 Read references only as needed:
 
 - `references/command_surface.md`: deterministic script commands.
+- `references/experiment_next_actions.md`: active experiment next-action queue,
+  configurable wiki dashboards, and active-thread-to-queue guidance.
+- `references/scientific_decision_loop.md`: per-run scientific outcomes, belief
+  transitions, separate repair budgets, and terminal non-positive completion.
 - `references/goal_state_schema.md`: control-plane fields and scope defaults.
 - `references/stage_contracts.md`: stage authorities and completion contracts.
 - `references/stage_skill_matrix.md`: child skill routing and write scopes.

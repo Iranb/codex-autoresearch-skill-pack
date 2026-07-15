@@ -1,0 +1,26 @@
+{
+  "claim_drift_status": {
+    "status": "passed",
+    "blocking_count": 0
+  },
+  "scientific_alignment_status": {
+    "status": "passed"
+  },
+  "numeric_grounding_status": {
+    "status": "passed"
+  },
+  "non_defensive_writing_status": {
+    "status": "passed",
+    "necessary_limitations_preserved": true,
+    "evidence_boundary_preserved": true,
+    "claim_upgrades_blocked": true,
+    "unsupported_claim_upgrades": false,
+    "top_tier_claim_posture": "The front matter states the supported claim directly and attaches the evidence boundary.",
+    "high_impact_positions_checked": [
+      "title",
+      "abstract",
+      "introduction",
+      "contributions"
+    ]
+  }
+}

@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import sys
 from pathlib import Path
@@ -14,10 +15,19 @@ from hpo_policy_lint import validate_hpo_search_policy
 
 SKILL_ROOT = Path(__file__).resolve().parents[2]
 PAPERNEXUS_SCRIPTS = SKILL_ROOT / "autoreskill-papernexus-innovation/scripts"
+WORKFLOW_SCRIPTS = SKILL_ROOT / "autoreskill-workflow/scripts"
 if str(PAPERNEXUS_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(PAPERNEXUS_SCRIPTS))
+if str(WORKFLOW_SCRIPTS) not in sys.path:
+    sys.path.insert(0, str(WORKFLOW_SCRIPTS))
 
 from idea_support_lint import lint_idea_support, resolve_artifact_path  # noqa: E402
+from parameter_transfer import (  # noqa: E402
+    VALID_PARAMETER_ROLES,
+    program_contract_binding,
+    required_dataset_ids,
+    validate_parameter_transfer_contract,
+)
 
 
 REQUIRED = [
@@ -35,11 +45,17 @@ REQUIRED = [
     "primary_metric",
     "fixed_budget",
 ]
+
+
+def canonical_sha256(value: Any) -> str:
+    encoded = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
 ONE_VARIABLE_KEYS = ["one_variable_change", "oneVariableChange", "method_delta", "methodDelta", "intervention", "variable_change"]
 FALSIFIER_KEYS = ["falsifier", "falsifiers", "failure_condition", "failure_conditions", "failureCondition", "stop_condition"]
 DATASET_KEYS = ["dataset_or_benchmark", "datasetOrBenchmark", "dataset", "datasets", "benchmark", "benchmarks"]
 READY = {"ready", "complete", "completed", "pass", "passed", "approved", "verified"}
 BACKENDS = {"local_gpu", "autodl_gpu"}
+EXECUTION_ROUTES = {"local", "ssh", "bjtu_hpc", "autodl"}
 EVIDENCE_GATE_STATUSES = {"passed", "not_required", "async_wait", "blocked"}
 MECHANISM_TYPES = {"ALGO", "CODE", "PARAM"}
 PROMOTION_STAGES = {"candidate", "ablation", "confirmation"}
@@ -70,10 +86,11 @@ PAPER_STORYLINE_REQUIRED_KEYS = [
     "reviewer_risk_and_defense",
     "narrative_spine",
 ]
-PROBLEM_PROTOCOL_ROLES = {"problem_definition", "protocol", "benchmark", "evaluation", "metric"}
-METHOD_ROLES = {"method_mechanism", "algorithm", "model", "architecture", "training_mechanism"}
-PROOF_INTEGRATION_ROLES = {"training_integration", "system_integration", "theory_analysis", "ablation", "validation", "analysis"}
+CORE_CONTRIBUTION_CLASSES = {"core", "core_scientific_contribution"}
+SUPPORTING_CONTRIBUTION_CLASSES = {"supporting", "supporting_scientific_contribution"}
+NON_INNOVATION_CONTRIBUTION_CLASSES = {"validation_role", "analysis_role", "engineering_support"}
 MAX_STABILITY_RANDOM_SEEDS = 3
+EXTERNAL_IDENTITY_FIELDS = ["external_campaign_ref", "external_campaign_sha256", "external_candidate_id"]
 
 
 def ar(project: str) -> Path:
@@ -104,6 +121,15 @@ def first_present(mapping: dict[str, Any], keys: list[str]) -> Any:
         if present(mapping.get(key)):
             return mapping[key]
     return None
+
+
+def evidence_source_mode(base: Path, packet: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+    gate_value = first_present(packet, ["pre_idea_evidence_gate_path", "preIdeaEvidenceGatePath"])
+    gate_path = resolve_artifact_path(base, gate_value, "ideation/PRE_IDEA_EVIDENCE_GATE.json")
+    gate = read_json(gate_path) if gate_path else None
+    if not isinstance(gate, dict):
+        gate = {}
+    return str(gate.get("evidence_source_mode") or "papernexus").strip().lower(), gate
 
 
 def placeholder(value: Any) -> bool:
@@ -185,7 +211,7 @@ def story_step_count(value: Any) -> int:
     return len([part for part in text.split(".") if part.strip()])
 
 
-def validate_baseline_backend_paths(packet: dict[str, Any], missing: list[str]) -> None:
+def validate_baseline_backend_paths(packet: dict[str, Any], missing: list[str], require_route: bool = False) -> None:
     baseline_code = packet.get("baseline_code")
     require_nested(
         baseline_code,
@@ -213,6 +239,16 @@ def validate_baseline_backend_paths(packet: dict[str, Any], missing: list[str]) 
     if backend_name == "autodl_gpu" and isinstance(backend, dict) and not present(backend.get("autodl_plan_ref")):
         missing.append("INNOVATION_PACKET.compute_backend.autodl_plan_ref")
 
+    route = str(packet.get("execution_route") or "").strip().lower()
+    if require_route and not route:
+        missing.append("INNOVATION_PACKET.execution_route")
+    if route and route not in EXECUTION_ROUTES:
+        missing.append("INNOVATION_PACKET.execution_route must be local, ssh, bjtu_hpc, or autodl")
+    if backend_name == "local_gpu" and route and route not in {"local", "ssh", "bjtu_hpc"}:
+        missing.append("INNOVATION_PACKET local_gpu execution_route must be local, ssh, or bjtu_hpc")
+    if backend_name == "autodl_gpu" and route and route != "autodl":
+        missing.append("INNOVATION_PACKET autodl_gpu execution_route must be autodl")
+
     mapping = packet.get("path_mapping")
     require_nested(
         mapping,
@@ -226,6 +262,13 @@ def validate_baseline_backend_paths(packet: dict[str, Any], missing: list[str]) 
             missing.append("INNOVATION_PACKET.path_mapping.selected_backend must be local_gpu or autodl_gpu")
         if backend_name in BACKENDS and selected and selected != backend_name:
             missing.append("INNOVATION_PACKET.path_mapping.selected_backend must match compute_backend.backend")
+        mapping_route = str(mapping.get("execution_route") or "").strip().lower()
+        if require_route and not mapping_route:
+            missing.append("INNOVATION_PACKET.path_mapping.execution_route")
+        if mapping_route and mapping_route not in EXECUTION_ROUTES:
+            missing.append("INNOVATION_PACKET.path_mapping.execution_route must be local, ssh, bjtu_hpc, or autodl")
+        if route and mapping_route and route != mapping_route:
+            missing.append("INNOVATION_PACKET.path_mapping.execution_route must match INNOVATION_PACKET.execution_route")
         require_nested(mapping.get("env"), "INNOVATION_PACKET.path_mapping.env", ["DATA_ROOT", "OUTPUT_DIR", "CKPT_DIR"], missing)
 
 
@@ -268,18 +311,40 @@ def validate_innovation_contract(packet: dict[str, Any], missing: list[str]) -> 
         missing.append("INNOVATION_PACKET.innovation_search_contract.confirmation_required must be true")
 
 
-def validate_paper_bundle(packet: dict[str, Any], missing: list[str], details: dict[str, Any]) -> None:
+def validate_paper_bundle(
+    packet: dict[str, Any],
+    missing: list[str],
+    details: dict[str, Any],
+    *,
+    require_storyline: bool = True,
+) -> None:
     contract = packet.get("innovation_search_contract") if isinstance(packet.get("innovation_search_contract"), dict) else {}
+    core = first_present(packet, ["core_scientific_contribution", "core_contribution"])
+    if not present(core):
+        core = contract.get("core_scientific_contribution") or contract.get("core_contribution")
+    # Keep old bundle keys readable without restoring the retired three-contribution requirement.
     bundle = first_present(packet, ["paper_innovation_bundle", "innovation_bundle", "three_innovation_bundle"])
     if not present(bundle):
         bundle = contract.get("paper_innovation_bundle") or contract.get("innovation_bundle")
     points = as_list(bundle)
     details["paper_innovation_bundle_count"] = len(points)
-    if len(points) < 3:
-        missing.append("INNOVATION_PACKET.paper_innovation_bundle must contain at least 3 paper-level innovation points")
-        return
-    roles: set[str] = set()
-    transfer_source_count = 0
+    legacy_core_index: int | None = None
+    if not present(core) and points:
+        for index, point in enumerate(points):
+            if not isinstance(point, dict):
+                continue
+            contribution_class = normalized_role(point.get("contribution_class"))
+            if contribution_class in CORE_CONTRIBUTION_CLASSES:
+                core = point
+                legacy_core_index = index
+                break
+        if not present(core):
+            core = points[0]
+            legacy_core_index = 0
+    if not present(core) or placeholder(core):
+        missing.append("INNOVATION_PACKET.core_scientific_contribution")
+    details["core_scientific_contribution_present"] = present(core)
+
     for index, point in enumerate(points):
         prefix = f"INNOVATION_PACKET.paper_innovation_bundle[{index}]"
         if not isinstance(point, dict):
@@ -289,24 +354,37 @@ def validate_paper_bundle(packet: dict[str, Any], missing: list[str], details: d
             value = point.get(key)
             if not present(value) or placeholder(value):
                 missing.append(f"{prefix}.{key}")
-        role = normalized_role(point.get("role"))
         source_role = normalized_role(point.get("source_role"))
-        if role:
-            roles.add(role)
-        if source_role in VALID_METHOD_SOURCE_ROLES:
-            transfer_source_count += 1
-        elif source_role in TARGET_DOMAIN_ONLY_ROLES and not present(point.get("current_field_absence_evidence")):
+        if source_role in TARGET_DOMAIN_ONLY_ROLES and not present(point.get("current_field_absence_evidence")):
             missing.append(f"{prefix}.current_field_absence_evidence required for target-domain-only innovation point")
-    details["paper_innovation_bundle_roles"] = sorted(roles)
-    details["paper_innovation_bundle_transfer_source_count"] = transfer_source_count
-    if not roles & PROBLEM_PROTOCOL_ROLES:
-        missing.append("INNOVATION_PACKET.paper_innovation_bundle needs a problem/protocol/evaluation innovation point")
-    if not roles & METHOD_ROLES:
-        missing.append("INNOVATION_PACKET.paper_innovation_bundle needs a method/mechanism innovation point")
-    if not roles & PROOF_INTEGRATION_ROLES:
-        missing.append("INNOVATION_PACKET.paper_innovation_bundle needs a training/integration/analysis/validation innovation point")
-    if transfer_source_count < 1:
-        missing.append("INNOVATION_PACKET.paper_innovation_bundle needs at least one near/far/cross-lane or external transfer-backed point")
+        contribution_class = normalized_role(point.get("contribution_class"))
+        if contribution_class and contribution_class not in CORE_CONTRIBUTION_CLASSES | SUPPORTING_CONTRIBUTION_CLASSES | NON_INNOVATION_CONTRIBUTION_CLASSES:
+            missing.append(f"{prefix}.contribution_class must identify core, supporting, validation, analysis, or engineering support")
+        if contribution_class in SUPPORTING_CONTRIBUTION_CLASSES and not present(point.get("counterfactual_necessity")):
+            missing.append(f"{prefix}.counterfactual_necessity")
+
+    supporting = packet.get("supporting_contributions")
+    if supporting is not None and not isinstance(supporting, list):
+        missing.append("INNOVATION_PACKET.supporting_contributions must be a list")
+        supporting = []
+    for index, point in enumerate(supporting or []):
+        prefix = f"INNOVATION_PACKET.supporting_contributions[{index}]"
+        if not isinstance(point, dict):
+            missing.append(f"{prefix} must be an object")
+            continue
+        contribution_class = normalized_role(point.get("contribution_class") or "supporting_scientific_contribution")
+        if contribution_class not in SUPPORTING_CONTRIBUTION_CLASSES | NON_INNOVATION_CONTRIBUTION_CLASSES:
+            missing.append(f"{prefix}.contribution_class")
+        for key in ["name", "evidence_refs", "validation_plan"]:
+            if not present(point.get(key)) or placeholder(point.get(key)):
+                missing.append(f"{prefix}.{key}")
+        if contribution_class in SUPPORTING_CONTRIBUTION_CLASSES and not present(point.get("counterfactual_necessity")):
+            missing.append(f"{prefix}.counterfactual_necessity")
+    details["supporting_contribution_count"] = len(supporting or [])
+    details["legacy_bundle_core_index"] = legacy_core_index
+
+    if not require_storyline:
+        return
 
     storyline = first_present(packet, ["paper_storyline", "storyline_contract", "storyline"])
     if not present(storyline):
@@ -322,7 +400,7 @@ def validate_paper_bundle(packet: dict[str, Any], missing: list[str], details: d
         missing.append("INNOVATION_PACKET.paper_storyline.narrative_spine must contain 5-7 sequential story steps")
 
 
-def validate_evidence_import_gate(packet: dict[str, Any], missing: list[str]) -> None:
+def validate_evidence_import_gate(packet: dict[str, Any], missing: list[str], mode: str = "papernexus") -> None:
     gate = packet.get("evidence_import_gate")
     require_nested(gate, "INNOVATION_PACKET.evidence_import_gate", ["status", "reason", "launch_blocked"], missing)
     if not isinstance(gate, dict):
@@ -332,12 +410,22 @@ def validate_evidence_import_gate(packet: dict[str, Any], missing: list[str]) ->
     if status not in EVIDENCE_GATE_STATUSES:
         missing.append("INNOVATION_PACKET.evidence_import_gate.status must be passed, not_required, async_wait, or blocked")
 
+    if mode == "external_material":
+        if status != "not_required":
+            missing.append("INNOVATION_PACKET.evidence_import_gate.status must be not_required for external_material")
+        if str(gate.get("source_mode") or "").strip().lower() != "external_material":
+            missing.append("INNOVATION_PACKET.evidence_import_gate.source_mode=external_material")
+        if not present(gate.get("validation_ref")):
+            missing.append("INNOVATION_PACKET.evidence_import_gate.validation_ref")
+        if gate.get("mcp_attempted") is True:
+            missing.append("INNOVATION_PACKET.evidence_import_gate.mcp_attempted must not be true for external_material")
+
     if status in {"passed", "not_required"}:
         if gate.get("launch_blocked") is True:
             missing.append("INNOVATION_PACKET.evidence_import_gate.launch_blocked must be false for passed/not_required")
         if not present(gate.get("material_refs")) and not present(gate.get("evidence_ids")):
             missing.append("INNOVATION_PACKET.evidence_import_gate.material_refs or evidence_ids")
-        if status == "passed" and gate.get("mcp_attempted") is not True:
+        if mode == "papernexus" and status == "passed" and gate.get("mcp_attempted") is not True:
             missing.append("INNOVATION_PACKET.evidence_import_gate.mcp_attempted must be true when status is passed")
 
     if status in {"async_wait", "blocked"}:
@@ -490,6 +578,192 @@ def find_design_review(base: Path, packet: dict[str, Any]) -> tuple[Path | None,
     return None, None, False
 
 
+def validate_external_identity_and_norms(
+    base: Path,
+    packet: dict[str, Any],
+    gate: dict[str, Any],
+    missing: list[str],
+) -> None:
+    for key in EXTERNAL_IDENTITY_FIELDS:
+        if not present(packet.get(key)):
+            missing.append(f"INNOVATION_PACKET.{key}")
+    commitment_sha = str(packet.get("protected_commitment_sha256") or "").strip().lower()
+    if len(commitment_sha) != 64 or any(char not in "0123456789abcdef" for char in commitment_sha):
+        missing.append("INNOVATION_PACKET.protected_commitment_sha256")
+    if present(packet.get("external_campaign_ref")) and str(packet.get("external_campaign_ref")) != str(gate.get("campaign_ref") or ""):
+        missing.append("INNOVATION_PACKET.external_campaign_ref must match PRE_IDEA_EVIDENCE_GATE.campaign_ref")
+    if present(packet.get("external_campaign_sha256")) and str(packet.get("external_campaign_sha256")) != str(gate.get("campaign_sha256") or ""):
+        missing.append("INNOVATION_PACKET.external_campaign_sha256 must match PRE_IDEA_EVIDENCE_GATE.campaign_sha256")
+    fragment_id = str(packet.get("selected_idea_fragment_id") or "").strip()
+    candidate_id = str(packet.get("external_candidate_id") or "").strip()
+    contract = packet.get("innovation_search_contract") if isinstance(packet.get("innovation_search_contract"), dict) else {}
+    track_id = str(contract.get("track_id") or packet.get("track_id") or "").strip()
+    if candidate_id and fragment_id and candidate_id == fragment_id:
+        missing.append("INNOVATION_PACKET.external_candidate_id must remain distinct from selected_idea_fragment_id")
+    if candidate_id and track_id and candidate_id == track_id:
+        missing.append("INNOVATION_PACKET.external_candidate_id must remain distinct from track_id")
+
+    norms = packet.get("external_evidence_norms") or packet.get("evidence_norms")
+    if not isinstance(norms, dict):
+        missing.append("INNOVATION_PACKET.external_evidence_norms or evidence_norms")
+    else:
+        for label, keys in [
+            ("campaign_ref", ["campaign_ref", "external_campaign_ref"]),
+            ("campaign_sha256", ["campaign_sha256", "external_campaign_sha256"]),
+            ("source_integrity", ["source_integrity", "source_integrity_status"]),
+            ("source_verification_limits", ["source_verification_limits", "verification_limits"]),
+            ("claim_limits", ["claim_limits", "claim_boundary"]),
+        ]:
+            if not present(first_present(norms, keys)):
+                missing.append(f"INNOVATION_PACKET.external_evidence_norms.{label}")
+        norm_ref = first_present(norms, ["campaign_ref", "external_campaign_ref"])
+        norm_hash = first_present(norms, ["campaign_sha256", "external_campaign_sha256"])
+        if present(norm_ref) and str(norm_ref) != str(gate.get("campaign_ref") or ""):
+            missing.append("INNOVATION_PACKET.external_evidence_norms.campaign_ref must match gate")
+        if present(norm_hash) and str(norm_hash) != str(gate.get("campaign_sha256") or ""):
+            missing.append("INNOVATION_PACKET.external_evidence_norms.campaign_sha256 must match gate")
+
+
+def validate_external_panel_review(
+    base: Path,
+    packet: dict[str, Any],
+    missing: list[str],
+    details: dict[str, Any],
+) -> None:
+    path = base / "ideation/PANEL_DESIGN_REVIEW.json"
+    payload = read_json(path)
+    details["design_review_path"] = relpath(base, path)
+    if not isinstance(payload, dict):
+        missing.append("ideation/PANEL_DESIGN_REVIEW.json")
+        return
+    if not design_review_ready(payload):
+        missing.append("PANEL_DESIGN_REVIEW.status/verdict passed or approved")
+    reviewer = first_present(payload, ["reviewer_id", "reviewer", "reviewer_context_id"])
+    author = first_present(payload, ["generation_author_id", "generation_author", "generator_id"])
+    generation_context = first_present(payload, ["generation_context_ref", "generation_context_id", "author_context_ref"])
+    review_context = first_present(payload, ["review_context_ref", "review_context_id", "reviewer_context_ref"])
+    separated = payload.get("context_separated") is True or (
+        present(generation_context)
+        and present(review_context)
+        and str(generation_context) != str(review_context)
+    )
+    if not present(reviewer):
+        missing.append("PANEL_DESIGN_REVIEW.reviewer_id or reviewer")
+    if not present(author) and not present(generation_context):
+        missing.append("PANEL_DESIGN_REVIEW generation author/context identity")
+    if present(reviewer) and present(author) and str(reviewer) == str(author):
+        missing.append("PANEL_DESIGN_REVIEW reviewer must differ from generation author")
+    if not separated:
+        missing.append("PANEL_DESIGN_REVIEW.context_separated=true or distinct generation/review contexts")
+    candidate_id = str(packet.get("external_candidate_id") or "").strip()
+    refs = set()
+    for key in ["external_candidate_id", "candidate_id", "candidate_refs", "reviewed_candidate_ids"]:
+        value = payload.get(key)
+        if isinstance(value, list):
+            refs.update(str(item) for item in value if present(item))
+        elif present(value):
+            refs.add(str(value))
+    if candidate_id and candidate_id not in refs:
+        missing.append("PANEL_DESIGN_REVIEW must reference INNOVATION_PACKET.external_candidate_id")
+    details["external_panel_review"] = {
+        "status": payload.get("status"),
+        "verdict": payload.get("verdict") or payload.get("decision"),
+        "candidate_refs": sorted(refs),
+        "context_separated": separated,
+    }
+
+
+def validate_passport_binding(
+    base: Path, packet: dict[str, Any], missing: list[str], warnings: list[str]
+) -> None:
+    ref = str(packet.get("project_execution_passport_ref") or "").strip()
+    passport_path = base / (ref or "resources/PROJECT_EXECUTION_PASSPORT.json")
+    if not ref:
+        if passport_path.exists():
+            warnings.append("project execution passport exists but this legacy packet has no execution-profile binding")
+        return
+    passport = read_json(passport_path)
+    if not isinstance(passport, dict) or not passport:
+        missing.append("INNOVATION_PACKET.project_execution_passport_ref must resolve")
+        return
+    if str(packet.get("project_execution_passport_index_sha256") or "") != str(passport.get("index_semantic_sha256") or ""):
+        missing.append("INNOVATION_PACKET.project_execution_passport_index_sha256 must match passport index")
+    profile_id = str(packet.get("execution_profile_id") or "")
+    profile = next(
+        (
+            item
+            for item in passport.get("execution_profiles", [])
+            if isinstance(item, dict) and str(item.get("profile_id") or "") == profile_id
+        ),
+        None,
+    )
+    if profile is None:
+        missing.append("INNOVATION_PACKET.execution_profile_id must resolve one passport profile")
+    elif str(packet.get("execution_profile_sha256") or "") != str(profile.get("execution_profile_sha256") or ""):
+        missing.append("INNOVATION_PACKET.execution_profile_sha256 must match the selected profile")
+    delta = packet.get("innovation_delta")
+    if not isinstance(delta, dict) or not delta:
+        missing.append("INNOVATION_PACKET.innovation_delta")
+    elif str(packet.get("innovation_delta_sha256") or "") != canonical_sha256(delta):
+        missing.append("INNOVATION_PACKET.innovation_delta_sha256 must match innovation_delta")
+    projection = packet.get("resolved_execution_contract_projection")
+    if isinstance(projection, dict) and str(packet.get("resolved_execution_contract_projection_sha256") or "") != canonical_sha256(projection):
+        missing.append("INNOVATION_PACKET.resolved_execution_contract_projection_sha256 must match projection")
+
+
+def validate_program_parameter_binding(
+    base: Path,
+    packet: dict[str, Any],
+    missing: list[str],
+    details: dict[str, Any],
+) -> None:
+    program = read_json(base / "orchestrator/PROGRAM_CLAIM_CONTRACT.json") or {}
+    mode = str(program.get("enforcement_mode") or "legacy")
+    scope = str(program.get("claim_scope") or "dataset_specific")
+    details["program_claim_contract_enforcement_mode"] = mode
+    if mode != "enforced":
+        return
+    for field, expected in program_contract_binding(program).items():
+        if packet.get(field) != expected:
+            missing.append(f"INNOVATION_PACKET.{field} must match PROGRAM_CLAIM_CONTRACT.json")
+    claim_role = str(packet.get("claim_role") or "")
+    if scope == "cross_dataset_method" and claim_role == "method_candidate":
+        contract = packet.get("parameter_transfer_contract")
+        datasets = required_dataset_ids(program, packet)
+        validation = validate_parameter_transfer_contract(contract, datasets)
+        missing.extend(
+            f"INNOVATION_PACKET.parameter_transfer_contract: {error}"
+            for error in validation.get("errors") or []
+        )
+        if not present(packet.get("method_formula_sha256")):
+            missing.append("INNOVATION_PACKET.method_formula_sha256")
+        inventory = packet.get("parameter_role_inventory")
+        if not isinstance(inventory, list) or not inventory:
+            missing.append("INNOVATION_PACKET.parameter_role_inventory")
+        else:
+            load_bearing = []
+            for index, row in enumerate(inventory):
+                if not isinstance(row, dict):
+                    missing.append(f"INNOVATION_PACKET.parameter_role_inventory[{index}] must be an object")
+                    continue
+                role = str(row.get("parameter_role") or "")
+                if role not in VALID_PARAMETER_ROLES:
+                    missing.append(f"INNOVATION_PACKET.parameter_role_inventory[{index}].parameter_role")
+                if not present(row.get("parameter_name")):
+                    missing.append(f"INNOVATION_PACKET.parameter_role_inventory[{index}].parameter_name")
+                if role == "innovation_load_bearing":
+                    load_bearing.append(row)
+            if len(load_bearing) != 1:
+                missing.append("INNOVATION_PACKET.parameter_role_inventory must contain exactly one innovation_load_bearing row")
+            elif isinstance(contract, dict):
+                if load_bearing[0].get("parameter_name") != contract.get("parameter_name"):
+                    missing.append("INNOVATION_PACKET load-bearing inventory name must match parameter_transfer_contract")
+                if load_bearing[0].get("parameter_transfer_contract_sha256") != contract.get(
+                    "parameter_transfer_contract_sha256"
+                ):
+                    missing.append("INNOVATION_PACKET load-bearing inventory hash must match parameter_transfer_contract")
+
+
 def lint_packet(project: str, packet_path: Path | None = None) -> dict[str, Any]:
     base = ar(project)
     path = packet_path or base / "orchestrator/INNOVATION_PACKET.json"
@@ -501,6 +775,11 @@ def lint_packet(project: str, packet_path: Path | None = None) -> dict[str, Any]
     if not isinstance(packet, dict):
         missing.append(relpath(base, path))
         return {"complete": False, "status": "incomplete", "missing": missing, "warnings": warnings, "path": str(path)}
+
+    mode, source_gate = evidence_source_mode(base, packet)
+    details["evidence_source_mode"] = mode
+    if mode not in {"papernexus", "external_material"}:
+        missing.append("PRE_IDEA_EVIDENCE_GATE.evidence_source_mode must be papernexus or external_material")
 
     for key in REQUIRED:
         if not present(packet.get(key)):
@@ -514,13 +793,22 @@ def lint_packet(project: str, packet_path: Path | None = None) -> dict[str, Any]
     if not present(first_present(packet, DATASET_KEYS)):
         missing.append("INNOVATION_PACKET.dataset_or_benchmark")
 
-    validate_baseline_backend_paths(packet, missing)
+    validate_baseline_backend_paths(packet, missing, require_route=mode == "external_material")
     validate_innovation_contract(packet, missing)
-    validate_paper_bundle(packet, missing, details)
-    validate_evidence_import_gate(packet, missing)
+    validate_paper_bundle(
+        packet,
+        missing,
+        details,
+        require_storyline=str(packet.get("track_role") or "primary").strip().lower() == "primary",
+    )
+    validate_evidence_import_gate(packet, missing, mode)
     validate_pre_idea_refs(base, packet, missing, details)
     validate_stability_seed_policy(packet, missing, warnings)
     validate_hpo_search_policy(packet, "INNOVATION_PACKET", missing, warnings)
+    validate_passport_binding(base, packet, missing, warnings)
+    validate_program_parameter_binding(base, packet, missing, details)
+    if mode == "external_material":
+        validate_external_identity_and_norms(base, packet, source_gate, missing)
 
     summary, boundary_missing = boundary_summary(packet)
     missing.extend(boundary_missing)
@@ -531,31 +819,34 @@ def lint_packet(project: str, packet_path: Path | None = None) -> dict[str, Any]
     missing.extend(f"idea_support: {item}" for item in idea_support.get("missing", []))
     warnings.extend(f"idea_support: {item}" for item in idea_support.get("warnings", []))
 
-    caps = read_json(base / "capabilities.json") or {}
-    controller_available = caps.get("research_controller_available") is True
-    brief_value = first_present(packet, ["controller_innovation_brief_path", "controllerInnovationBriefPath", "innovation_brief_path"])
-    brief_path = resolve_path(base, brief_value) if brief_value else None
-    if controller_available and not brief_path:
-        missing.append("INNOVATION_PACKET.controller_innovation_brief_path")
-    if brief_path:
-        brief = read_json(brief_path)
-        if brief is None:
-            missing.append(f"controller_innovation_brief_path target missing: {relpath(base, brief_path)}")
-        elif str(brief.get("status", "")).lower() not in READY:
-            missing.append("controller innovation brief status ready")
-        details["controller_innovation_brief_path"] = relpath(base, brief_path)
-    elif not controller_available:
-        warnings.append("research_controller unavailable or unrecorded; controller innovation brief not required")
+    if mode == "external_material":
+        validate_external_panel_review(base, packet, missing, details)
+    else:
+        caps = read_json(base / "capabilities.json") or {}
+        controller_available = caps.get("research_controller_available") is True
+        brief_value = first_present(packet, ["controller_innovation_brief_path", "controllerInnovationBriefPath", "innovation_brief_path"])
+        brief_path = resolve_path(base, brief_value) if brief_value else None
+        if controller_available and not brief_path:
+            missing.append("INNOVATION_PACKET.controller_innovation_brief_path")
+        if brief_path:
+            brief = read_json(brief_path)
+            if brief is None:
+                missing.append(f"controller_innovation_brief_path target missing: {relpath(base, brief_path)}")
+            elif str(brief.get("status", "")).lower() not in READY:
+                missing.append("controller innovation brief status ready")
+            details["controller_innovation_brief_path"] = relpath(base, brief_path)
+        elif not controller_available:
+            warnings.append("research_controller unavailable or unrecorded; controller innovation brief not required")
 
-    proposal_controller_ready = proposal_graph_controller_ready(base, packet, details)
-    design_path, design_payload, design_ready = find_design_review(base, packet)
-    if design_payload is None and not proposal_controller_ready:
-        missing.append("controller design review or fallback panel review")
-    elif design_payload is not None and not design_ready and not proposal_controller_ready:
-        missing.append("controller design review status/verdict ready")
-    details["design_review_path"] = relpath(base, design_path) if design_path else None
-    if proposal_controller_ready and design_payload is None:
-        warnings.append("using committed proposal graph controller trace as design-review authority")
+        proposal_controller_ready = proposal_graph_controller_ready(base, packet, details)
+        design_path, design_payload, design_ready = find_design_review(base, packet)
+        if design_payload is None and not proposal_controller_ready:
+            missing.append("controller design review or fallback panel review")
+        elif design_payload is not None and not design_ready and not proposal_controller_ready:
+            missing.append("controller design review status/verdict ready")
+        details["design_review_path"] = relpath(base, design_path) if design_path else None
+        if proposal_controller_ready and design_payload is None:
+            warnings.append("using committed proposal graph controller trace as design-review authority")
 
     evidence = first_present(packet, ["evidence_paths", "evidencePaths", "supporting_papers", "supportingPapers"])
     if not present(evidence):

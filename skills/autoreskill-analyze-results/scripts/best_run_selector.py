@@ -10,6 +10,14 @@ from pathlib import Path
 from typing import Any
 
 
+TERMINAL_NONPOSITIVE_STATUSES = {
+    "core_hypotheses_refuted",
+    "no_valid_gain",
+    "inconclusive_budget_exhausted",
+    "protocol_unresolvable",
+}
+
+
 def now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -52,6 +60,22 @@ def run_id(row: dict[str, Any]) -> str:
     return str(row.get("experiment_id") or row.get("remote_run") or row.get("manifest") or "unknown")
 
 
+def terminal_nonpositive_program(base: Path, ledger: dict[str, Any]) -> dict[str, Any]:
+    decision_ledger = read_json(base / "ideation/IDEA_DECISION_LEDGER.json", {})
+    decision = decision_ledger.get("program_decision") if isinstance(decision_ledger, dict) else None
+    if not isinstance(decision, dict):
+        return {}
+    status = str(decision.get("status") or "").strip().lower()
+    if (
+        decision.get("terminal") is True
+        and status in TERMINAL_NONPOSITIVE_STATUSES
+        and str(decision.get("target_stage") or "").strip().lower() == "analysis"
+        and ledger.get("improvement_claim_allowed") is False
+    ):
+        return decision
+    return {}
+
+
 def build(project: str) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
     base = ar(project)
     ledger = read_json(base / "coder/EXPERIMENT_LEDGER.json", {})
@@ -60,6 +84,8 @@ def build(project: str) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]
     selected = ledger.get("best_run") if isinstance(ledger, dict) and isinstance(ledger.get("best_run"), dict) else None
     if not selected and promoted:
         selected = promoted[0]
+    terminal_program = terminal_nonpositive_program(base, ledger if isinstance(ledger, dict) else {})
+    terminal_no_promotion = bool(terminal_program and not selected)
     excluded = []
     for row in entries:
         if selected and run_id(row) == run_id(selected):
@@ -80,8 +106,10 @@ def build(project: str) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]
         "excluded_runs": excluded,
         "exclusion_reasons": {row["run_id"]: row["reason"] for row in excluded},
         "ablation_or_confirmation_ref": selected.get("ablation_of") or selected.get("confirmation_of") if selected else None,
-        "final_promotion_status": "promoted" if selected else "blocked_no_promoted_run",
-        "claim_policy": "strong_improvement_claims_require_selected_promoted_run",
+        "final_promotion_status": "promoted" if selected else "terminal_program_no_promoted_run" if terminal_no_promotion else "blocked_no_promoted_run",
+        "program_decision_status": terminal_program.get("status") if terminal_program else None,
+        "program_decision_ref": "ideation/IDEA_DECISION_LEDGER.json#program_decision" if terminal_program else None,
+        "claim_policy": "strong_improvement_claims_require_selected_promoted_run" if selected else "no_positive_improvement_claim",
     }
     score_failures = []
     for row in promoted:
@@ -91,7 +119,7 @@ def build(project: str) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]
     score = {
         "schema_version": 1,
         "created_at": now(),
-        "status": "passed" if selected and not score_failures else "blocked",
+        "status": "not_applicable_no_positive_claim" if terminal_no_promotion else "passed" if selected and not score_failures else "blocked",
         "selected_run_id": selection["selected_run_id"],
         "checks": [
             {"run_id": run_id(row), "metric_value": row.get("metric_value") or (row.get("metrics") or {}).get("proposed"), "metric_source": row.get("metric_source") or row.get("metrics_path"), "status": "passed" if (row.get("metric_value") or (row.get("metrics") or {}).get("proposed")) is not None else "blocked"}
@@ -107,7 +135,11 @@ def build(project: str) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]
     spec = {
         "schema_version": 1,
         "created_at": now(),
-        "status": "passed" if not spec_failures else "blocked",
+        "status": (
+            "not_applicable_no_valid_result"
+            if terminal_no_promotion and str(terminal_program.get("status") or "") == "protocol_unresolvable"
+            else "passed" if not spec_failures else "blocked"
+        ),
         "checks": [
             {"run_id": run_id(row), "track_id": row.get("track_id"), "status": row.get("spec_violation_status") or "not_checked"}
             for row in entries
@@ -124,15 +156,27 @@ def check(project: str) -> dict[str, Any]:
     spec = read_json(base / "analyzer/SPEC_VIOLATION_AUDIT.json", {})
     missing: list[str] = []
     warnings: list[str] = []
-    if not isinstance(selection, dict) or not present(selection.get("selected_run_id")):
-        missing.append("analyzer/BEST_RUN_SELECTION.json selected_run_id")
-    elif selection.get("final_promotion_status") != "promoted":
-        missing.append("analyzer/BEST_RUN_SELECTION.json final_promotion_status=promoted")
-    if not isinstance(score, dict) or score.get("status") != "passed":
-        missing.append("analyzer/SCORE_VERIFICATION.json status=passed")
-    if not isinstance(spec, dict) or spec.get("status") != "passed":
-        missing.append("analyzer/SPEC_VIOLATION_AUDIT.json status=passed")
-    if selection and not present(selection.get("ablation_or_confirmation_ref")):
+    terminal_no_promotion = (
+        isinstance(selection, dict)
+        and selection.get("final_promotion_status") == "terminal_program_no_promoted_run"
+        and not present(selection.get("selected_run_id"))
+        and present(selection.get("program_decision_ref"))
+    )
+    if terminal_no_promotion:
+        if not isinstance(score, dict) or score.get("status") != "not_applicable_no_positive_claim":
+            missing.append("analyzer/SCORE_VERIFICATION.json status=not_applicable_no_positive_claim")
+        if not isinstance(spec, dict) or spec.get("status") not in {"passed", "not_applicable_no_valid_result"}:
+            missing.append("analyzer/SPEC_VIOLATION_AUDIT.json passed or not_applicable_no_valid_result")
+    else:
+        if not isinstance(selection, dict) or not present(selection.get("selected_run_id")):
+            missing.append("analyzer/BEST_RUN_SELECTION.json selected_run_id")
+        elif selection.get("final_promotion_status") != "promoted":
+            missing.append("analyzer/BEST_RUN_SELECTION.json final_promotion_status=promoted")
+        if not isinstance(score, dict) or score.get("status") != "passed":
+            missing.append("analyzer/SCORE_VERIFICATION.json status=passed")
+        if not isinstance(spec, dict) or spec.get("status") != "passed":
+            missing.append("analyzer/SPEC_VIOLATION_AUDIT.json status=passed")
+    if selection and not terminal_no_promotion and not present(selection.get("ablation_or_confirmation_ref")):
         warnings.append("selected run has no explicit ablation_or_confirmation_ref; keep claims moderate unless ledger proves promotion")
     return {"complete": not missing, "status": "complete" if not missing else "incomplete", "missing": missing, "warnings": warnings}
 

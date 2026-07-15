@@ -1,0 +1,8 @@
+{
+  "goal_type": "standalone_survey",
+  "claim_mode": "survey_only",
+  "claim_limits": {
+    "paper_claims": "No manuscript or experiment claim is made by this fixture.",
+    "allowed_output": "survey-only diagnostic lint"
+  }
+}

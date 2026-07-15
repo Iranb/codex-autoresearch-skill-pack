@@ -9,6 +9,7 @@ Codex heartbeat.
 - Allowed Heartbeat Scopes
 - Bounded Continuation Before Waiting
 - Stale External Polls
+- Experiment Opportunity Scan
 - Managed Heartbeat Lifecycle
 - Result-Aware Poll Classification
 - PaperNexus Graph Import Heartbeats
@@ -35,7 +36,7 @@ tick. Continue running local ticks/jobs until one of these conditions is reached
 - `hard_stop` or terminal completion.
 - `queued_async_wait` for an allowed external wait.
 - `repair_already_queued` with no due packet.
-- External live run/resource wait.
+- External live run/resource wait with no eligible parallel experiment launch.
 - User, budget, credential, or safety gate.
 - Active loop budget is exhausted.
 
@@ -48,6 +49,21 @@ or launch/repair readiness with no external runtime wait, treat any existing
 `poll_experiment_run` heartbeat as obsolete. Supersede the async job and continue
 local WorkflowGuard classification so idle resources can trigger launch, repair,
 rollback, or stage advancement.
+
+Also treat `poll_experiment_run` as obsolete when the next-action queue contains
+an independent `ready` or `planned` launch row that can fit remaining resources.
+A running experiment is not a global barrier: before continuing a heartbeat,
+check `.autoreskill/experiment/NEXT_EXPERIMENT_QUEUE.json`, reconcile stale
+running rows, refresh live GPU/HPC capacity, and dispatch a parallel launch when
+the candidate row has no blocker, satisfied dependencies, no mutex/resource
+conflict, and `parallel_safe` is not false.
+
+Before waiting, also run the queue `frontier` check. An actionable
+`missing_track_packet` or `admissible_frontier_deficit` is synchronous planning,
+not a heartbeat. `scientific_dependency_wait` is a valid experiment wait only
+when the referenced authoritative run is live. In `admission_scope=global`, a
+project monitor reports `global_admission_required` and leaves physical launch
+to the global dispatcher.
 
 Apply the same local-first rule to non-experiment external waits:
 
@@ -65,6 +81,83 @@ Apply the same local-first rule to non-experiment external waits:
   wait but the current contract has a more immediate local repair. It must not be
   dispatched until the current contract again identifies the same external wait
   as the blocker.
+
+## Experiment Opportunity Scan
+
+Every experiment heartbeat runs this scan after reconciling live/terminal rows
+and before choosing the next wait:
+
+1. Validate the current next-action queue and selection/packet authorities, then
+   run `experiment_next_actions.py frontier`.
+2. Refresh live resource pools when a ready/planned row, positive portfolio
+   deficit, or capacity-dependent blocker exists; run project or global
+   scheduling under its current authority. Count only fresh capability-known
+   slots, not raw SSH hosts or unverified GPUs.
+3. Continue synchronously for an actionable missing packet, control, ablation,
+   cross-dataset confirmation, or other packet-declared frontier row.
+4. Compute `portfolio_admission_deficit = 4 - active_nonterminal_tracks`. From
+   the committed evidence-gated shortlist, select the exact deterministic
+   feasible subset of causally distinct untested candidates, bounded by the
+   deficit and aggregate budget, then batch-admit and materialize every selected
+   candidate's cheapest single-seed `pilot_only` test in one recoverable
+   transaction. This direct-admission step does not regenerate/rescore the
+   shortlist, admit from GPU availability, or serialize the batch to one
+   candidate per heartbeat; use step 5 only when its stricter conditions hold.
+5. If the deficit is positive and the current-revision committed shortlist has
+   no fillable candidate, dispatch one bounded `replenish_experiment_portfolio`
+   action when the ledger records a named unresolved program claim and the
+   evidence/compute/revision budgets permit it. Candidate construction is local;
+   it does not wait for or require idle GPUs. Zero active tracks are eligible;
+   they are not proof that the program is complete. Before generation, commit one
+   idempotent changed-basis `replenishment_event` with
+   `research_decision.py --replenishment --write`. Preserve any selected primary
+   and its selection fingerprint; record `shortlist_exhausted`, `invalid`, or
+   `strategically_superseded` in existing lifecycle/decision authorities; reuse
+   the current canonical evidence source and corpus; run targeted incremental
+   discovery only for missing evidence roles; generate 8-12 lightweight cards,
+   merge causal duplicates, and batch-screen one 3-5 item shortlist. Bind the
+   pool and scorecard to the active program revision; do not select a primary or
+   generate track seeds in this action. Deep-plan only the exact feasible
+   candidates needed by the deficit in the following admission action. Reuse the prior
+   event or rejection instead of repeating research when the program, lifecycle,
+   evidence-source, selection, and decision fingerprints are unchanged. If the
+   old route is track-terminal but project-nonterminal, first follow the explicit
+   replacement-authority and program-revision recovery route; a project-terminal
+   route cannot reopen.
+6. Before seeds or HPO, materialize every missing preregistered
+   `stage2_parameter_probe` row for the selected load-bearing parameter across all
+   required datasets. After the ledger-owned calibration decision freezes one
+   profile, materialize every paired `stage2_method_screen` leg. Open DEHB only
+   after cross-dataset support and a named coupled-parameter sensitivity question;
+   a valid negative, missing matched baseline, or idle GPU is not such a question.
+   After each ledger write, run `stage_transition_materialize.py --dry-run`, then
+   apply against the reported queue revision. It creates all currently unlocked
+   Stage 3/4 rows together, creates one complete dataset-group HPO trial when
+   eligible, and creates Stage 6 only after ledger-backed full-budget support
+   plus an optional finalized HPO decision. Reconcile grouped HPO evidence with
+   `dataset_group_hpo.py reconcile --write`; use `--finalize` only after the
+   registered full-resource budget is resolved, or pass a recorded
+   `--stop-reason` for a deliberate bounded early stop. An incomplete group has no
+   optimizer objective.
+7. Route every fitting assignment through the current launch authority. In
+   project mode, atomically claim one assignment, persist intent, launch as
+   authorized, record receipt/observation, refresh, and repeat until no fitting
+   row remains or the wake budget is reached. In global mode, expose rows to the
+   global dispatcher; the project monitor must not claim them. One submit before
+   refresh is a safety rule, not a one-submit-per-heartbeat limit.
+
+Priority is not a project-wide barrier: lower-priority fitting work may use a
+resource pool that no higher-priority row can use. However, ready validity
+repairs, causal discriminators, controls, and new single-innovation pilots outrank
+parameter optimization on the same fitting pool.
+
+Checking is mandatory, launching is conditional. When no action can proceed,
+record the current scheduler or gate rejection rather than writing a generic
+`waiting` result. If queue revision, track/selection/lifecycle fingerprints,
+result evidence, evidence-source authority, HPO budget, and relevant resource
+observations are unchanged, reuse the previous scientific or replenishment
+rejection and avoid repeating heavy idea review; a ready row with a capacity
+blocker still requires a fresh resource observation.
 
 `next_retry_at` is an unattended backoff, not a hard block after a human/resource
 update. If the user provides a new endpoint, credential, GPU allocation, dataset
@@ -115,6 +208,7 @@ change. Classify each poll before scheduling another heartbeat:
 | Terminal result | Complete or fail the async job, delete heartbeat, and tick locally |
 | Superseded wait | Mark job superseded, delete heartbeat, and continue local routing |
 | Locally actionable repair or launch state | Stop waiting and dispatch/queue repair in the bounded loop |
+| Independent ready experiment row plus free resource slot | Stop waiting and dispatch `launch_parallel_experiment` |
 
 Use compact normalized status for signatures. Store only enough progress to make
 the next resume deterministic: remote status, task/run id, queue position,

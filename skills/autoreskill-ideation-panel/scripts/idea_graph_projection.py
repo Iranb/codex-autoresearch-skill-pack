@@ -6,9 +6,24 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+
+EXTERNAL_GATE_SCRIPT_DIR = (
+    Path(__file__).resolve().parents[2] / "autoreskill-gpu-idea-validation/scripts"
+)
+if str(EXTERNAL_GATE_SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(EXTERNAL_GATE_SCRIPT_DIR))
+
+from external_gate_commit import (  # noqa: E402
+    ExternalGateError,
+    load_external_gate_commit,
+    load_gate_source_mode,
+    require_same_external_gate_commit,
+)
 
 
 ROLE_TO_NODE_TYPE = {
@@ -21,6 +36,7 @@ ROLE_TO_NODE_TYPE = {
     "transfer_bridge": "transfer_bridge",
     "challenge_anchor": "claim",
 }
+EVIDENCE_SOURCE_MODES = {"papernexus", "external_material"}
 
 
 def now() -> str:
@@ -63,6 +79,39 @@ def present(value: Any) -> bool:
     if isinstance(value, (list, tuple, set, dict)):
         return bool(value)
     return True
+
+
+def evidence_source_mode(base: Path) -> str:
+    mode, _ = load_gate_source_mode(base)
+    return mode
+
+
+def object_rows(value: Any, keys: tuple[str, ...]) -> list[dict[str, Any]]:
+    if not isinstance(value, dict):
+        return []
+    for key in keys:
+        rows = value.get(key)
+        if isinstance(rows, list):
+            return [row for row in rows if isinstance(row, dict)]
+    return []
+
+
+def refs_of(row: dict[str, Any]) -> list[str]:
+    refs: list[str] = []
+    for key in ["evidence_ids", "evidence_refs", "source_refs", "material_refs", "supporting_source_refs"]:
+        value = row.get(key)
+        if isinstance(value, list):
+            refs.extend(str(item).strip() for item in value if present(item))
+        elif present(value):
+            refs.append(str(value).strip())
+    return sorted(set(refs))
+
+
+def external_row_id(row: dict[str, Any], fallback: str) -> str:
+    for key in ["external_candidate_id", "candidate_id", "node_id", "gap_id", "pattern_id", "source_id", "id"]:
+        if present(row.get(key)):
+            return str(row[key]).strip()
+    return fallback
 
 
 def text_of(row: dict[str, Any]) -> str:
@@ -355,6 +404,278 @@ def add_reviewer_risk_nodes(base: Path, nodes: dict[str, dict[str, Any]], edges:
                     break
 
 
+def add_external_slot_nodes(
+    slots: dict[str, Any],
+    slot_rel: str | None,
+    nodes: dict[str, dict[str, Any]],
+) -> None:
+    """Project external slots without inventing lineage from array order."""
+    if slot_rel is None:
+        return
+    mapping = {
+        "challenge_clusters": "claim",
+        "insight_clusters": "method_mechanism",
+        "transfer_bridges": "transfer_bridge",
+        "anchor_nodes": "claim",
+        "relation_patterns": "claim",
+    }
+    for key, node_type in mapping.items():
+        rows = slots.get(key)
+        if not isinstance(rows, list):
+            continue
+        for index, row in enumerate(item for item in rows if isinstance(item, dict)):
+            slot_id = external_row_id(row, f"{key}:{index + 1}")
+            label = str(row.get("summary") or row.get("label") or row.get("name") or slot_id)
+            evidence_ids = refs_of(row) or [slot_id]
+            add_node(
+                nodes,
+                node_payload(
+                    node_type=node_type,
+                    label=label,
+                    roles=[key],
+                    evidence_ids=evidence_ids,
+                    source_paths=[slot_rel],
+                    data={
+                        "slot_id": slot_id,
+                        "external_candidate_id": row.get("external_candidate_id"),
+                        "explicit_relations": row.get("relations") or row.get("lineage_edges") or [],
+                    },
+                ),
+            )
+
+
+def build_external_projection(base: Path, commit: dict[str, Any]) -> dict[str, Any]:
+    gate = commit["gate"]
+    campaign = commit["campaign"]
+    campaign_path = commit["campaign_path"]
+    campaign_rel = commit["campaign_ref"]
+    lint_path = commit["lint_path"]
+    lint_rel = commit["lint_ref"]
+    slot_path = commit["slot_path"]
+    slot_rel = commit["slot_ref"]
+    slot_map = commit["slot_map"]
+    nodes: dict[str, dict[str, Any]] = {}
+    edges: dict[str, dict[str, Any]] = {}
+    id_map: dict[str, str] = {}
+    source_rel = campaign_rel or "ideation/NON_PAPERNEXUS_IDEA_CAMPAIGN.json"
+
+    source_rows = object_rows(
+        campaign,
+        ("sources", "source_records", "materials", "evidence_records", "literature_evidence"),
+    )
+    for index, row in enumerate(source_rows):
+        source_id = external_row_id(row, f"source:{index + 1}")
+        lane = str(row.get("lane") or row.get("evidence_lane") or row.get("source_role") or "unassigned")
+        label = str(row.get("title") or row.get("label") or row.get("stable_locator") or source_id)
+        projected = add_node(
+            nodes,
+            node_payload(
+                node_type="paper",
+                label=label,
+                lane=lane,
+                roles=[str(role) for role in row.get("roles", []) if present(role)],
+                evidence_ids=[source_id],
+                source_paths=[source_rel],
+                data={
+                    "source_id": source_id,
+                    "provider": row.get("provider"),
+                    "locator": row.get("locator") or row.get("stable_locator"),
+                    "excerpt_sha256": row.get("excerpt_sha256"),
+                },
+            ),
+        )
+        id_map[source_id] = projected
+
+    lineage = campaign.get("method_lineage") if isinstance(campaign, dict) else None
+    lineage_nodes = object_rows(lineage, ("nodes", "methods", "lineage_nodes"))
+    if not lineage_nodes:
+        lineage_nodes = object_rows(campaign, ("lineage_nodes", "methods", "method_nodes"))
+    for index, row in enumerate(lineage_nodes):
+        item_id = external_row_id(row, f"method:{index + 1}")
+        label = str(row.get("label") or row.get("name") or row.get("method") or item_id)
+        projected = add_node(
+            nodes,
+            node_payload(
+                node_type="method_mechanism",
+                label=label,
+                lane=row.get("lane"),
+                roles=["explicit_method_lineage"],
+                evidence_ids=refs_of(row) or [item_id],
+                source_paths=[source_rel],
+                data={"external_node_id": item_id, "mechanism": row.get("mechanism")},
+            ),
+        )
+        id_map[item_id] = projected
+
+    gap_rows = object_rows(campaign, ("structural_gaps", "gaps", "gap_records"))
+    for index, row in enumerate(gap_rows):
+        gap_id = external_row_id(row, f"gap:{index + 1}")
+        projected = add_node(
+            nodes,
+            node_payload(
+                node_type="structural_gap",
+                label=str(row.get("label") or row.get("gap") or row.get("summary") or gap_id),
+                roles=[str(row.get("gap_type") or "structural_gap")],
+                evidence_ids=refs_of(row) or [gap_id],
+                source_paths=[source_rel],
+                data={"gap_id": gap_id, "lineage_refs": row.get("lineage_refs") or []},
+            ),
+        )
+        id_map[gap_id] = projected
+
+    pattern_rows = object_rows(campaign, ("patterns", "selected_patterns", "pattern_selections"))
+    for index, row in enumerate(pattern_rows):
+        pattern_id = external_row_id(row, f"pattern:{index + 1}")
+        projected = add_node(
+            nodes,
+            node_payload(
+                node_type="pattern",
+                label=str(row.get("label") or row.get("main_pattern") or row.get("name") or pattern_id),
+                roles=["gap_closure_pattern"],
+                evidence_ids=refs_of(row) or [pattern_id],
+                source_paths=[source_rel],
+                data={"pattern_id": pattern_id, "subpattern": row.get("subpattern")},
+            ),
+        )
+        id_map[pattern_id] = projected
+
+    candidate_rows = object_rows(campaign, ("candidates", "idea_candidates", "admitted_candidates"))
+    for index, row in enumerate(candidate_rows):
+        candidate_id = external_row_id(row, f"candidate:{index + 1}")
+        evidence_ids = refs_of(row) or [candidate_id]
+        candidate_node = add_node(
+            nodes,
+            node_payload(
+                node_type="candidate",
+                label=str(row.get("title") or row.get("name") or row.get("hypothesis") or candidate_id),
+                roles=["external_candidate"],
+                evidence_ids=evidence_ids,
+                source_paths=[source_rel],
+                data={"external_candidate_id": candidate_id, "status": row.get("status") or row.get("verdict")},
+            ),
+        )
+        id_map[candidate_id] = candidate_node
+        mechanism = row.get("mechanism") or row.get("method") or row.get("intervention")
+        if present(mechanism):
+            mechanism_label = (
+                mechanism.get("intervention") or mechanism.get("one_variable_change")
+                if isinstance(mechanism, dict)
+                else mechanism
+            )
+            mechanism_node = add_node(
+                nodes,
+                node_payload(
+                    node_type="method_mechanism",
+                    label=f"{candidate_id}: {mechanism_label}",
+                    roles=["candidate_mechanism"],
+                    evidence_ids=evidence_ids,
+                    source_paths=[source_rel],
+                    data={"external_candidate_id": candidate_id},
+                ),
+            )
+            add_edge(edges, candidate_node, mechanism_node, "anchors", evidence_ids)
+        for closure_index, closure in enumerate(
+            item for item in row.get("gap_closures", []) if isinstance(item, dict)
+        ):
+            main_pattern = str(closure.get("main_pattern") or f"pattern:{closure_index + 1}")
+            subpattern = str(closure.get("subpattern") or "")
+            gap_ref = str(closure.get("gap_ref") or "")
+            closure_evidence = list(evidence_ids)
+            gap_row = next(
+                (item for item in gap_rows if external_row_id(item, "") == gap_ref),
+                {},
+            )
+            closure_evidence = sorted(set(closure_evidence) | set(refs_of(gap_row))) or [candidate_id]
+            pattern_node = add_node(
+                nodes,
+                node_payload(
+                    node_type="pattern",
+                    label=f"{main_pattern} / {subpattern}" if subpattern else main_pattern,
+                    roles=["gap_closure_pattern"],
+                    evidence_ids=closure_evidence,
+                    source_paths=[source_rel],
+                    data={
+                        "external_candidate_id": candidate_id,
+                        "main_pattern": main_pattern,
+                        "subpattern": subpattern,
+                        "gap_ref": gap_ref,
+                    },
+                ),
+            )
+            add_edge(edges, pattern_node, candidate_node, "anchors", closure_evidence)
+            if gap_ref in id_map:
+                add_edge(edges, pattern_node, id_map[gap_ref], "transfers_to", closure_evidence)
+        negative = row.get("negative_control") or row.get("negativeControl")
+        if present(negative):
+            negative_node = add_node(
+                nodes,
+                node_payload(
+                    node_type="negative_evidence",
+                    label=f"{candidate_id}: {negative}",
+                    roles=["negative_control"],
+                    evidence_ids=evidence_ids,
+                    source_paths=[source_rel],
+                    data={"external_candidate_id": candidate_id},
+                ),
+            )
+            add_edge(edges, negative_node, candidate_node, "contradicts", evidence_ids)
+        protocol = row.get("pilot_protocol") or row.get("validation_protocol") or row.get("protocol") or row.get("rapid_validation")
+        if present(protocol):
+            protocol_node = add_node(
+                nodes,
+                node_payload(
+                    node_type="protocol",
+                    label=f"{candidate_id}: bounded pilot protocol",
+                    roles=["falsification_protocol"],
+                    evidence_ids=evidence_ids,
+                    source_paths=[source_rel],
+                    data={"external_candidate_id": candidate_id, "protocol": protocol},
+                ),
+            )
+            add_edge(edges, protocol_node, candidate_node, "evaluates_on", evidence_ids)
+        for source_id in refs_of(row):
+            if source_id in id_map:
+                add_edge(edges, id_map[source_id], candidate_node, "supports", [source_id])
+
+    explicit_edges = object_rows(lineage, ("edges", "relations", "lineage_edges"))
+    explicit_edges.extend(object_rows(campaign, ("lineage_edges", "explicit_relations")))
+    for row in explicit_edges:
+        source = str(row.get("source") or row.get("from") or row.get("source_id") or "").strip()
+        target = str(row.get("target") or row.get("to") or row.get("target_id") or "").strip()
+        if source not in id_map or target not in id_map:
+            continue
+        relation = str(row.get("type") or row.get("relation") or row.get("edge_type") or "supports").strip()
+        evidence_ids = refs_of(row)
+        if not evidence_ids:
+            # Explicit but unsupported lineage is intentionally not projected.
+            continue
+        add_edge(edges, id_map[source], id_map[target], relation, evidence_ids)
+
+    add_external_slot_nodes(slot_map, slot_rel, nodes)
+    add_reviewer_risk_nodes(base, nodes, edges)
+    scorecard_rel = "ideation/IDEA_NOVELTY_VENUE_SCORECARD.json"
+    source_candidates = [
+        (campaign_path, source_rel),
+        (lint_path, lint_rel),
+        (slot_path, slot_rel),
+        (base / scorecard_rel, scorecard_rel),
+    ]
+    return {
+        "schema_version": 1,
+        "generated_at": now(),
+        "artifact": "EVIDENCE_GRAPH_PROJECTION",
+        "evidence_source_mode": "external_material",
+        "external_campaign_ref": source_rel,
+        "external_campaign_sha256": gate.get("campaign_sha256") if isinstance(gate, dict) else None,
+        "source_paths": [rel for path, rel in source_candidates if path is not None and rel is not None and path.exists()],
+        "node_type_set": sorted({str(node.get("type")) for node in nodes.values()}),
+        "edge_type_set": sorted({str(edge.get("type")) for edge in edges.values()}),
+        "lane_coverage": lane_coverage(nodes),
+        "nodes": sorted(nodes.values(), key=lambda row: (str(row.get("type")), str(row.get("label")))),
+        "edges": sorted(edges.values(), key=lambda row: str(row.get("id"))),
+    }
+
+
 def lane_coverage(nodes: dict[str, dict[str, Any]]) -> dict[str, dict[str, int]]:
     coverage: dict[str, dict[str, int]] = {}
     for node in nodes.values():
@@ -371,8 +692,27 @@ def lane_coverage(nodes: dict[str, dict[str, Any]]) -> dict[str, dict[str, int]]
     return coverage
 
 
-def build(project: str) -> dict[str, Any]:
+def build(project: str, external_commit: dict[str, Any] | None = None) -> dict[str, Any]:
     base = ar(project)
+    if external_commit is not None:
+        return build_external_projection(base, external_commit)
+    mode = evidence_source_mode(base)
+    if mode == "external_material":
+        return build_external_projection(base, load_external_gate_commit(base))
+    if mode not in EVIDENCE_SOURCE_MODES:
+        return {
+            "schema_version": 1,
+            "generated_at": now(),
+            "artifact": "EVIDENCE_GRAPH_PROJECTION",
+            "evidence_source_mode": mode,
+            "source_paths": [],
+            "node_type_set": [],
+            "edge_type_set": [],
+            "lane_coverage": {},
+            "nodes": [],
+            "edges": [],
+            "errors": ["evidence_source_mode must be papernexus or external_material"],
+        }
     nodes: dict[str, dict[str, Any]] = {}
     edges: dict[str, dict[str, Any]] = {}
     add_candidate_nodes(base, nodes, edges)
@@ -401,19 +741,36 @@ def build(project: str) -> dict[str, Any]:
     }
 
 
-def main() -> None:
+def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--project", required=True)
     parser.add_argument("--output", default="ideation/EVIDENCE_GRAPH_PROJECTION.json")
     args = parser.parse_args()
     base = ar(args.project)
-    projection = build(args.project)
+    external_commit = None
+    try:
+        if evidence_source_mode(base) == "external_material":
+            external_commit = load_external_gate_commit(base)
+        projection = build(args.project, external_commit)
+        if external_commit is not None:
+            require_same_external_gate_commit(external_commit, load_external_gate_commit(base))
+    except ExternalGateError as exc:
+        print(
+            json.dumps(
+                {"ok": False, "error": {"code": "external_gate_invalid", "message": str(exc)}},
+                indent=2,
+                ensure_ascii=False,
+            ),
+            file=sys.stderr,
+        )
+        return 1
     output = Path(args.output).expanduser()
     if not output.is_absolute():
         output = base / args.output
     write_json(output, projection)
     print(json.dumps({"ok": True, "path": str(output), "nodes": len(projection["nodes"]), "edges": len(projection["edges"])}, indent=2, ensure_ascii=False))
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())
