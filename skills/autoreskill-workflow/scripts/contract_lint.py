@@ -4,11 +4,18 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import subprocess
 import sys
 from pathlib import Path
 from typing import Any
+
+SCRIPT_DIR = Path(__file__).resolve().parent
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
+
+from program_claim_contract import validate_contract as validate_program_claim_contract
 
 
 READY = {"ready", "complete", "completed", "pass", "passed", "verified"}
@@ -21,13 +28,55 @@ IDEA_LIFECYCLE_STATUSES = {
     "parked",
     "killed",
     "degraded_speculative",
+    "alternate",  # schema-v2 compatibility
 }
+ADMITTED_IDEA_LIFECYCLES = {
+    "selected_primary",
+    "alternate_track",
+    "risk_repair_track",
+    "advance_with_constraints",
+    "alternate",
+}
+TRACK_ROLES = {"primary", "alternate", "risk_repair"}
+SCIENTIFIC_OUTCOME_CLASSES = {
+    "infrastructure_failure",
+    "implementation_failure",
+    "protocol_invalid",
+    "budget_stopped_no_scientific_conclusion",
+    "valid_positive_candidate",
+    "valid_negative",
+    "valid_inconclusive",
+    "cross_dataset_contradiction",
+    "duplicate_or_non_discriminating",
+}
+BELIEF_EFFECTS = {"none", "support_increased", "support_weakened", "refuted", "scope_narrowed", "still_inconclusive"}
+RESEARCH_TRANSITIONS = {
+    "PROCEED_TO_ABLATION_OR_CONFIRMATION",
+    "REFINE_IMPLEMENTATION",
+    "REFINE_PROTOCOL",
+    "RUN_ONE_DISAMBIGUATOR",
+    "PIVOT_TO_CHILD_TRACK",
+    "RETIRE_TRACK",
+    "SCOPE_CLAIM",
+    "CONCLUDE_PROGRAM",
+    "WAIT_OR_RECONCILE_BACKEND",
+}
+TERMINAL_PROGRAM_STATUSES = {
+    "supported_result_available",
+    "core_hypotheses_refuted",
+    "no_valid_gain",
+    "inconclusive_budget_exhausted",
+    "protocol_unresolvable",
+}
+TERMINAL_TRACK_LIFECYCLES = {"retired", "concluded", "refuted", "terminal"}
 IDEA_FAILURE_CLASSES = {
     "none",
     "novelty_collision",
     "closest_prior_overlap",
     "story_collapse",
-    "three_innovation_bundle_incomplete",
+    "core_contribution_undefended",
+    "causal_hypothesis_underspecified",
+    "duplicate_causal_signature",
     "evidence_gap",
     "proposal_graph_uncommitted",
     "target_domain_only_method",
@@ -86,6 +135,7 @@ SCOPE_CLAIM_LIMIT_FIELDS = [
     "reduced_evidence_target",
 ]
 SELECTION_REF_FIELDS = ["selection_fingerprint", "selected_primary_ref"]
+PROGRAM_CONTRACT_CONTEXT: dict[str, Any] = {}
 
 
 def ar(project: str) -> Path:
@@ -99,6 +149,29 @@ def read_json(path: Path) -> dict[str, Any] | None:
         return json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError:
         return None
+
+
+def canonical_sha256(payload: Any) -> str:
+    encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def seed_semantic_sha256(payload: dict[str, Any]) -> str:
+    stable = {
+        key: value
+        for key, value in payload.items()
+        if key not in {"generated_at", "semantic_sha256"}
+    }
+    return canonical_sha256(stable)
+
+
+def packet_semantic_sha256(payload: dict[str, Any]) -> str:
+    stable = {
+        key: value
+        for key, value in payload.items()
+        if key not in {"created_at", "generated_at", "semantic_sha256"}
+    }
+    return canonical_sha256(stable)
 
 
 def nonempty(path: Path) -> bool:
@@ -294,12 +367,15 @@ def selected_idea_gate_authority(base: Path) -> dict[str, Any]:
     selected_track = pool.get("selected_track_id") or ledger.get("selected_track_id")
     primary_seed_tracks: set[str] = set()
     seed_idea_ids: set[str] = set()
+    seed_by_track: dict[str, dict[str, Any]] = {}
     seed_selection_ref = ""
     for row in rows_from_payload(seeds):
         if not isinstance(row, dict):
             continue
         if present(row.get("idea_id")):
             seed_idea_ids.add(str(row["idea_id"]))
+        if present(row.get("track_id")):
+            seed_by_track[str(row["track_id"])] = row
         is_primary = normalized(row.get("track_role")) == "primary"
         if selected_idea and row.get("idea_id") and str(row.get("idea_id")) != str(selected_idea):
             is_primary = False
@@ -332,6 +408,8 @@ def selected_idea_gate_authority(base: Path) -> dict[str, Any]:
         "selection_fingerprint_explicit": bool(explicit_ref),
         "primary_seed_track_ids": sorted(primary_seed_tracks),
         "seed_idea_ids": sorted(seed_idea_ids),
+        "seed_by_track": seed_by_track,
+        "source_track_seed_sha256": seed_semantic_sha256(seeds) if isinstance(seeds, dict) and seeds else "",
         "lifecycle_by_id": lifecycle_by_id,
     }
 
@@ -344,6 +422,7 @@ def plan_selected_rows(matrix: Any) -> list[dict[str, Any]]:
         launch_status = normalized(row.get("launch_status"))
         if (
             row.get("selected_for_review") is True
+            or row.get("planning_admitted") is True
             or launch_status == "ready"
             or normalized(row.get("track_role")) == "primary"
         ):
@@ -390,14 +469,52 @@ def selected_reentry_mentions_negative(decision: dict[str, Any], selected_idea: 
 
 
 def negative_experiment_artifacts_for_selection(base: Path, selected_idea: str, selected_track: str) -> list[dict[str, Any]]:
-    """Find terminal not-promoted evidence for the selected idea/track.
+    """Find accepted scientific negative evidence for the selected idea/track.
 
     Experiment ledgers can lag behind per-track REMOTE_RUN/CANDIDATE_VERDICT files.
-    This scan intentionally checks both lightweight run artifacts and the aggregate
-    ledger so stale selected plans cannot re-launch a track already proven negative.
+    Prefer SCIENTIFIC_OUTCOME sidecars and typed ledger rows. Raw ``failed`` or
+    ``not_promoted`` runtime state is retained only as a legacy fallback because it
+    may represent infrastructure, implementation, or protocol failure.
     """
 
     negatives: list[dict[str, Any]] = []
+    typed_by_run: dict[str, dict[str, Any]] = {}
+    for outcome_path in base.glob("coder/experiments/**/SCIENTIFIC_OUTCOME.json"):
+        outcome = read_json(outcome_path)
+        if not isinstance(outcome, dict) or not present(outcome.get("run_id")):
+            continue
+        typed_by_run[str(outcome["run_id"])] = outcome
+
+    scientific_negative_classes = {
+        "valid_negative",
+        "cross_dataset_contradiction",
+        "duplicate_or_non_discriminating",
+    }
+
+    def is_scientific_negative(payload: dict[str, Any]) -> tuple[bool, str]:
+        run_id = str(payload.get("run_id") or "")
+        typed = typed_by_run.get(run_id, payload if present(payload.get("outcome_class")) else {})
+        if typed:
+            outcome_class = normalized(typed.get("outcome_class"))
+            outcome_status = normalized(
+                payload.get("scientific_outcome_status")
+                or typed.get("scientific_outcome_status")
+                or typed.get("status")
+            )
+            accepted = outcome_status in {"accepted", "applied", "complete", "completed"}
+            return accepted and outcome_class in scientific_negative_classes, outcome_class
+        status = normalized(payload.get("status") or payload.get("run_status"))
+        decision = normalized(payload.get("promotion_decision") or payload.get("promotion_status") or payload.get("verdict"))
+        legacy_negative = (
+            status in {"terminal_not_promoted", "not_promoted", "regressed", "completed_terminal_not_promoted"}
+            or status.startswith("terminal_not_promoted")
+            or status.startswith("not_promoted")
+            or decision.startswith("not_promoted")
+            or decision in {"terminal_not_promoted", "regressed"}
+            or payload.get("candidate_supported") is False and bool(decision)
+        )
+        return legacy_negative, "legacy_untyped_terminal_evidence" if legacy_negative else ""
+
     candidate_paths = list(base.glob("coder/experiments/**/CANDIDATE_VERDICT.json"))
     candidate_paths += list(base.glob("coder/experiments/**/REMOTE_RUN.json"))
     candidate_paths += list(base.glob("coder/experiments/**/*VERDICT*.json"))
@@ -416,16 +533,7 @@ def negative_experiment_artifacts_for_selection(base: Path, selected_idea: str, 
             continue
         if not (path_matches_idea or idea_id == selected_idea or (selected_track and track_id == selected_track)):
             continue
-        status = normalized(payload.get("status") or payload.get("run_status"))
-        decision = normalized(payload.get("promotion_decision") or payload.get("promotion_status") or payload.get("verdict"))
-        negative = (
-            status in {"terminal_not_promoted", "not_promoted", "failed", "regressed", "completed_terminal_not_promoted"}
-            or status.startswith("terminal_not_promoted")
-            or status.startswith("not_promoted")
-            or decision.startswith("not_promoted")
-            or decision in {"terminal_not_promoted", "failed", "regressed"}
-            or payload.get("candidate_supported") is False and bool(decision)
-        )
+        negative, outcome_class = is_scientific_negative(payload)
         if not negative:
             continue
         negatives.append(
@@ -437,13 +545,17 @@ def negative_experiment_artifacts_for_selection(base: Path, selected_idea: str, 
                 "status": payload.get("status") or payload.get("run_status"),
                 "promotion_decision": payload.get("promotion_decision") or payload.get("promotion_status") or payload.get("verdict"),
                 "candidate_supported": payload.get("candidate_supported"),
+                "outcome_class": outcome_class,
                 "negative_result_manuscript_allowed": payload.get("negative_result_manuscript_allowed"),
                 "mtime": path.stat().st_mtime,
             }
         )
 
     ledger = read_json(base / "coder/EXPERIMENT_LEDGER.json") or {}
-    for index, row in enumerate(rows_from_payload(ledger)):
+    ledger_rows = ledger.get("entries") if isinstance(ledger, dict) else None
+    if not isinstance(ledger_rows, list):
+        ledger_rows = rows_from_payload(ledger)
+    for index, row in enumerate(ledger_rows):
         if not isinstance(row, dict):
             continue
         idea_id = str(row.get("selected_idea_id") or row.get("idea_id") or "").strip()
@@ -454,14 +566,7 @@ def negative_experiment_artifacts_for_selection(base: Path, selected_idea: str, 
             continue
         if not (idea_id == selected_idea or (selected_track and track_id == selected_track)):
             continue
-        status = normalized(row.get("status") or row.get("run_status"))
-        decision = normalized(row.get("promotion_decision") or row.get("promotion_status") or row.get("verdict"))
-        negative = (
-            status.startswith("terminal_not_promoted")
-            or status.startswith("not_promoted")
-            or decision.startswith("not_promoted")
-            or row.get("candidate_supported") is False and bool(decision)
-        )
+        negative, outcome_class = is_scientific_negative(row)
         if negative:
             negatives.append(
                 {
@@ -472,6 +577,7 @@ def negative_experiment_artifacts_for_selection(base: Path, selected_idea: str, 
                     "status": row.get("status") or row.get("run_status"),
                     "promotion_decision": row.get("promotion_decision") or row.get("promotion_status") or row.get("verdict"),
                     "candidate_supported": row.get("candidate_supported"),
+                    "outcome_class": outcome_class,
                     "negative_result_manuscript_allowed": row.get("negative_result_manuscript_allowed"),
                     "mtime": 0,
                 }
@@ -572,6 +678,19 @@ def validate_selected_projection_alignment(base: Path) -> tuple[list[str], list[
                 f"orchestrator/TRACK_PLAN_MATRIX.json selection_fingerprint={matrix_ref} "
                 f"does not match idea_gate selection_fingerprint={expected_selection_ref}"
             )
+        matrix_v3 = matrix.get("schema_version") == 3
+        expected_seed_sha = str(gate.get("source_track_seed_sha256") or "")
+        if matrix_v3 and str(matrix.get("source_track_seed_sha256") or "") != expected_seed_sha:
+            missing.append(
+                "orchestrator/TRACK_PLAN_MATRIX.json source_track_seed_sha256 does not match current IDEA_TRACK_SEEDS.json"
+            )
+        if matrix_v3:
+            for rel, payload in packets.items():
+                if str(payload.get("source_track_seed_sha256") or "") != expected_seed_sha:
+                    missing.append(f"{rel} source_track_seed_sha256 does not match current IDEA_TRACK_SEEDS.json")
+                recorded_hash = str(payload.get("semantic_sha256") or "").strip().lower()
+                if recorded_hash and recorded_hash != packet_semantic_sha256(payload):
+                    missing.append(f"{rel} semantic_sha256 does not match current packet content")
         active_rows = plan_selected_rows(matrix)
         selected_active_rows = [
             row
@@ -585,6 +704,7 @@ def validate_selected_projection_alignment(base: Path) -> tuple[list[str], list[
                 f"idea_gate selection {selected_idea}/{selected_track or '<no-track>'}"
             )
         lifecycle_by_id = gate.get("lifecycle_by_id") if isinstance(gate.get("lifecycle_by_id"), dict) else {}
+        seed_by_track = gate.get("seed_by_track") if isinstance(gate.get("seed_by_track"), dict) else {}
         for index, row in enumerate(active_rows):
             idea_id = str(row.get("idea_id") or "")
             track_id = str(row.get("track_id") or "")
@@ -597,15 +717,81 @@ def validate_selected_projection_alignment(base: Path) -> tuple[list[str], list[
                     f"orchestrator/TRACK_PLAN_MATRIX.json active tracks[{index}] "
                     f"selection_fingerprint={row_ref} does not match idea_gate selection_fingerprint={expected_selection_ref}"
                 )
-            if idea_id and idea_id != selected_idea:
+            is_primary_projection = idea_id == selected_idea and (
+                not selected_track or track_id == selected_track
+            )
+            if not matrix_v3 and idea_id and not is_primary_projection:
                 missing.append(
                     f"orchestrator/TRACK_PLAN_MATRIX.json active tracks[{index}] "
                     f"{idea_id}/{track_id} is stale; expected {selected_idea}/{selected_track or '<no-track>'}"
                 )
-            if lifecycle in {"parked", "killed"}:
+            if lifecycle in {"parked", "killed", "retired", "refuted"}:
                 missing.append(
                     f"orchestrator/TRACK_PLAN_MATRIX.json active tracks[{index}] "
                     f"{idea_id}/{track_id} has lifecycle_status={lifecycle}"
+                )
+            if not matrix_v3:
+                continue
+            seed = seed_by_track.get(track_id) if isinstance(seed_by_track.get(track_id), dict) else {}
+            if not seed:
+                missing.append(
+                    f"orchestrator/TRACK_PLAN_MATRIX.json active tracks[{index}] {track_id} is absent from current IDEA_TRACK_SEEDS.json"
+                )
+                continue
+            if str(seed.get("idea_id") or "") != idea_id:
+                missing.append(f"orchestrator/TRACK_PLAN_MATRIX.json active tracks[{index}].idea_id does not match seed authority")
+            role = normalized(row.get("track_role"))
+            if role not in TRACK_ROLES or role != normalized(seed.get("track_role")):
+                missing.append(f"orchestrator/TRACK_PLAN_MATRIX.json active tracks[{index}].track_role does not match seed authority")
+            row_lifecycle = normalized(row.get("idea_lifecycle_status") or lifecycle)
+            if row_lifecycle not in ADMITTED_IDEA_LIFECYCLES:
+                missing.append(
+                    f"orchestrator/TRACK_PLAN_MATRIX.json active tracks[{index}].idea_lifecycle_status={row_lifecycle or '<missing>'} is not admitted"
+                )
+            if row.get("planning_admitted") is not True:
+                missing.append(f"orchestrator/TRACK_PLAN_MATRIX.json active tracks[{index}].planning_admitted must be true")
+            if str(row.get("source_track_seed_sha256") or "") != expected_seed_sha:
+                missing.append(f"orchestrator/TRACK_PLAN_MATRIX.json active tracks[{index}].source_track_seed_sha256 is stale")
+            for ref_field, hash_field in [
+                ("innovation_packet_ref", "innovation_packet_sha256"),
+                ("review_packet_ref", "review_packet_sha256"),
+            ]:
+                ref = str(row.get(ref_field) or "").strip()
+                packet = read_json(base / ref) if ref else None
+                if not isinstance(packet, dict) or not packet:
+                    missing.append(f"orchestrator/TRACK_PLAN_MATRIX.json active tracks[{index}].{ref_field} is missing")
+                    continue
+                computed_hash = packet_semantic_sha256(packet)
+                if str(row.get(hash_field) or "") != computed_hash:
+                    missing.append(f"orchestrator/TRACK_PLAN_MATRIX.json active tracks[{index}].{hash_field} is stale")
+                recorded_hash = str(packet.get("semantic_sha256") or "").strip().lower()
+                if recorded_hash and recorded_hash != computed_hash:
+                    missing.append(f"{ref} semantic_sha256 does not match current packet content")
+                if str(packet.get("selected_idea_id") or "") != idea_id or (
+                    present(packet.get("track_id")) and str(packet.get("track_id")) != track_id
+                ):
+                    missing.append(f"{ref} identity does not match TRACK_PLAN_MATRIX active track")
+                packet_seed_sha = str(packet.get("source_track_seed_sha256") or "")
+                if packet_seed_sha and packet_seed_sha != expected_seed_sha:
+                    missing.append(f"{ref} source_track_seed_sha256 is stale")
+            ceiling = str(row.get("evidence_tier_ceiling") or "")
+            gate_policy = row.get("promotion_gate") if isinstance(row.get("promotion_gate"), dict) else {}
+            if role != "primary":
+                if ceiling != "pilot_only":
+                    missing.append(
+                        f"orchestrator/TRACK_PLAN_MATRIX.json active tracks[{index}].evidence_tier_ceiling must be pilot_only"
+                    )
+                if "pilot_only" not in normalized(gate_policy.get("claim_policy")):
+                    missing.append(
+                        f"orchestrator/TRACK_PLAN_MATRIX.json active tracks[{index}].promotion_gate must prohibit claim promotion"
+                    )
+            elif not is_primary_projection:
+                missing.append(
+                    f"orchestrator/TRACK_PLAN_MATRIX.json primary active track must match {selected_idea}/{selected_track or '<no-track>'}"
+                )
+            if ceiling != "pilot_only" and not is_primary_projection:
+                missing.append(
+                    f"orchestrator/TRACK_PLAN_MATRIX.json active tracks[{index}] is claim-bearing but is not the selected primary"
                 )
     details = {
         "idea_gate": gate,
@@ -750,10 +936,69 @@ def validate_idea_decision_ledger(base: Path) -> tuple[list[str], list[str], dic
             missing.append(f"IDEA_TRACK_SEEDS idea {seed_id} is parked in IDEA_DECISION_LEDGER")
         elif status not in {"selected_primary", "alternate_track", "risk_repair_track", "advance_with_constraints"}:
             warnings.append(f"IDEA_TRACK_SEEDS idea {seed_id} has lifecycle_status={status}; verify this is intentional")
+    experiment_decisions = ledger.get("experiment_decisions") if isinstance(ledger.get("experiment_decisions"), list) else []
+    scientific_decision_ids: set[str] = set()
+    for index, row in enumerate(item for item in experiment_decisions if isinstance(item, dict)):
+        prefix = f"ideation/IDEA_DECISION_LEDGER.json experiment_decisions[{index}]"
+        for field in [
+            "decision_id",
+            "run_id",
+            "selected_idea_id",
+            "track_id",
+            "outcome_hash",
+            "outcome_class",
+            "belief_effect",
+            "next_belief_state",
+            "transition",
+            "scientific_revision_index",
+            "max_scientific_revisions",
+            "evidence_refs",
+        ]:
+            if not present(row.get(field)) and row.get(field) != 0:
+                missing.append(f"{prefix}.{field}")
+        decision_id = str(row.get("decision_id") or "")
+        if decision_id in scientific_decision_ids:
+            missing.append(f"{prefix}.decision_id duplicate")
+        elif decision_id:
+            scientific_decision_ids.add(decision_id)
+        if normalized(row.get("outcome_class")) not in SCIENTIFIC_OUTCOME_CLASSES:
+            missing.append(f"{prefix}.outcome_class")
+        if normalized(row.get("belief_effect")) not in BELIEF_EFFECTS:
+            missing.append(f"{prefix}.belief_effect")
+        if str(row.get("transition") or "").strip().upper() not in RESEARCH_TRANSITIONS:
+            missing.append(f"{prefix}.transition")
+    track_states = ledger.get("track_states") if isinstance(ledger.get("track_states"), list) else []
+    seen_tracks: set[str] = set()
+    for index, row in enumerate(item for item in track_states if isinstance(item, dict)):
+        prefix = f"ideation/IDEA_DECISION_LEDGER.json track_states[{index}]"
+        for field in [
+            "track_id",
+            "idea_id",
+            "belief_state",
+            "lifecycle_status",
+            "operational_attempt",
+            "scientific_revision_index",
+            "max_scientific_revisions",
+            "last_run_id",
+            "last_decision_id",
+        ]:
+            if not present(row.get(field)) and row.get(field) != 0:
+                missing.append(f"{prefix}.{field}")
+        track_id = str(row.get("track_id") or "")
+        if track_id in seen_tracks:
+            missing.append(f"{prefix}.track_id duplicate")
+        elif track_id:
+            seen_tracks.add(track_id)
+        revision = row.get("scientific_revision_index")
+        max_revision = row.get("max_scientific_revisions")
+        if isinstance(revision, int) and isinstance(max_revision, int) and revision > max_revision:
+            missing.append(f"{prefix}.scientific_revision_index exceeds max_scientific_revisions")
     return missing, warnings, {
         "decision_count": len(decisions),
         "pool_idea_count": len(pool_ids),
         "track_seed_count": len(seed_ids),
+        "experiment_decision_count": len(experiment_decisions),
+        "track_state_count": len(track_states),
         "selection_fingerprint": top_selection_ref or (selected_refs[0] if selected_refs else ""),
     }
 
@@ -901,11 +1146,34 @@ def validate_experiment_failure_lineage(
         decision = str(entry.get("promotion_decision") or entry.get("promotion_status") or entry.get("verdict") or "").strip().lower()
         status = str(entry.get("status") or "").strip().lower()
         spec = str(entry.get("spec_violation_status") or "").strip().lower()
-        is_failure = decision in failure_like or status in {"failed", "failure", "budget_stopped", "regressed"} or spec in {"flagged", "violation", "failed"}
+        outcome_class = normalized(entry.get("outcome_class"))
+        typed_outcome = outcome_class in SCIENTIFIC_OUTCOME_CLASSES
+        operational_or_invalid = outcome_class in {
+            "infrastructure_failure",
+            "implementation_failure",
+            "protocol_invalid",
+            "budget_stopped_no_scientific_conclusion",
+        }
+        is_failure = (
+            operational_or_invalid
+            if typed_outcome
+            else decision in failure_like
+            or status in {"failed", "failure", "budget_stopped", "regressed"}
+            or spec in {"flagged", "violation", "failed"}
+        )
+        if typed_outcome and not present(entry.get("failure_class")) and outcome_class != "valid_positive_candidate":
+            missing.append(f"{prefix}.failure_class")
+        if typed_outcome and outcome_class != "valid_positive_candidate":
+            if not present(entry.get("next_action")):
+                missing.append(f"{prefix}.next_action")
+            if not present(entry.get("selected_idea_id")):
+                missing.append(f"{prefix}.selected_idea_id")
+            if not present(entry.get("track_id")):
+                missing.append(f"{prefix}.track_id")
         if is_failure:
             if not present(entry.get("failure_class")):
                 missing.append(f"{prefix}.failure_class")
-            if require_failure_diagnosis:
+            if require_failure_diagnosis and operational_or_invalid:
                 diagnosis = entry.get("failure_diagnosis")
                 if not present(diagnosis):
                     missing.append(f"{prefix}.failure_diagnosis")
@@ -917,15 +1185,123 @@ def validate_experiment_failure_lineage(
                         missing.append(f"{prefix}.failure_diagnosis.repeated_failure_key for same_idea_retry")
                 else:
                     missing.append(f"{prefix}.failure_diagnosis must be an object with primary_cause/evidence_sufficiency/intervention_level/repair_route")
-            if not present(entry.get("next_action")):
+            if not typed_outcome and not present(entry.get("next_action")):
                 missing.append(f"{prefix}.next_action")
-            if not present(entry.get("selected_idea_id")):
+            if not typed_outcome and not present(entry.get("selected_idea_id")):
                 missing.append(f"{prefix}.selected_idea_id")
-            if not present(entry.get("track_id")):
+            if not typed_outcome and not present(entry.get("track_id")):
                 missing.append(f"{prefix}.track_id")
         if decision == "candidate_supported":
             warnings.append(f"{prefix} candidate_supported is pilot evidence and cannot support stable improvement claims")
     return missing, warnings, {"entry_count": len(entries)}
+
+
+def validate_scientific_outcome_lineage(
+    ledger: dict[str, Any] | None,
+    *,
+    terminal_program: dict[str, Any] | None = None,
+) -> tuple[list[str], list[str], dict[str, Any]]:
+    missing: list[str] = []
+    warnings: list[str] = []
+    details: dict[str, Any] = {"terminal_entry_count": 0, "accepted_count": 0, "quarantined_count": 0}
+    terminal_statuses = {"completed", "failed", "failure", "budget_stopped", "terminal", "regressed"}
+    entries = rows_from_payload((ledger or {}).get("entries") if isinstance(ledger, dict) else None)
+    for index, entry in enumerate(entries):
+        status = normalized(entry.get("status") or entry.get("run_status"))
+        if status not in terminal_statuses:
+            continue
+        details["terminal_entry_count"] += 1
+        prefix = f"coder/EXPERIMENT_LEDGER.json entries[{index}]"
+        outcome_status = normalized(entry.get("scientific_outcome_status"))
+        if outcome_status == "quarantined":
+            details["quarantined_count"] += 1
+            if normalized((terminal_program or {}).get("status")) != "protocol_unresolvable":
+                missing.append(f"{prefix}.scientific_outcome_status=quarantined requires terminal protocol_unresolvable decision")
+            continue
+        if outcome_status != "accepted":
+            missing.append(f"{prefix}.scientific_outcome_status=accepted")
+            continue
+        details["accepted_count"] += 1
+        outcome_class = normalized(entry.get("outcome_class"))
+        belief = normalized(entry.get("belief_effect"))
+        transition = str(entry.get("research_transition") or "").strip().upper()
+        if outcome_class not in SCIENTIFIC_OUTCOME_CLASSES:
+            missing.append(f"{prefix}.outcome_class must be typed")
+        if belief not in BELIEF_EFFECTS:
+            missing.append(f"{prefix}.belief_effect must be typed")
+        if transition not in RESEARCH_TRANSITIONS:
+            missing.append(f"{prefix}.research_transition must be typed")
+        for field in [
+            "run_id",
+            "selected_idea_id",
+            "track_id",
+            "branch_id",
+            "queue_row_id",
+            "selection_fingerprint",
+            "launch_identity_hash",
+            "scientific_outcome_ref",
+            "scientific_outcome_hash",
+            "scientific_decision_id",
+        ]:
+            if not present(entry.get(field)):
+                missing.append(f"{prefix}.{field}")
+        if outcome_class in {"infrastructure_failure", "implementation_failure", "protocol_invalid", "budget_stopped_no_scientific_conclusion"} and belief != "none":
+            missing.append(f"{prefix} operational/invalid outcome must use belief_effect=none")
+        if outcome_class == "valid_negative" and transition == "REFINE_IMPLEMENTATION":
+            missing.append(f"{prefix} valid_negative cannot default to implementation repair")
+        if outcome_class == "valid_positive_candidate" and normalized(entry.get("promotion_decision")) == "promoted":
+            missing.append(f"{prefix} positive candidate requires linked ablation/confirmation before promotion")
+        if normalized(entry.get("scientific_claim_class")) == "parameter_evidence" and normalized(entry.get("mechanism_type")) != "param":
+            warnings.append(f"{prefix} parameter_evidence should use mechanism_type=PARAM")
+    return missing, warnings, details
+
+
+def validate_terminal_program_decision(
+    base: Path,
+    decision: dict[str, Any] | None,
+) -> tuple[list[str], list[str], dict[str, Any]]:
+    missing: list[str] = []
+    warnings: list[str] = []
+    if not isinstance(decision, dict) or not decision:
+        return ["ideation/IDEA_DECISION_LEDGER.json program_decision"], warnings, {"present": False}
+    for field in [
+        "status",
+        "active_track_ids",
+        "final_track_states",
+        "evidence_refs",
+        "remaining_claim_scope",
+        "mandatory_downgrade",
+        "budget_or_value_rationale",
+        "target_stage",
+        "decision_id",
+    ]:
+        if not present(decision.get(field)):
+            missing.append(f"program_decision.{field}")
+    status = normalized(decision.get("status"))
+    if status not in TERMINAL_PROGRAM_STATUSES:
+        missing.append(f"program_decision.status must be one of {sorted(TERMINAL_PROGRAM_STATUSES)}")
+    if decision.get("terminal") is not True:
+        missing.append("program_decision.terminal=true")
+    if decision.get("target_stage") not in {"analysis", "idea_gate"}:
+        missing.append("program_decision.target_stage must be analysis or idea_gate")
+    final_states = decision.get("final_track_states") if isinstance(decision.get("final_track_states"), list) else []
+    for index, row in enumerate(final_states):
+        if not isinstance(row, dict) or normalized(row.get("lifecycle_status")) not in TERMINAL_TRACK_LIFECYCLES:
+            missing.append(f"program_decision.final_track_states[{index}].lifecycle_status must be terminal")
+    queue = read_json(base / "experiment/NEXT_EXPERIMENT_QUEUE.json") or {}
+    live = [
+        str(row.get("id") or row.get("row_id") or "unknown")
+        for row in queue.get("rows") or []
+        if isinstance(row, dict)
+        and normalized(row.get("status")) in {"ready", "planned", "claimed", "submitting", "needs_sync", "running"}
+    ]
+    if live:
+        missing.append("program_decision has unresolved live queue rows: " + ", ".join(live))
+    if status != "supported_result_available" and decision.get("improvement_claim_allowed") is not False:
+        missing.append("negative/inconclusive program_decision improvement_claim_allowed=false")
+    if requires_strong_paper_contract(base) and not present(decision.get("evaluator_evidence_refs")):
+        missing.append("program_decision.evaluator_evidence_refs for strong-paper workflow")
+    return missing, warnings, {"present": True, "status": status, "live_queue_rows": live}
 
 
 def resolve_result_path(project_root: Path, base: Path, value: Any) -> Path | None:
@@ -1248,14 +1624,39 @@ def innovation_role_bucket(value: Any) -> str | None:
     return None
 
 
-def validate_effective_innovation_points(base: Path, min_count: int = 3) -> tuple[list[str], list[str], dict[str, Any]]:
+def terminal_nonpositive_program(base: Path) -> dict[str, Any]:
+    decision_ledger = read_json(base / "ideation/IDEA_DECISION_LEDGER.json")
+    ledger = read_json(base / "coder/EXPERIMENT_LEDGER.json")
+    decision = decision_ledger.get("program_decision") if isinstance(decision_ledger, dict) else None
+    if not isinstance(decision, dict) or not isinstance(ledger, dict):
+        return {}
+    if (
+        decision.get("terminal") is True
+        and normalized(decision.get("status"))
+        in {"core_hypotheses_refuted", "no_valid_gain", "inconclusive_budget_exhausted", "protocol_unresolvable"}
+        and normalized(decision.get("target_stage")) == "analysis"
+        and ledger.get("improvement_claim_allowed") is False
+    ):
+        return decision
+    return {}
+
+
+def validate_effective_innovation_points(base: Path, min_count: int = 1) -> tuple[list[str], list[str], dict[str, Any]]:
     missing: list[str] = []
     warnings: list[str] = []
+    terminal_program = terminal_nonpositive_program(base)
     summary = read_json(base / "analyzer/IDEA_OUTCOME_SUMMARY.json")
     if not isinstance(summary, dict):
         return ["analyzer/IDEA_OUTCOME_SUMMARY.json"], warnings, {"effective_innovation_point_count": 0}
     points = summary.get("effective_innovation_points") or summary.get("accepted_innovation_points")
     if not isinstance(points, list) or not points:
+        if terminal_program:
+            return [], ["terminal non-positive program has no effective innovation claim"], {
+                "effective_innovation_point_count": 0,
+                "core_scientific_contribution_count": 0,
+                "terminal_program_status": terminal_program.get("status"),
+                "improvement_claim_allowed": False,
+            }
         return ["analyzer/IDEA_OUTCOME_SUMMARY.json effective_innovation_points[]"], warnings, {"effective_innovation_point_count": 0}
 
     accepted_statuses = {
@@ -1279,9 +1680,16 @@ def validate_effective_innovation_points(base: Path, min_count: int = 3) -> tupl
         "future_work",
         "unsupported",
         "pilot_only",
+        "refuted",
+        "inconclusive",
+        "invalid_evidence",
+        "valid_negative",
+        "valid_inconclusive",
+        "protocol_invalid",
     }
     low_priority_objectives = {"parameter_tuning", "diagnostic", "resource_fill"}
     accepted_count = 0
+    core_count = 0
     role_buckets: set[str] = set()
 
     for index, point in enumerate(row for row in points if isinstance(row, dict)):
@@ -1304,6 +1712,11 @@ def validate_effective_innovation_points(base: Path, min_count: int = 3) -> tupl
         objective_class = normalized(point.get("objective_class"))
         if objective_class in low_priority_objectives and point.get("reclassified_by_idea_gate") is not True:
             missing.append(f"{prefix}.objective_class {objective_class} cannot count as an effective innovation point without reclassified_by_idea_gate=true")
+        contribution_class = normalized(point.get("contribution_class") or point.get("innovation_class"))
+        if contribution_class in {"validation_role", "analysis_role", "engineering_support"}:
+            missing.append(f"{prefix}.contribution_class {contribution_class} cannot count as an effective innovation point")
+        if contribution_class in {"supporting", "supporting_scientific_contribution"} and not present(point.get("counterfactual_necessity")):
+            missing.append(f"{prefix}.counterfactual_necessity")
         if not present(point.get("claim_scope")):
             missing.append(f"{prefix}.claim_scope")
         evidence_ref = point.get("promoted_run_ref") or point.get("evidence_ref") or point.get("review_acceptance_ref") or point.get("analysis_ref")
@@ -1314,18 +1727,23 @@ def validate_effective_innovation_points(base: Path, min_count: int = 3) -> tupl
             accepted_count += 1
             if bucket:
                 role_buckets.add(bucket)
+            if contribution_class in {"core", "core_scientific_contribution"} or (
+                not contribution_class and bucket == "method_mechanism"
+            ):
+                core_count += 1
 
-    required_buckets = {
-        "problem_protocol_evaluation",
-        "method_mechanism",
-        "training_integration_analysis_validation",
+    if terminal_program and accepted_count:
+        missing.append("terminal non-positive program cannot declare accepted effective innovation points")
+    if not terminal_program and accepted_count < min_count:
+        missing.append(f"analyzer/IDEA_OUTCOME_SUMMARY.json effective_innovation_points needs at least {min_count} accepted core contribution; found {accepted_count}")
+    if not terminal_program and core_count < 1:
+        missing.append("analyzer/IDEA_OUTCOME_SUMMARY.json needs one accepted core_scientific_contribution")
+    return missing, warnings, {
+        "effective_innovation_point_count": accepted_count,
+        "core_scientific_contribution_count": core_count,
+        "effective_innovation_role_buckets": sorted(role_buckets),
+        "terminal_program_status": terminal_program.get("status") if terminal_program else None,
     }
-    if accepted_count < min_count:
-        missing.append(f"analyzer/IDEA_OUTCOME_SUMMARY.json effective_innovation_points needs at least {min_count} accepted points; found {accepted_count}")
-    missing_buckets = sorted(required_buckets - role_buckets)
-    if missing_buckets:
-        missing.append(f"analyzer/IDEA_OUTCOME_SUMMARY.json effective_innovation_points missing story roles {missing_buckets}")
-    return missing, warnings, {"effective_innovation_point_count": accepted_count, "effective_innovation_role_buckets": sorted(role_buckets)}
 
 
 def read_first_json(base: Path, rels: list[str]) -> tuple[dict[str, Any] | None, str | None]:
@@ -1578,14 +1996,21 @@ def result(
     warnings: list[str] | None = None,
     details: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    merged_warnings = list(warnings or [])
+    program_warnings = PROGRAM_CONTRACT_CONTEXT.get("warnings")
+    if isinstance(program_warnings, list):
+        merged_warnings.extend(f"program_claim_contract: {item}" for item in program_warnings)
+    merged_details = dict(details or {})
+    if PROGRAM_CONTRACT_CONTEXT:
+        merged_details["program_claim_contract"] = PROGRAM_CONTRACT_CONTEXT
     return {
         "stage": stage,
         "complete": complete,
         "status": "complete" if complete else "incomplete",
         "missing": missing,
-        "warnings": warnings or [],
+        "warnings": merged_warnings,
         "contract_source": source,
-        "details": details or {},
+        "details": merged_details,
     }
 
 
@@ -1599,6 +2024,48 @@ def run_json(cmd: list[str]) -> dict[str, Any]:
     if proc.stderr.strip():
         parsed["stderr"] = proc.stderr.strip()
     return parsed
+
+
+def evidence_source_mode(base: Path) -> str:
+    gate = read_json(base / "ideation/PRE_IDEA_EVIDENCE_GATE.json") or {}
+    return str(gate.get("evidence_source_mode") or "papernexus").strip().lower()
+
+
+def run_external_alignment_lint(skill_root: Path, project: str, stage: str) -> dict[str, Any]:
+    script = skill_root / "autoreskill-gpu-idea-validation/scripts/external_alignment_lint.py"
+    if not script.is_file():
+        return {
+            "complete": False,
+            "missing": ["autoreskill-gpu-idea-validation/scripts/external_alignment_lint.py"],
+            "warnings": [],
+            "returncode": 1,
+        }
+    return run_json(
+        [
+            sys.executable,
+            str(script),
+            "--project",
+            str(Path(project).expanduser().resolve()),
+            "--stage",
+            stage,
+        ]
+    )
+
+
+def merge_child_lint(
+    name: str,
+    out: dict[str, Any],
+    missing: list[str],
+    warnings: list[str],
+) -> None:
+    if not out.get("complete"):
+        items = out.get("missing") if isinstance(out.get("missing"), list) else []
+        if items:
+            missing.extend(f"{name}: {item}" for item in items)
+        else:
+            missing.append(f"{name} failed without structured missing output")
+    items = out.get("warnings") if isinstance(out.get("warnings"), list) else []
+    warnings.extend(f"{name}: {item}" for item in items)
 
 
 def run_innovation_story_lint(skill_root: Path, project: str, stage: str) -> dict[str, Any]:
@@ -1652,7 +2119,27 @@ def run_paper_forensics_lint(skill_root: Path, project: str, stage: str) -> dict
 
 
 def lint(project: str, stage: str) -> dict[str, Any]:
+    global PROGRAM_CONTRACT_CONTEXT
     base = ar(project)
+    program_contract = read_json(base / "orchestrator/PROGRAM_CLAIM_CONTRACT.json") or {}
+    PROGRAM_CONTRACT_CONTEXT = {}
+    if program_contract:
+        PROGRAM_CONTRACT_CONTEXT = validate_program_claim_contract(program_contract)
+        mode = str(program_contract.get("enforcement_mode") or "legacy").strip().lower()
+        PROGRAM_CONTRACT_CONTEXT["present"] = True
+        if mode == "enforced" and not PROGRAM_CONTRACT_CONTEXT.get("complete"):
+            return result(
+                stage,
+                False,
+                [f"program_claim_contract: {item}" for item in PROGRAM_CONTRACT_CONTEXT.get("errors", [])],
+                "program_claim_contract",
+                [],
+                {"program_claim_contract": PROGRAM_CONTRACT_CONTEXT},
+            )
+        if mode == "shadow" and PROGRAM_CONTRACT_CONTEXT.get("errors"):
+            PROGRAM_CONTRACT_CONTEXT["warnings"] = [
+                f"shadow blocker: {item}" for item in PROGRAM_CONTRACT_CONTEXT.get("errors", [])
+            ]
     scope = workflow_scope(base)
     strong_contract = requires_strong_paper_contract(base)
     if stage == "init":
@@ -1761,10 +2248,18 @@ def lint(project: str, stage: str) -> dict[str, Any]:
         discovery_packet = read_json(base / "literature/LITERATURE_DISCOVERY_PACKET.json")
         discovery_triage = read_json(base / "papernexus/LITERATURE_DISCOVERY_TRIAGE.json")
         gate_payload = read_json(base / "ideation/PRE_IDEA_EVIDENCE_GATE.json")
+        mode = evidence_source_mode(base)
+        legacy_mode = mode == "papernexus"
+        external_mode = mode == "external_material"
+        skipped = {"complete": True, "status": "skipped", "missing": [], "warnings": []}
+
+        def pn_lint(cmd: list[str]) -> dict[str, Any]:
+            return run_json(cmd) if legacy_mode else dict(skipped)
+
         caps = read_json(base / "capabilities.json") or {}
         agent_ops = set(caps.get("agent_materials_operations") or [])
         proposal_graph_available = caps.get("proposal_graph_session_available") is True or "proposal_graph_session" in agent_ops
-        approved_degraded = degraded_gate_approved(gate_payload)
+        approved_degraded = legacy_mode and degraded_gate_approved(gate_payload)
         pool_lint = run_json(
             [
                 sys.executable,
@@ -1800,7 +2295,7 @@ def lint(project: str, stage: str) -> dict[str, Any]:
                 "--allow-degraded",
             ]
         )
-        proposal_graph_lint = run_json(
+        proposal_graph_lint = pn_lint(
             [
                 sys.executable,
                 str(skill_root / "autoreskill-papernexus-innovation/scripts/proposal_graph_session_lint.py"),
@@ -1808,7 +2303,7 @@ def lint(project: str, stage: str) -> dict[str, Any]:
                 str(Path(project).expanduser().resolve()),
             ]
         )
-        discovery_config_lint = run_json(
+        discovery_config_lint = pn_lint(
             [
                 sys.executable,
                 str(skill_root / "autoreskill-papernexus-innovation/scripts/pre_idea_discovery_config_lint.py"),
@@ -1816,7 +2311,7 @@ def lint(project: str, stage: str) -> dict[str, Any]:
                 str(Path(project).expanduser().resolve()),
             ]
         )
-        abstract_screening_lint = run_json(
+        abstract_screening_lint = pn_lint(
             [
                 sys.executable,
                 str(skill_root / "autoreskill-papernexus-innovation/scripts/abstract_screening_audit_lint.py"),
@@ -1824,7 +2319,7 @@ def lint(project: str, stage: str) -> dict[str, Any]:
                 str(Path(project).expanduser().resolve()),
             ]
         )
-        paper_selection_lint = run_json(
+        paper_selection_lint = pn_lint(
             [
                 sys.executable,
                 str(skill_root / "autoreskill-papernexus-innovation/scripts/paper_selection_scorecard_lint.py"),
@@ -1832,7 +2327,7 @@ def lint(project: str, stage: str) -> dict[str, Any]:
                 str(Path(project).expanduser().resolve()),
             ]
         )
-        breadth_lint = run_json(
+        breadth_lint = pn_lint(
             [
                 sys.executable,
                 str(skill_root / "autoreskill-papernexus-innovation/scripts/pre_idea_breadth_lint.py"),
@@ -1840,7 +2335,7 @@ def lint(project: str, stage: str) -> dict[str, Any]:
                 str(Path(project).expanduser().resolve()),
             ]
         )
-        graph_import_lint = run_json(
+        graph_import_lint = pn_lint(
             [
                 sys.executable,
                 str(skill_root / "autoreskill-papernexus-innovation/scripts/graph_import_plan_lint.py"),
@@ -1848,7 +2343,7 @@ def lint(project: str, stage: str) -> dict[str, Any]:
                 str(Path(project).expanduser().resolve()),
             ]
         )
-        import_workflow_lint = run_json(
+        import_workflow_lint = pn_lint(
             [
                 sys.executable,
                 str(skill_root / "autoreskill-papernexus-innovation/scripts/import_workflow_status_lint.py"),
@@ -1856,7 +2351,7 @@ def lint(project: str, stage: str) -> dict[str, Any]:
                 str(Path(project).expanduser().resolve()),
             ]
         )
-        split_reading_lint = run_json(
+        split_reading_lint = pn_lint(
             [
                 sys.executable,
                 str(skill_root / "autoreskill-papernexus-innovation/scripts/split_reading_evidence_pack_lint.py"),
@@ -1867,21 +2362,26 @@ def lint(project: str, stage: str) -> dict[str, Any]:
         innovation_story_lint = run_innovation_story_lint(skill_root, project, stage)
         paper_code_transfer_lint = run_paper_code_transfer_lint(skill_root, project)
         idea_decision_missing, idea_decision_warnings, idea_decision_details = validate_idea_decision_ledger(base)
+        external_alignment = run_external_alignment_lint(skill_root, project, stage) if external_mode else dict(skipped)
         missing = []
         warnings = []
+        if mode not in {"papernexus", "external_material"}:
+            missing.append("PRE_IDEA_EVIDENCE_GATE.evidence_source_mode must be papernexus or external_material")
+        if external_mode:
+            merge_child_lint("external_alignment_lint", external_alignment, missing, warnings)
         if approved_degraded:
             warnings.append("pre-idea gate is approved degraded; discovery/triage gaps are tracked as claim limits")
-        elif not discovery_packet:
+        elif legacy_mode and not discovery_packet:
             missing.append("literature/LITERATURE_DISCOVERY_PACKET.json from pre-idea literature discovery")
-        if approved_degraded:
+        if approved_degraded or external_mode:
             pass
-        elif not discovery_triage:
+        elif legacy_mode and not discovery_triage:
             missing.append("papernexus/LITERATURE_DISCOVERY_TRIAGE.json from pre-idea candidate screening")
         elif discovery_triage.get("discovery_attempted") is not True:
             missing.append("papernexus/LITERATURE_DISCOVERY_TRIAGE.json discovery_attempted=true")
         elif discovery_triage.get("policy", {}).get("import_resolved") is not False or discovery_triage.get("policy", {}).get("process_imports") is not False:
             missing.append("first-pass ideation literature discovery must be metadata-only and non-importing")
-        if not approved_degraded:
+        if legacy_mode and not approved_degraded:
             for name, out in {
                 "pre_idea_discovery_config_lint": discovery_config_lint,
                 "abstract_screening_audit_lint": abstract_screening_lint,
@@ -1908,14 +2408,14 @@ def lint(project: str, stage: str) -> dict[str, Any]:
         if not contract:
             warnings.append("ideation/idea-catalyst/IDEA_CATALYST_CONTRACT.json missing; allowed when pre-idea evidence gate and slot map pass")
         elif contract.get("status") not in {"ready", "brainstorm_ready"}:
-            warnings.append("ideation/idea-catalyst/IDEA_CATALYST_CONTRACT.json not ready; treating as PaperNexus evidence debt")
-        if proposal_graph_available and not approved_degraded:
+            warnings.append("ideation/idea-catalyst/IDEA_CATALYST_CONTRACT.json not ready; treating as source evidence debt")
+        if legacy_mode and proposal_graph_available and not approved_degraded:
             if not proposal_graph_lint.get("complete"):
                 items = proposal_graph_lint.get("missing") if isinstance(proposal_graph_lint.get("missing"), list) else []
                 missing.extend(f"proposal_graph_session_lint: {item}" for item in items)
                 if proposal_graph_lint.get("returncode", 1) != 0 and not items:
                     missing.append("proposal_graph_session_lint failed without structured missing output")
-        elif not proposal_graph_available:
+        elif legacy_mode and not proposal_graph_available:
             warnings.append("proposal_graph_session unavailable or unrecorded; falling back to split-reading slots plus idea_catalyst/research_controller")
         if not pool_lint.get("complete"):
             items = pool_lint.get("missing") if isinstance(pool_lint.get("missing"), list) else []
@@ -1994,11 +2494,14 @@ def lint(project: str, stage: str) -> dict[str, Any]:
                 "idea_graph_lint": idea_graph_lint,
                 "discovery_triage": discovery_triage or {},
                 "proposal_graph_session_available": proposal_graph_available,
+                "evidence_source_mode": mode,
+                "external_alignment_lint": external_alignment,
             },
         )
 
     if stage == "idea_gate":
         skill_root = Path(__file__).resolve().parents[2]
+        mode = evidence_source_mode(base)
         pool_lint = run_json(
             [
                 sys.executable,
@@ -2039,8 +2542,17 @@ def lint(project: str, stage: str) -> dict[str, Any]:
         innovation_story_lint = run_innovation_story_lint(skill_root, project, stage)
         paper_code_transfer_lint = run_paper_code_transfer_lint(skill_root, project)
         idea_decision_missing, idea_decision_warnings, idea_decision_details = validate_idea_decision_ledger(base)
+        external_alignment = (
+            run_external_alignment_lint(skill_root, project, stage)
+            if mode == "external_material"
+            else {"complete": True, "status": "skipped", "missing": [], "warnings": []}
+        )
         missing = []
         warnings = []
+        if mode not in {"papernexus", "external_material"}:
+            missing.append("PRE_IDEA_EVIDENCE_GATE.evidence_source_mode must be papernexus or external_material")
+        if mode == "external_material":
+            merge_child_lint("external_alignment_lint", external_alignment, missing, warnings)
         if not has_any(base, ["ideation/TOURNAMENT_SCOREBOARD.json", "ideation/TOP3_DIRECTION_SUMMARY.md", "reviewer/IDEA_GATE_REVIEW.json"]):
             missing.append("idea gate review or tournament scoreboard")
         if not pool_lint.get("complete"):
@@ -2106,11 +2618,14 @@ def lint(project: str, stage: str) -> dict[str, Any]:
                 "innovation_story_lint": innovation_story_lint,
                 "paper_code_transfer_lint": paper_code_transfer_lint,
                 "selected_negative_evidence": negative_details,
+                "evidence_source_mode": mode,
+                "external_alignment_lint": external_alignment,
             },
         )
 
     if stage == "experiment_plan":
         skill_root = Path(__file__).resolve().parents[2]
+        mode = evidence_source_mode(base)
         scripts = {
             "track_plan_matrix": [
                 sys.executable,
@@ -2143,10 +2658,29 @@ def lint(project: str, stage: str) -> dict[str, Any]:
         details = {name: run_json(cmd) for name, cmd in scripts.items()}
         details["paper_code_transfer_lint"] = run_paper_code_transfer_lint(skill_root, project)
         details["baseline_report_alignment_lint"] = run_baseline_report_alignment_lint(skill_root, project, stage)
+        if mode == "external_material":
+            details["external_alignment_lint"] = run_external_alignment_lint(skill_root, project, stage)
+        elif mode == "papernexus":
+            details["external_alignment_lint"] = {
+                "complete": True,
+                "status": "skipped",
+                "missing": [],
+                "warnings": [],
+            }
+        else:
+            details["external_alignment_lint"] = {
+                "complete": False,
+                "missing": ["PRE_IDEA_EVIDENCE_GATE.evidence_source_mode must be papernexus or external_material"],
+                "warnings": [],
+                "returncode": 1,
+            }
+        details["evidence_source_mode"] = mode
         missing: list[str] = []
         warnings: list[str] = []
         complete = True
         for name, out in details.items():
+            if not isinstance(out, dict) or name == "evidence_source_mode":
+                continue
             if not out.get("complete"):
                 complete = False
                 items = out.get("missing") if isinstance(out.get("missing"), list) else []
@@ -2257,6 +2791,12 @@ def lint(project: str, stage: str) -> dict[str, Any]:
         warnings = []
         details: dict[str, Any] = {}
         ledger = read_json(base / "coder/EXPERIMENT_LEDGER.json")
+        decision_ledger = read_json(base / "ideation/IDEA_DECISION_LEDGER.json") or {}
+        program_decision = (
+            decision_ledger.get("program_decision")
+            if isinstance(decision_ledger, dict) and isinstance(decision_ledger.get("program_decision"), dict)
+            else {}
+        )
         if not nonempty(base / "coder/EXPERIMENT_LEDGER.json"):
             missing.append("coder/EXPERIMENT_LEDGER.json")
         if not (has_glob(base, "coder/experiments/**/REMOTE_RUN.json") or has_glob(base, "coder/experiments/**/results/*")):
@@ -2304,10 +2844,20 @@ def lint(project: str, stage: str) -> dict[str, Any]:
         items = baseline_report_out.get("warnings") if isinstance(baseline_report_out.get("warnings"), list) else []
         warnings.extend(f"baseline_report_alignment_lint: {item}" for item in items)
         if ledger:
+            promoted_ready = bool(ledger.get("best_run") or ledger.get("track_best_runs"))
+            terminal_ready = False
+            if program_decision:
+                program_missing, program_warnings, program_details = validate_terminal_program_decision(base, program_decision)
+                missing.extend(f"terminal_program_decision: {item}" for item in program_missing)
+                warnings.extend(f"terminal_program_decision: {item}" for item in program_warnings)
+                details["terminal_program_decision"] = program_details
+                terminal_ready = not program_missing and program_decision.get("target_stage") == "analysis"
             if ledger.get("ready_for_analysis") is not True:
-                missing.append("coder/EXPERIMENT_LEDGER.json ready_for_analysis=true from promoted evidence")
-            if not ledger.get("best_run") and not ledger.get("track_best_runs"):
-                missing.append("promoted best_run or track_best_runs")
+                missing.append("coder/EXPERIMENT_LEDGER.json ready_for_analysis=true from promoted evidence or terminal program decision")
+            if not promoted_ready and not terminal_ready:
+                missing.append("promoted best_run/track_best_runs or valid terminal program_decision")
+            if terminal_ready and ledger.get("improvement_claim_allowed") is not False:
+                missing.append("terminal negative/inconclusive ledger must set improvement_claim_allowed=false")
             if ledger.get("candidate_runs"):
                 warnings.append("candidate_supported runs are pilot evidence; run linked ablation/confirmation before analysis")
             failure_missing, failure_warnings, failure_details = validate_experiment_failure_lineage(
@@ -2318,6 +2868,13 @@ def lint(project: str, stage: str) -> dict[str, Any]:
             missing.extend(f"experiment_failure_lineage: {item}" for item in failure_missing)
             warnings.extend(f"experiment_failure_lineage: {item}" for item in failure_warnings)
             details["experiment_failure_lineage"] = failure_details
+            scientific_missing, scientific_warnings, scientific_details = validate_scientific_outcome_lineage(
+                ledger,
+                terminal_program=program_decision,
+            )
+            missing.extend(f"scientific_outcome_lineage: {item}" for item in scientific_missing)
+            warnings.extend(f"scientific_outcome_lineage: {item}" for item in scientific_warnings)
+            details["scientific_outcome_lineage"] = scientific_details
             summary_missing, summary_warnings, summary_details = validate_experiment_result_summaries(project, base, ledger)
             missing.extend(f"experiment_result_summaries: {item}" for item in summary_missing)
             warnings.extend(f"experiment_result_summaries: {item}" for item in summary_warnings)

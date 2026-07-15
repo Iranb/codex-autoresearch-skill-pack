@@ -33,13 +33,27 @@ Rules:
   validation is capped at three experiment random seeds; if budget prevents
   2-3 seeds, downgrade claim strength instead of over-reading a single seed.
 - Do not report only best result or only the best metric component. For multi-metric protocols, tables and verdicts must show the full metric vector plus the predeclared composite/stress metrics.
-- Use `coder/EXPERIMENT_LEDGER.json` as the run trajectory authority. Report promoted, not_promoted, failed, and rollback decisions.
+- Use `coder/EXPERIMENT_LEDGER.json` as the run trajectory authority. Report
+  promoted, not_promoted, failed, rollback, valid negative, refuted,
+  inconclusive, invalid, and terminal-program decisions.
 - Treat `best_run` and `track_best_runs` promoted entries as the only sources for improvement claims unless a later confirmation run supersedes them, and only when those entries pass the locked `metric_policy`.
 - Run `best_run_selector.py` before writing. It is the deterministic selector for promoted evidence and emits the score/spec audit artifacts consumed by paper writing.
 - Treat `candidate_supported` as pilot evidence only. It may justify ablation/confirmation scheduling, but it must not be phrased as a stable improvement.
 - Report each innovation track with selected idea, mechanism, mechanism type, promotion stage, ablation/confirmation links, verdict, and next action.
 - Downgrade or remove claims when improvement comes from a fixture, single seed, more-than-three-seed fishing, missing matched baseline, protected-path hash change, protocol drift, unreconciled run, cherry-picked single metric component, or `New`-only gain with material `All`, `Old`, composite, calibration, tail, unknown-K, or other required metric regression.
-- Negative and regressed runs are useful evidence for pruning candidates, not support for stronger manuscript claims.
+- Negative/refuted/inconclusive tracks remain analyzable. They may support
+  pruning, scope limits, failure analysis, or a bounded negative finding, but
+  cannot count as an effective innovation or positive improvement.
+- When a valid terminal non-positive `program_decision` reaches analysis,
+  `BEST_RUN_SELECTION.json` must explicitly record
+  `terminal_program_no_promoted_run`, `SCORE_VERIFICATION.json` must record
+  `not_applicable_no_positive_claim`, and the narrative must preserve
+  `improvement_claim_allowed=false`. Do not fabricate a best run to satisfy the
+  positive path.
+- Positive writing needs one accepted core scientific contribution. Optional
+  supporting contributions count only with counterfactual necessity; validation,
+  analysis, engineering support, parameter tuning, and negative tracks do not
+  increase the contribution count.
 - If results contradict the proposed mechanism or need source-backed limitation/negative-evidence framing, trigger targeted PaperNexus literature discovery and record the evidence boundary before writing.
 - Unsupported claims must be removed or softened before writing.
 - Figures/tables must be reproducible from scripts or data.

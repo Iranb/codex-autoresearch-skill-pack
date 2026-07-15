@@ -1,0 +1,34 @@
+{
+  "status": "passed",
+  "disaggregated_effects": {
+    "claim_status": "claim_limited",
+    "rows": [
+      {
+        "slice": "main_metric",
+        "critical": true,
+        "direction": "positive",
+        "evidence_ref": "coder/experiments/run-b/RESULT_SUMMARY.json",
+        "claim_disposition": "claim_limited"
+      }
+    ]
+  },
+  "mechanism_support": {
+    "mechanism_claim": "The module isolates the intended failure mode.",
+    "status": "outcome_only",
+    "allowed_wording": "we demonstrate the mechanism"
+  },
+  "validation_to_test_transfer": {
+    "validation_selection_ref": "val-split",
+    "target_or_test_ref": "test-split",
+    "transfer_status": "passed",
+    "claim_status": "claim_limited"
+  },
+  "numeric_measurement_registry": {
+    "metric_units": "accuracy percentage points",
+    "parser_source": "scripts/parse_metrics.py",
+    "baseline_source": "paper_reported_baseline",
+    "measurement_refs": [
+      "coder/experiments/run-b/metrics.json"
+    ]
+  }
+}

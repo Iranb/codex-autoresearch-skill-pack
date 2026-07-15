@@ -5,6 +5,10 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
+import re
+import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -26,11 +30,37 @@ PAPER_COMPARISON_KEYS = [
     "overlap_risk",
     "differentiation_claim",
 ]
-PAPER_STORY_ASSESSMENT_KEYS = [
-    "three_innovation_verdict",
-    "storyline_coherence",
-    "weakest_bundle_link",
+SHORTLIST_ASSESSMENT_KEYS = [
+    "core_contribution_verdict",
+    "storyline_readiness",
+    "weakest_causal_link",
     "required_story_repair",
+]
+PAIRWISE_COMPARISON_KEYS = [
+    "closest_competing_idea_id",
+    "mechanism_difference",
+    "predicted_pattern_difference",
+    "cheapest_discriminator",
+    "verdict",
+]
+PAIRWISE_VERDICTS = {"distinct", "redundant", "ablation", "uncertain"}
+SHORTLIST_PAPER_KEYS = [
+    "paper_thesis",
+    "contribution_type",
+    "target_venue_fit",
+    "novelty_claim",
+    "baseline_pressure",
+    "minimum_experiment_table",
+    "ablation_plan",
+    "falsifier",
+]
+STORYLINE_KEYS = [
+    "opening_tension",
+    "hidden_cause",
+    "method_as_resolution",
+    "proof_ladder",
+    "reviewer_risk_and_defense",
+    "narrative_spine",
 ]
 VALID_METHOD_SOURCE_ROLES = {
     "near_neighbor",
@@ -41,9 +71,66 @@ VALID_METHOD_SOURCE_ROLES = {
     "target_domain_absence_proven",
 }
 TARGET_DOMAIN_ONLY_ROLES = {"target_domain", "current_field", "target_domain_only"}
-PROBLEM_PROTOCOL_ROLES = {"problem_definition", "protocol", "benchmark", "evaluation", "metric"}
-METHOD_ROLES = {"method_mechanism", "algorithm", "model", "architecture", "training_mechanism"}
-PROOF_INTEGRATION_ROLES = {"training_integration", "system_integration", "theory_analysis", "ablation", "validation", "analysis"}
+EVIDENCE_SOURCE_MODES = {"papernexus", "external_material"}
+
+
+def string_list(value: Any) -> list[str]:
+    if isinstance(value, str):
+        return [value.strip()] if value.strip() else []
+    if isinstance(value, (list, tuple, set)):
+        return [str(item).strip() for item in value if str(item).strip()]
+    return []
+
+
+def positive_finite(value: Any) -> float | None:
+    if isinstance(value, bool):
+        return None
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if math.isfinite(parsed) and parsed > 0 else None
+
+
+def deterministic_rank_tuple(row: dict[str, Any], idea: dict[str, Any]) -> list[Any] | None:
+    targets = string_list(row.get("unique_decision_targets") or row.get("decision_target_refs"))
+    if not targets:
+        target = row.get("decision_target") or idea.get("claim_target")
+        targets = [str(target)] if present(target) else []
+    cost = positive_finite(
+        row.get("estimated_falsifier_gpu_hours")
+        or row.get("estimated_gpu_hours")
+        or idea.get("estimated_falsifier_gpu_hours")
+        or idea.get("estimated_gpu_hours")
+    )
+    if not targets or cost is None:
+        return None
+    resolved = row.get("competing_hypotheses_resolved_count")
+    try:
+        resolved_count = max(0, int(resolved))
+    except (TypeError, ValueError):
+        resolved_count = len(string_list(row.get("competing_hypotheses_resolved"))) or len(set(targets))
+    reuse_count = len(set(string_list(row.get("reusable_invariant_refs") or idea.get("reusable_invariant_refs"))))
+    risk_count = len(
+        set(
+            string_list(
+                row.get("reviewer_risks")
+                or row.get("reviewer_attack_surface")
+                or idea.get("reviewer_risks")
+                or idea.get("red_line_risks")
+            )
+        )
+    )
+    density = len(set(targets)) / cost
+    return [
+        0 if row.get("changes_core_claim") is True or idea.get("changes_core_claim") is True else 1,
+        -resolved_count,
+        -density,
+        cost,
+        -reuse_count,
+        risk_count,
+        str(idea.get("id") or row.get("idea_id") or row.get("id") or ""),
+    ]
 
 
 def project_root(project: str) -> Path:
@@ -70,6 +157,47 @@ def read_json(path: Path) -> Any:
         return json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError:
         return None
+
+
+def source_mode(gate: Any) -> str:
+    if not isinstance(gate, dict):
+        return "papernexus"
+    return str(gate.get("evidence_source_mode") or "papernexus").strip().lower()
+
+
+def run_json(cmd: list[str]) -> dict[str, Any]:
+    proc = subprocess.run(cmd, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
+    try:
+        out = json.loads(proc.stdout) if proc.stdout.strip() else {}
+    except json.JSONDecodeError:
+        out = {"stdout": proc.stdout}
+    if not isinstance(out, dict):
+        out = {"result": out}
+    out.setdefault("returncode", proc.returncode)
+    if proc.stderr.strip():
+        out["stderr"] = proc.stderr.strip()
+    return out
+
+
+def external_alignment(project: str, stage: str) -> dict[str, Any]:
+    script = Path(__file__).resolve().parents[2] / "autoreskill-gpu-idea-validation/scripts/external_alignment_lint.py"
+    if not script.is_file():
+        return {
+            "complete": False,
+            "missing": ["autoreskill-gpu-idea-validation/scripts/external_alignment_lint.py"],
+            "warnings": [],
+            "returncode": 1,
+        }
+    return run_json(
+        [
+            sys.executable,
+            str(script),
+            "--project",
+            str(project_root(project)),
+            "--stage",
+            stage,
+        ]
+    )
 
 
 def present(value: Any) -> bool:
@@ -102,35 +230,56 @@ def normalized_role(value: Any) -> str:
     return str(value or "").strip().lower().replace("-", "_").replace(" ", "_")
 
 
-def as_list(value: Any) -> list[Any]:
-    if isinstance(value, list):
-        return value
-    if isinstance(value, tuple):
-        return list(value)
-    return []
+def normalized_text(value: Any) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", str(value or "").strip().lower()).strip()
 
 
-def innovation_bundle_from_idea(idea: dict[str, Any]) -> list[Any]:
+def causal_signature(idea: dict[str, Any]) -> str:
+    explicit = normalized_text(idea.get("causal_signature"))
+    if explicit:
+        return explicit
+    fields = [normalized_text(idea.get(key)) for key in ["intervention", "mechanism", "predicted_pattern"]]
+    return " | ".join(fields) if all(fields) else ""
+
+
+def recommendation_ids(value: Any) -> set[str]:
+    out: set[str] = set()
+    if not isinstance(value, list):
+        return out
+    for item in value:
+        raw = item.get("idea_id") or item.get("id") if isinstance(item, dict) else item
+        if present(raw):
+            out.add(str(raw))
+    return out
+
+
+def validate_shortlist_idea(idea: dict[str, Any], prefix: str, selected: bool, missing: list[str]) -> None:
     paper = idea.get("paper_contribution") if isinstance(idea.get("paper_contribution"), dict) else {}
-    return as_list(idea.get("innovation_bundle") or paper.get("innovation_bundle") or paper.get("innovation_points"))
-
-
-def validate_idea_bundle_shape(idea: dict[str, Any], prefix: str, missing: list[str]) -> None:
-    bundle = innovation_bundle_from_idea(idea)
-    if len(bundle) < 3:
-        missing.append(f"{prefix}.paper_contribution.innovation_bundle must contain at least 3 innovation points")
+    if not paper:
+        missing.append(f"{prefix}.paper_contribution required for shortlisted ideas")
         return
-    roles = {
-        normalized_role(point.get("role"))
-        for point in bundle
-        if isinstance(point, dict) and present(point.get("role"))
-    }
-    if not roles & PROBLEM_PROTOCOL_ROLES:
-        missing.append(f"{prefix}.paper_contribution.innovation_bundle needs problem/protocol/evaluation point")
-    if not roles & METHOD_ROLES:
-        missing.append(f"{prefix}.paper_contribution.innovation_bundle needs method/mechanism point")
-    if not roles & PROOF_INTEGRATION_ROLES:
-        missing.append(f"{prefix}.paper_contribution.innovation_bundle needs training/integration/analysis/validation point")
+    for key in SHORTLIST_PAPER_KEYS:
+        if not present(paper.get(key)):
+            missing.append(f"{prefix}.paper_contribution.{key}")
+    if not present(idea.get("closest_prior_comparison") or paper.get("closest_prior_comparison")):
+        missing.append(f"{prefix}.closest_prior_comparison")
+    if not present(idea.get("claim_boundary") or paper.get("claim_boundary")):
+        missing.append(f"{prefix}.claim_boundary")
+    routes = idea.get("outcome_routes")
+    if not isinstance(routes, dict):
+        missing.append(f"{prefix}.outcome_routes")
+    else:
+        for key in ["positive", "negative", "inconclusive", "invalid"]:
+            if not present(routes.get(key)):
+                missing.append(f"{prefix}.outcome_routes.{key}")
+    if selected:
+        storyline = idea.get("paper_storyline") or paper.get("storyline") or paper.get("paper_storyline")
+        if not isinstance(storyline, dict):
+            missing.append(f"{prefix}.paper_contribution.storyline required for selected primary")
+        else:
+            for key in STORYLINE_KEYS:
+                if not present(storyline.get(key)):
+                    missing.append(f"{prefix}.paper_contribution.storyline.{key}")
 
 
 def degraded_gate_approved(gate: dict[str, Any]) -> bool:
@@ -160,6 +309,14 @@ def rows_from_scorecard(scorecard: Any) -> list[dict[str, Any]]:
 
 def lint(project: str, scorecard_rel: str, pool_rel: str) -> dict[str, Any]:
     base = ar(project)
+    program_contract = read_json(base / "orchestrator/PROGRAM_CLAIM_CONTRACT.json") or {}
+    program_mode = str(program_contract.get("enforcement_mode") or "legacy").strip().lower() if isinstance(program_contract, dict) else "legacy"
+    program_scope = str(program_contract.get("claim_scope") or "dataset_specific").strip().lower() if isinstance(program_contract, dict) else "dataset_specific"
+    required_program_datasets = [
+        str(item.get("dataset_id"))
+        for item in (program_contract.get("target_datasets") or [])
+        if isinstance(item, dict) and item.get("required") is True and present(item.get("dataset_id"))
+    ] if isinstance(program_contract, dict) else []
     scorecard_path = resolve(base, scorecard_rel)
     pool_path = resolve(base, pool_rel)
     scorecard = read_json(scorecard_path)
@@ -177,6 +334,13 @@ def lint(project: str, scorecard_rel: str, pool_rel: str) -> dict[str, Any]:
             "warnings": [],
             "path": str(scorecard_path),
         }
+
+    schema_version = scorecard.get("schema_version", 1)
+    deterministic_schema = isinstance(schema_version, int) and schema_version >= 2
+    if deterministic_schema and not present(scorecard.get("selection_revision")):
+        missing.append("selection_revision")
+    elif not present(scorecard.get("selection_revision")):
+        warnings.append("legacy scorecard has no selection_revision; regenerate before heartbeat batch refill")
 
     if not ideas:
         missing.append(pool_rel)
@@ -209,8 +373,12 @@ def lint(project: str, scorecard_rel: str, pool_rel: str) -> dict[str, Any]:
     gate_path = resolve(base, str(gate_value))
     gate = read_json(gate_path)
     pre_idea_degraded = False
+    evidence_mode = source_mode(gate)
+    alignment: dict[str, Any] | None = None
     if not isinstance(gate, dict):
         missing.append(f"pre_idea_evidence_gate_path target missing: {gate_value}")
+    elif evidence_mode not in EVIDENCE_SOURCE_MODES:
+        missing.append("pre_idea_evidence_gate_path evidence_source_mode must be papernexus or external_material")
     else:
         gate_status = str(gate.get("status") or "").strip().lower()
         if gate_status == "passed":
@@ -220,6 +388,29 @@ def lint(project: str, scorecard_rel: str, pool_rel: str) -> dict[str, Any]:
             warnings.append("pre_idea_evidence_gate_path is approved degraded; scorecard claim limits must remain explicit")
         else:
             missing.append("pre_idea_evidence_gate_path status passed or approved degraded")
+    if evidence_mode == "external_material":
+        if pre_idea_degraded:
+            missing.append("external_material evidence cannot use an approved degraded gate")
+        for packet_key, gate_key in [
+            ("external_campaign_ref", "campaign_ref"),
+            ("external_campaign_sha256", "campaign_sha256"),
+        ]:
+            if not present(scorecard.get(packet_key)):
+                missing.append(packet_key)
+            elif isinstance(gate, dict) and str(scorecard.get(packet_key)) != str(gate.get(gate_key)):
+                missing.append(f"{packet_key} must match PRE_IDEA_EVIDENCE_GATE.{gate_key}")
+        expected_slot_map = str(gate.get("innovation_slot_map_path") or "").strip() if isinstance(gate, dict) else ""
+        if not expected_slot_map or str(scorecard.get("innovation_slot_map_path") or "").strip() != expected_slot_map:
+            missing.append("innovation_slot_map_path must match PRE_IDEA_EVIDENCE_GATE.innovation_slot_map_path")
+        alignment = external_alignment(project, "ideation")
+        if not alignment.get("complete"):
+            items = alignment.get("missing") if isinstance(alignment.get("missing"), list) else []
+            if items:
+                missing.extend(f"external_alignment_lint: {item}" for item in items)
+            else:
+                missing.append("external_alignment_lint failed without structured missing output")
+        items = alignment.get("warnings") if isinstance(alignment.get("warnings"), list) else []
+        warnings.extend(f"external_alignment_lint: {item}" for item in items)
 
     slot_value = scorecard.get("innovation_slot_map_path") or "ideation/INNOVATION_SLOT_MAP.json"
     slot_path = resolve(base, str(slot_value))
@@ -234,11 +425,24 @@ def lint(project: str, scorecard_rel: str, pool_rel: str) -> dict[str, Any]:
         missing.append(f"innovation_slot_map_path target missing: {slot_value}")
     if pre_idea_degraded and not present(scorecard.get("claim_limits")):
         missing.append("claim_limits required for approved degraded pre-idea gate")
-    if proposal_graph_available and not pre_idea_degraded and not proposal_declared:
+    if evidence_mode == "papernexus" and proposal_graph_available and not pre_idea_degraded and not proposal_declared:
         missing.append("proposal_graph_session_path or proposal_graph_session_manifest_path")
 
     idea_by_id = {str(row.get("id") or "").strip(): row for row in ideas if str(row.get("id") or "").strip()}
     idea_ids = set(idea_by_id)
+    shortlist = recommendation_ids(scorecard.get("shortlisted_idea_ids"))
+    if not shortlist:
+        shortlist = recommendation_ids(scorecard.get("top_track_recommendations"))
+    if not 3 <= len(shortlist) <= 5:
+        missing.append(f"shortlist must contain 3-5 ideas, got {len(shortlist)}")
+    unknown_shortlist = sorted(shortlist - idea_ids)
+    if unknown_shortlist:
+        missing.append("shortlist contains unknown idea ids: " + ", ".join(unknown_shortlist))
+    selected_primary = str(scorecard.get("selected_primary_idea_id") or "").strip()
+    if selected_primary and selected_primary not in idea_ids:
+        missing.append(f"selected_primary_idea_id {selected_primary!r} is not in idea pool")
+    if selected_primary and selected_primary not in shortlist:
+        missing.append("selected_primary_idea_id must be in the 3-5 idea shortlist")
     row_by_id: dict[str, dict[str, Any]] = {}
     for row in rows:
         idea_id = str(row.get("id") or row.get("idea_id") or "").strip()
@@ -254,7 +458,6 @@ def lint(project: str, scorecard_rel: str, pool_rel: str) -> dict[str, Any]:
 
     for idea_id in sorted(idea_ids & set(row_by_id)):
         row = row_by_id[idea_id]
-        validate_idea_bundle_shape(idea_by_id[idea_id], f"idea_pool[{idea_id}]", missing)
         prefix = f"scorecard[{idea_id}]"
         scores = row.get("scores") if isinstance(row.get("scores"), dict) else row
         if not positive_int(row.get("rank")):
@@ -268,32 +471,26 @@ def lint(project: str, scorecard_rel: str, pool_rel: str) -> dict[str, Any]:
         for key in PAPER_COMPARISON_KEYS:
             if not present(comparison.get(key)):
                 missing.append(f"{prefix}.paper_comparison.{key}")
-        story_assessment = row.get("paper_story_assessment") if isinstance(row.get("paper_story_assessment"), dict) else {}
-        for key in PAPER_STORY_ASSESSMENT_KEYS:
-            if not present(story_assessment.get(key)):
-                missing.append(f"{prefix}.paper_story_assessment.{key}")
-        for key in [
-            "closest_prior_pressure",
-            "novelty_separation_needed",
-            "graph_path_status",
-            "evidence_closure_level",
-            "near_neighbor_pressure",
-            "far_neighbor_transfer_rationale",
-            "primary_method_source_role",
-            "target_domain_anchor",
-            "neighbor_transfer_mechanism",
-            "target_domain_method_overlap_risk",
-            "top_tier_support_judgment",
-            "venue_support_verdict",
-            "evidence_debt",
-            "next_evidence_closure",
-        ]:
-            if not present(row.get(key)):
+        signature = causal_signature(idea_by_id[idea_id])
+        if not signature:
+            missing.append(f"idea_pool[{idea_id}].causal_signature")
+        if normalized_text(row.get("causal_signature")) != signature:
+            missing.append(f"{prefix}.causal_signature must match the idea pool causal identity")
+        pairwise = row.get("pairwise_comparison") if isinstance(row.get("pairwise_comparison"), dict) else {}
+        for key in PAIRWISE_COMPARISON_KEYS:
+            if not present(pairwise.get(key)):
+                missing.append(f"{prefix}.pairwise_comparison.{key}")
+        competing_id = str(pairwise.get("closest_competing_idea_id") or "").strip()
+        if competing_id and (competing_id not in idea_ids or competing_id == idea_id):
+            missing.append(f"{prefix}.pairwise_comparison.closest_competing_idea_id must name another pool idea")
+        pairwise_verdict = normalized_role(pairwise.get("verdict"))
+        if pairwise_verdict and pairwise_verdict not in PAIRWISE_VERDICTS:
+            missing.append(f"{prefix}.pairwise_comparison.verdict must be one of {sorted(PAIRWISE_VERDICTS)}")
+        for key in ["evidence_closure_level", "evidence_debt", "next_evidence_closure"]:
+            if key not in row or (key != "evidence_debt" and not present(row.get(key))):
                 missing.append(f"{prefix}.{key}")
         if str(row.get("evidence_closure_level") or "").strip().lower() not in EVIDENCE_CLOSURE_LEVELS:
             missing.append(f"{prefix}.evidence_closure_level must be one of {sorted(EVIDENCE_CLOSURE_LEVELS)}")
-        if not positive_int(row.get("scientistone_fast_rank")):
-            missing.append(f"{prefix}.scientistone_fast_rank positive integer")
         if not positive_int(row.get("paper_potential_rank")):
             missing.append(f"{prefix}.paper_potential_rank positive integer")
         action = str(row.get("recommended_track_action") or "").strip().lower()
@@ -313,6 +510,93 @@ def lint(project: str, scorecard_rel: str, pool_rel: str) -> dict[str, Any]:
         decision = str(row.get("promotion_recommendation") or "").strip().lower()
         if decision not in PROMOTION_DECISIONS:
             missing.append(f"{prefix}.promotion_recommendation advance/advance_with_constraints/park/kill")
+        if pairwise_verdict == "redundant" and decision in {"advance", "advance_with_constraints"}:
+            missing.append(f"{prefix} cannot advance while pairwise_comparison.verdict=redundant")
+        if idea_id in shortlist:
+            expected_tuple = deterministic_rank_tuple(row, idea_by_id[idea_id])
+            deterministic_fields_missing: list[str] = []
+            if not isinstance(row.get("changes_core_claim"), bool):
+                deterministic_fields_missing.append("changes_core_claim boolean")
+            if not string_list(row.get("unique_decision_targets") or row.get("decision_target_refs")):
+                deterministic_fields_missing.append("unique_decision_targets")
+            if positive_finite(
+                row.get("estimated_falsifier_gpu_hours")
+                or row.get("estimated_gpu_hours")
+                or idea_by_id[idea_id].get("estimated_falsifier_gpu_hours")
+                or idea_by_id[idea_id].get("estimated_gpu_hours")
+            ) is None:
+                deterministic_fields_missing.append("estimated_falsifier_gpu_hours positive finite")
+            recorded_tuple = row.get("deterministic_ranking_tuple")
+            if expected_tuple is None:
+                deterministic_fields_missing.append("deterministic ranking inputs")
+            elif not isinstance(recorded_tuple, list):
+                deterministic_fields_missing.append("deterministic_ranking_tuple")
+            elif recorded_tuple != expected_tuple:
+                missing.append(f"{prefix}.deterministic_ranking_tuple must match the auditable lexicographic inputs")
+            if deterministic_fields_missing:
+                target = missing if deterministic_schema else warnings
+                target.append(f"{prefix}: " + ", ".join(deterministic_fields_missing))
+            validate_shortlist_idea(idea_by_id[idea_id], f"idea_pool[{idea_id}]", idea_id == selected_primary, missing)
+            if program_contract and program_scope == "cross_dataset_method":
+                idea = idea_by_id[idea_id]
+                method_errors: list[str] = []
+                claim_role = normalized_role(row.get("claim_role") or idea.get("claim_role"))
+                if claim_role != "method_candidate":
+                    method_errors.append("claim_role must be method_candidate")
+                search_contract = (
+                    idea.get("innovation_search_contract")
+                    if isinstance(idea.get("innovation_search_contract"), dict)
+                    else {}
+                )
+                mechanism_type = str(
+                    row.get("mechanism_type")
+                    or idea.get("mechanism_type")
+                    or search_contract.get("mechanism_type")
+                    or ""
+                ).strip().upper()
+                if mechanism_type not in {"ALGO", "CODE", "PARAM"}:
+                    method_errors.append("mechanism_type must be ALGO, CODE, or PARAM")
+                for field in [
+                    "transfer_assumption",
+                    "parameter_transfer_mode",
+                    "paired_low_fidelity_falsifier",
+                    "shared_method_formula",
+                ]:
+                    if not present(row.get(field) or idea.get(field)):
+                        method_errors.append(f"{field} is required")
+                predictions = row.get("cross_dataset_prediction") or idea.get("cross_dataset_prediction")
+                prediction_datasets: set[str] = set()
+                if isinstance(predictions, dict):
+                    prediction_datasets = {str(key) for key in predictions}
+                elif isinstance(predictions, list):
+                    prediction_datasets = {
+                        str(item.get("dataset_id"))
+                        for item in predictions
+                        if isinstance(item, dict) and present(item.get("dataset_id"))
+                    }
+                if set(required_program_datasets) - prediction_datasets:
+                    method_errors.append("cross_dataset_prediction must cover every required dataset")
+                target = missing if program_mode == "enforced" else warnings
+                target.extend(f"{prefix}.cross_dataset_method: {item}" for item in method_errors)
+            story_assessment = row.get("paper_story_assessment") if isinstance(row.get("paper_story_assessment"), dict) else {}
+            for key in SHORTLIST_ASSESSMENT_KEYS:
+                if not present(story_assessment.get(key)):
+                    missing.append(f"{prefix}.paper_story_assessment.{key}")
+            for key in [
+                "closest_prior_pressure",
+                "novelty_separation_needed",
+                "graph_path_status",
+                "near_neighbor_pressure",
+                "far_neighbor_transfer_rationale",
+                "primary_method_source_role",
+                "target_domain_anchor",
+                "neighbor_transfer_mechanism",
+                "target_domain_method_overlap_risk",
+                "top_tier_support_judgment",
+                "venue_support_verdict",
+            ]:
+                if not present(row.get(key)):
+                    missing.append(f"{prefix}.{key}")
 
     if isinstance(scorecard.get("top_track_recommendations"), list):
         top_track_ids = set()
@@ -326,13 +610,10 @@ def lint(project: str, scorecard_rel: str, pool_rel: str) -> dict[str, Any]:
         unknown = sorted(top_track_ids - idea_ids)
         if unknown:
             missing.append("top_track_recommendations unknown idea ids: " + ", ".join(unknown))
-        if len(top_track_ids) < 3:
-            warnings.append("top_track_recommendations should usually include 3-4 candidate tracks")
-    selected_primary = scorecard.get("selected_primary_idea_id")
-    if present(selected_primary) and str(selected_primary) not in idea_ids:
-        missing.append(f"selected_primary_idea_id {selected_primary!r} is not in idea pool")
+        if not 3 <= len(top_track_ids) <= 5:
+            missing.append("top_track_recommendations must include 3-5 shortlisted ideas")
 
-    if proposal_graph_available and not any(present(row.get("proposal_graph_basis")) for row in rows):
+    if evidence_mode == "papernexus" and proposal_graph_available and not any(present(row.get("proposal_graph_basis")) for row in rows):
         warnings.append("proposal_graph_session is available but no score rows include proposal_graph_basis")
 
     md_path = scorecard_path.with_suffix(".md")
@@ -346,6 +627,9 @@ def lint(project: str, scorecard_rel: str, pool_rel: str) -> dict[str, Any]:
         "warnings": warnings,
         "idea_count": len(ideas),
         "score_row_count": len(row_by_id),
+        "shortlist_count": len(shortlist),
+        "evidence_source_mode": evidence_mode,
+        "external_alignment_lint": alignment,
         "dimensions": DIMENSIONS,
         "path": str(scorecard_path),
     }

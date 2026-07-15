@@ -17,7 +17,7 @@ This file is not a completion authority. Stage completion is owned by
 | `idea_gate` | Reviewer | `autoreskill-ideation-panel` or `autoreskill-review-gate`; use `autoreskill-papernexus-innovation` for selected-idea evidence debt | `.autoreskill/ideation/`, `.autoreskill/reviewer/`, `.autoreskill/literature/`, `.autoreskill/papernexus/`, `.autoreskill/survey/`, `.autoreskill/user_view/` |
 | `experiment_plan` | Orchestrator | `autoreskill-experiment-plan`; use `autoreskill-papernexus-innovation` for evidence import/material closure | `.autoreskill/orchestrator/`, `.autoreskill/planner/`, `.autoreskill/literature/`, `.autoreskill/papernexus/`, `.autoreskill/survey/`, `.autoreskill/user_view/` |
 | `code` | Coder | `autoreskill-implement-experiment` | `.autoreskill/coder/` |
-| `experiment` | Coder | `autoreskill-run-experiment` | `.autoreskill/coder/` |
+| `experiment` | Coder / WorkflowGuard | `autoreskill-run-experiment` for runtime and outcome evidence; `autoreskill-workflow` for validated lifecycle decisions and queue transitions | `.autoreskill/coder/`, `.autoreskill/ideation/IDEA_DECISION_LEDGER.json`, `.autoreskill/experiment/NEXT_EXPERIMENT_QUEUE.json` |
 | `analysis` | Analyzer | `autoreskill-analyze-results`; use `autoreskill-papernexus-innovation` for claim or negative-evidence repair | `.autoreskill/analyzer/`, `.autoreskill/literature/`, `.autoreskill/papernexus/`, `.autoreskill/user_view/` |
 | `review_pressure` | Reviewer | `autoreskill-review-gate`; use `autoreskill-papernexus-innovation` for novelty, citation, or baseline objections | `.autoreskill/reviewer/`, `.autoreskill/literature/`, `.autoreskill/papernexus/`, `.autoreskill/user_view/` |
 | `writing` | Academic Writer | `autoreskill-paper-write`; use `autoreskill-literature-review` and `autoreskill-papernexus-innovation` for related-work/citation gaps | `.autoreskill/paper/`, `.autoreskill/literature/`, `.autoreskill/papernexus/`, `.autoreskill/user_view/` |
@@ -29,8 +29,10 @@ This file is not a completion authority. Stage completion is owned by
   resolve ambiguity or repair a bad packet.
 - WorkflowGuard remains the only owner that may advance `goal_state.json`. Child
   skills write artifacts, then the parent updates the job and runs another tick.
-- Keep `code` and `experiment` under `Coder`. Ask Researcher to reconcile
-  scientific intent only when a job packet explicitly requests that.
+- Keep implementation and backend reconciliation under `Coder`. A result
+  adjudicator may propose `SCIENTIFIC_OUTCOME.json`; WorkflowGuard alone applies
+  the validated lifecycle transition with `research_decision.py` and advances the
+  stage. Neither role may promote a claim from prose.
 - If a linter fails, mark the job failed or retry with the exact blocker instead
   of manually advancing the stage.
 - Use `paper_code_innovation_transfer.md` for paper-code survey and migration

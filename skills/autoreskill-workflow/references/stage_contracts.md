@@ -52,6 +52,9 @@ Before applying the full registry, read `goal_type` and `claim_mode` from
 - Random-seed stability validation is capped at three experiment seeds.
   `IDEA_TRACK_SEEDS` are idea/track candidates and do not authorize extra random
   seeds.
+- Scientific outcomes follow `scientific_decision_loop.md`. Operational failures
+  cannot weaken a hypothesis; valid negative or inconclusive results must update
+  lifecycle state rather than defaulting to code repair.
 - Launchable `PARAM` mechanisms and target sweeps require
   `hpo_search_policy.search_method="dehb_resource_constrained"` in the planning
   packets. Seed, dataset, split, baseline, and metric are protected axes; linear
@@ -97,22 +100,50 @@ storyline design pass their lints. Ideas must be academic-paper-oriented and
 evidence-bounded; degraded speculative ideation requires explicit approval and
 claim limits.
 
+The canonical gate separates readiness from source identity. Missing
+`evidence_source_mode` means legacy `papernexus`. `external_material` skips
+PaperNexus discovery/proposal checks only after the committed external campaign,
+lint, slot-map hashes, and `external_alignment_lint.py --stage ideation` pass;
+all canonical pool, scorecard, graph, build-brief, audit, seeds, tournament, and
+storyline artifacts remain required.
+
 `idea_gate` is complete when the pre-idea gate is still valid or explicitly
 degraded, every idea has reviewer score/evidence boundaries, one primary idea is
 selected, `IDEA_DECISION_LEDGER.json` owns lifecycle status for every idea, and
 `IDEA_TRACK_SEEDS.json` contains only selected, alternate, risk-repair, or
-constrained-advance track candidates. Killed or parked ideas cannot launch unless
-a later explicit reentry decision changes their lifecycle.
+constrained-advance track candidates. Each active track has a causal signature,
+falsifier, alternative explanation, four outcome routes, and bounded scientific
+revision budget. Killed or parked ideas cannot launch unless a later explicit
+reentry decision changes their lifecycle.
 
-`experiment_plan` is complete when `INNOVATION_PACKET.json`,
-`TRACK_PLAN_MATRIX.json`, and `EXPERIMENT_REVIEW_PACKET.json` pass
+`experiment_plan` is complete when the primary top-level compatibility packets,
+every planning-admitted per-track packet pair, and matrix schema v3 pass
 `innovation_lint.py`, `prelaunch_lint.py`, `track_plan_matrix.py --check`,
 selected-projection checks, selected-negative-evidence checks, and required
 paper-code, baseline-alignment, and innovation-story lints. The selected idea
-and track references must match the current decision ledger and track seeds.
+and all admitted track references/hashes must match the current decision ledger
+and track seeds. Exactly one track is primary; at most three non-primary tracks
+may be planning-ready, and all of their rows remain `pilot_only` until explicit
+reselection and a frozen matched-baseline rerun.
 Launch-ready `PARAM` or target-sweep plans must use resource-constrained DEHB,
-one scout seed, at most three confirmation seeds, and top 1-2 full-resource
-survivor promotion.
+one scout seed, at most three total experiment random seeds when stability is
+tested, and top 1-2 full-resource survivor promotion. The paper plan needs one
+defensible core scientific contribution; optional supporting contributions count
+only with explicit counterfactual necessity.
+For an enforced `cross_dataset_method`, each method-candidate packet must also
+bind the program contract, required dataset group, parameter-transfer contract,
+profile state, immutable `method_formula_sha256`, and a parameter-role inventory
+with exactly one `innovation_load_bearing` field bound to the transfer contract.
+Baseline protocol fields must remain explicitly dataset-adaptable instead of
+being misclassified as innovation parameters. Stage 2 is incomplete until every preregistered per-dataset
+value probe exists, one ledger-owned calibration decision has produced a frozen
+profile, and every paired method-screen leg binds that profile. Stages 3-6 reject
+a missing or stale profile hash; seed variation cannot repair parameter coverage.
+For `external_material`, `external_alignment_lint.py --stage experiment_plan`
+and a passed, context-separated `ideation/PANEL_DESIGN_REVIEW.json` are also
+mandatory. Packets preserve `compute_backend.backend=local_gpu|autodl_gpu` and
+record the orthogonal `execution_route=local|ssh|bjtu_hpc|autodl` consistently;
+this routing metadata never grants remote-launch authority.
 
 `code` is complete when the experiment index, manifests,
 `TRACK_IMPLEMENTATION_INDEX.json`, baseline/data audit, clone or worktree proof,
@@ -121,18 +152,20 @@ proof are present. Fixture-only proof cannot satisfy launch readiness.
 
 `experiment` is complete when `EXPERIMENT_LEDGER.json` records every attempt,
 including failed, regressed, budget-stopped, spec-violating, rollback, and
-diagnostic runs, and the ledger contains promoted `best_run` or
-`track_best_runs`. Candidate-supported results alone are incomplete. If no active
-run remains and no promoted best exists, the latest failed or regressed run must
-be analyzed before rerun, rollback, downgrade, or hard stop. At most two same-idea
-repair attempts are allowed before changing track, idea, or innovation point.
+diagnostic runs, and either (a) contains promoted `best_run` or `track_best_runs`,
+or (b) cites a valid terminal `program_decision` with no live/launchable row and
+`improvement_claim_allowed=false`. Candidate-supported results alone are
+incomplete. Operational repair is bounded separately from scientific revision;
+a valid negative result is not a repair attempt.
 
 `analysis` is complete when claim-evidence matrix, track verdicts,
 `BEST_RUN_SELECTION.json`, `SCORE_VERIFICATION.json`,
 `SPEC_VIOLATION_AUDIT.json`, `IDEA_OUTCOME_SUMMARY.json`, required baseline
 alignment, and story updates pass. Candidate-only evidence stays pilot-only.
-Strong paper claims require at least three accepted effective innovation points
-and `post_analysis_self_audit` with `least_confident_point` and
+Positive strong claims require one accepted, evidence-backed core scientific
+contribution; validation, analysis, engineering support, parameter tuning, and
+negative/refuted/inconclusive tracks cannot be counted as that contribution.
+Every analysis requires `post_analysis_self_audit` with `least_confident_point` and
 `largest_possible_misunderstanding`.
 
 `review_pressure` is complete when `REVIEW_FINDINGS.json`,
@@ -152,7 +185,9 @@ local/reproduced-baseline-only deltas.
 and package gates, `submission_ready.json`, review gate, idea outcome summary,
 final manuscript forensics, required baseline alignment, and story synchronization
 pass. Strong-paper mode requires no blocking final numeric, statistical, or
-presentation findings and at least three accepted effective innovation points.
+presentation findings. Any positive contribution claim must trace to one accepted
+core scientific contribution; a terminal non-positive program may only retain its
+explicitly downgraded negative or inconclusive claim scope.
 
 ## Literature Discovery Trigger Rule
 

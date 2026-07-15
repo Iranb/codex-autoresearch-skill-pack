@@ -1,209 +1,175 @@
 ---
 name: autoreskill-ideation-panel
-description: OpenClaw-aligned multi-persona ideation and experiment-idea construction panel for portable AutoResearch. Use for Professor/Postdoc/PhDStudent/Critic passes, generating the 12-15 academic-paper-oriented experiment idea pool during ideation from pre-idea evidence and PaperNexus proposal_graph_session bundles, novelty tournaments, candidate pool scoring, fallback design review when PaperNexus research_controller/proposal graph is unavailable, selected idea gating, and IDEA_CATALYST_CONTRACT preparation.
+description: Evidence-backed multi-persona ideation and idea-gate skill for portable AutoResearch. Use to build a compact pool of falsifiable causal hypotheses from PaperNexus or committed external-material pre-idea evidence, detect semantic duplicates, run adversarial pairwise comparison, deepen a 3-5 idea shortlist, select one primary idea, and emit bounded IDEA_TRACK_SEEDS without granting launch approval.
 metadata:
-  short-description: Multi-persona ideation and idea gate
+  short-description: Causal ideation and idea gate
 ---
 
 # Ideation Panel
 
-Use after the topic/problem is clear and after the pre-idea evidence expansion gate has passed. PaperNexus materials are no longer only optional seeds before brainstorming: target-domain, near-neighbor, and far-neighbor discovery must each be attempted, audited at abstract/metadata-fallback level, actively screened, converted into split-reading evidence and innovation slots, and when available matured through `agent_materials(operation="proposal_graph_session")` before generating the experiment idea pool.
+Use after the research problem is clear and `ideation/PRE_IDEA_EVIDENCE_GATE.json` has passed, or has an explicitly approved degraded path with claim limits. This skill owns idea construction and selection. It does not certify novelty, approve launches, or promote claims.
 
-The 12-15 experiment ideas are created here, during idea construction. Immediately after creating the idea pool, score every idea for novelty against existing papers and for top-conference/journal support before selecting one for experiments. Do not defer idea generation or idea-level scoring to `autoreskill-experiment-plan`; experiment planning consumes a selected idea and closes the selected idea's evidence gaps.
+## Inputs And Authority
 
-Every item in `EXPERIMENT_IDEA_POOL.json` must be a plausible academic paper idea, not a standalone engineering task. Treat a valid idea as a paper thesis with a novelty claim, baseline pressure, minimum experiment table, ablation plan, and falsifier. These fields may be provisional during brainstorming, but they must be specific enough to show how the idea could become a paper. Tooling, metric guards, dashboards, split scripts, and harnesses are supporting artifacts unless they are framed as a benchmark, evaluation, dataset, or systems paper with its own research claim.
+Consume:
 
-Every paper idea must also include a three-or-more innovation bundle and a complete story line. The bundle is not a list of modules. It must include at least one innovation point about problem/protocol/evaluation framing, at least one about the method/mechanism, and at least one about training/integration/analysis/validation. At least one point should be sourced from near-neighbor, far-neighbor, proposal-graph, external-domain, or cross-lane transfer evidence. The `paper_contribution.storyline` must explain opening tension, hidden cause, method-as-resolution, proof ladder, reviewer risk/defense, and a 5-7 step narrative spine. Park or repair any idea that cannot satisfy this bundle.
+- target-domain, near-neighbor, and far-neighbor discovery evidence;
+- `papernexus/ABSTRACT_SCREENING_AUDIT.json` and `PAPER_SELECTION_SCORECARD.json`;
+- split-reading/material evidence and negative evidence;
+- the slot map committed by the pre-idea gate: for legacy PaperNexus this may be
+  `ideation/INNOVATION_SLOT_MAP.json`; for `external_material`, resolve only
+  `PRE_IDEA_EVIDENCE_GATE.innovation_slot_map_path`/`slot_map_ref` and verify
+  the content-addressed filename, SHA-256, and campaign lineage before use;
+- committed `proposal_graph_session` artifacts when available;
+- the existing Graph-of-Evidence projection and build brief.
 
-Also maintain `.autoreskill/user_view/innovation_story/00_STORYLINE_DESIGN.md` for the user. This file is not another idea list. It should explain the paper storyline: what belief the reader starts with, what tension breaks that belief, what hidden cause the method resolves, why near-neighbor/far-neighbor or cross-lane transfer supplies the main method mechanism, what evidence ladder would persuade a reviewer, and what figure sequence should carry the argument. Update it after idea-gate selection so the selected idea has a coherent narrative spine before experiment planning.
+PaperNexus artifacts, a committed `$autoreskill-gpu-idea-validation` external campaign, and model critiques are evidence. `EXPERIMENT_IDEA_POOL.json`, the scorecard, and the downstream `IDEA_DECISION_LEDGER.json` remain the project authorities. A model ranking cannot establish novelty or scientific truth.
 
-## Pre-Idea Evidence Gate
+If the canonical pre-idea gate is missing or blocked, return to evidence repair. Missing `evidence_source_mode` means legacy `papernexus`; `external_material` requires exact `campaign_ref`/hash, lint, slot-map, and protected candidate refs and is never treated as approved degraded evidence. An approved legacy degraded path must preserve `claim_limits` and `evidence_boundary` in the pool and scorecard. Read the source skill for its evidence policy; do not duplicate remote call configuration here.
 
-Before writing `ideation/EXPERIMENT_IDEA_POOL.json`, require:
+For an external-material idea gate, create the independent semantic review from
+the source skill's `PANEL_DESIGN_REVIEW.template.json`, in a reviewer context
+different from candidate generation, then install it only through:
 
-- `.autoreskill/literature/PRE_IDEA_DISCOVERY_PLAN.json`
-- `.autoreskill/literature/TARGET_DOMAIN_DISCOVERY_PACKET.json`
-- `.autoreskill/literature/NEAR_NEIGHBOR_DISCOVERY_PACKET.json`
-- `.autoreskill/literature/FAR_NEIGHBOR_DISCOVERY_PACKET.json`
-- `.autoreskill/papernexus/ABSTRACT_SCREENING_AUDIT.json`
-- `.autoreskill/papernexus/PAPER_SELECTION_SCORECARD.json`
-- `.autoreskill/papernexus/GRAPH_IMPORT_PLAN.json` or an explicit unresolved blocker
-- `.autoreskill/papernexus/IMPORT_WORKFLOW_STATUS.json` when imports/material jobs were submitted (`GRAPH_IMPORT_STATUS.json` is legacy compatibility only)
-- `.autoreskill/papernexus/SPLIT_READING_EVIDENCE_PACK.json`
-- `.autoreskill/papernexus/proposal_graph_session.json` and/or `.autoreskill/papernexus/proposal_graph_sessions/<run_id>/proposal-session-manifest.json` when PaperNexus exposes `proposal_graph_session`
-- `.autoreskill/ideation/INNOVATION_SLOT_MAP.json`
-- `.autoreskill/ideation/PRE_IDEA_EVIDENCE_GATE.json` with `status="passed"`
+```bash
+python3 "${CODEX_HOME:-$HOME/.codex}/skills/autoreskill-gpu-idea-validation/scripts/idea_campaign.py" \
+  write-panel-design-review --project <project-root> \
+  --input <absolute-independent-panel-review.json> \
+  --expected-current-panel-sha256 <sha256-or-absent>
+```
 
-This gate is venue-agnostic. Do not relax the current-field, near-neighbor, and far-neighbor evidence requirements just because the target venue is broad, unknown, or no longer TPAMI-focused.
+Do not write `PANEL_DESIGN_REVIEW.json` directly. The CAS writer binds the
+review to the current passed content-addressed campaign commit and admitted
+candidate IDs; run external alignment lint after the write.
 
-The three required discovery lanes are:
+## Build Causal Hypotheses
 
-- `target_domain`: current field, closest priors, SOTA, baseline, dataset, metric, protocol, limitations, negative evidence.
-- `near_neighbor`: related but different direction; shared task, dataset, metric, setting, or failure mode, but different mechanism, assumption, or optimization route.
-- `far_neighbor`: storyline construction direction; domain-agnostic challenge abstraction and external source-domain mechanisms inspired by Idea-Catalyst-style cross-domain retrieval.
+Generate 8-12 lightweight hypothesis cards by default. A 6-7 item niche pool or 13-15 item breadth extension requires `pool_size_exception` with `kind`, `reason`, `approved_by`, and `approved_at`. More names are not scientific diversity.
 
-For top-tier method ideas, target-domain evidence is primarily the anchor and adversary: it defines the task, closest priors, baseline pressure, protocol, and overlap risk. The main method mechanism should primarily come from `near_neighbor`, `far_neighbor`, `cross_lane_recombination`, or `proposal_graph_transfer`. A target-domain-only method variant should be moved to baseline/ablation unless the idea includes source-backed proof that the mechanism is absent from the current field and records `current_field_absence_evidence`.
+Every card must state:
 
-Do not mechanically import raw discovery results. Raw discovery often contains duplicates, weakly related papers, unresolved full-text sources, survey noise, and generic benchmark papers. Before high-signal selection, Codex must produce `ABSTRACT_SCREENING_AUDIT.json` with one row per merged discovery candidate, recording abstract text plus `abstract_read=true` or an explicit `abstract_missing=true` metadata fallback, decision, and rationale. Codex must actively screen candidates and select about 60-80% of the high-signal eligible set for graph import, material view, or split-reading, not 60-80% of raw search results.
+- `research_question` and one `core_scientific_contribution`;
+- target-domain anchor and closest-prior delta;
+- intervention, mechanism, and predicted metric/dataset pattern;
+- falsifier and strongest alternative explanation;
+- cheapest experiment that distinguishes the mechanism;
+- `causal_signature`, normalized from intervention + mechanism + predicted pattern;
+- source evidence or explicit evidence debt;
+- paper potential: target claim, minimum table, and reviewer risk;
+- red-line audit for metric/eval/dataset/budget drift, leakage, and prediction cheating.
 
-In addition to one-attempt lane coverage, run the general breadth gate. By default, the screened scorecard must include at least target-domain raw/eligible/selected counts of 10/6/4, near-neighbor counts of 12/8/5, far-neighbor counts of 10/7/4, at least 21 eligible candidates total, and at least 13 graph-import or split-read selections total. The near/far-neighbor evidence budget is intentionally heavier because it is the preferred source of top-tier method mechanisms. A sparse niche topic may pass only with an explicit `breadth_exception_approval` or degraded gate that records attempted expansion and claim limits.
+When the live program contract declares `cross_dataset_method`, a shortlisted
+method card must also set `claim_role=method_candidate`, use an `ALGO|CODE`
+learner mechanism, predict the outcome pattern on every required dataset, name
+its load-bearing parameter and scale type, choose a provisional transfer mode,
+and give one paired falsifier that distinguishes mechanism failure from
+parameter-scale failure. Ideation names the transfer assumption and sensitivity;
+the Experiment Planner owns concrete 2-3-value ranges, calibration, and freeze.
+Evaluator-only, protocol-only, and baseline-calibration ideas use their explicit
+non-method claim roles and cannot satisfy the method portfolio target.
 
-Idea generation must consume `INNOVATION_SLOT_MAP.json`, not a bare topic. When a committed proposal graph session exists, use its `proposal.md`, `proposal.json`, committed subgraph, role-action trace, and commit decisions as the primary PaperNexus seed for idea construction. Every non-degraded idea should cite challenge/insight/transfer slot ids through `innovation_slot_refs` or an equivalent field, and any idea derived from the proposal bundle should also cite `proposal_session_ref` or `proposal_graph_refs`. If the gate is missing, blocked, or only metadata-backed, return to discovery/material repair instead of generating the idea pool. A degraded metadata-only path requires explicit user approval and must mark claim limits.
+Different names with the same causal signature are duplicates. Merge them, reject one, or mark an explicit duplicate/ablation relation. Parameter-only variants remain `PARAM`; engineering chores go to `SUPPORTING_ARTIFACTS.json`. Keep `PARAM` ideas at two or fewer and `CODE` ideas at four or fewer.
 
-Before writing final ideas, build the local Graph-of-Evidence package:
+One defensible core contribution is sufficient. `supporting_contributions` are optional and count only when each states what central claim fails without it through `counterfactual_necessity`. Validation, analysis, tooling, and presentation are evidence roles, not invented innovations.
 
-- `ideation/EVIDENCE_GRAPH_PROJECTION.json` from screened papers, split-reading materials, innovation slots, and proposal graph artifacts.
-- `ideation/IDEA_BUILD_BRIEF.json` and `.md` as the ScientistOne-style brief for the ideation panel.
-- `ideation/GOE_IDEA_AUDIT.json` from `idea_graph_lint.py --write-audit`.
+Roles run isolated passes:
 
-These artifacts are evidence-only. They compress the current evidence state and expose missing paths; they do not replace `PRE_IDEA_EVIDENCE_GATE.json`, the idea pool, or the novelty/venue scorecard as stage authorities.
+- Professor: significance and paradigm value.
+- Postdoc: feasibility and discriminating experiment.
+- PhDStudent: closest-prior and baseline pressure.
+- Critic: semantic duplication, alternative explanation, and reviewer attack.
 
-Approved degraded ideation is an exception path, not the default. It is valid only when `ideation/PRE_IDEA_EVIDENCE_GATE.json` has `status="degraded_requires_user_approval"`, `allowed_next_action="generate_experiment_idea_pool_degraded"` or equivalent, `claim_limits`, and `degraded_approval` with `approved=true`, `approved_by`, `approved_at`, and `reason`. In that mode, run `pre_idea_evidence_gate_lint.py --allow-degraded`, and every generated `EXPERIMENT_IDEA_POOL.json` plus `IDEA_NOVELTY_VENUE_SCORECARD.json` must carry `claim_limits` and `evidence_boundary`. Degraded ideas are speculative only; `autoreskill-experiment-plan` must close selected-idea PaperNexus evidence before any formal launch or manuscript claim.
+## Score And Shortlist
 
-## Brainstorming Policy
+Score every card before selection. Each score row must retain the standard 1-5 dimensions, closest-prior comparison, evidence closure/debt, and a pairwise comparison against the closest competing idea:
 
-Ideation remains divergent after the pre-idea evidence gate passes. Do not discard a candidate only because some secondary `agent_materials` fields remain sparse. Instead, keep the candidate when it has paper potential and annotate the evidence gap.
+- whether mechanisms differ;
+- whether predicted patterns differ;
+- the cheapest discriminator;
+- verdict: `distinct`, `redundant`, `ablation`, or `uncertain`.
 
-Each idea should include lightweight maturity fields:
+A `redundant` row cannot advance. Pairwise scores and tournament rankings are
+screening evidence only. After the hard gates, use a deterministic lexicographic
+order: more unique claim/decision targets, more competing explanations
+distinguished, lower cheapest-falsifier GPU-hours, more reuse of locked
+baseline/code/data/runtime components, then lower reviewer novelty/confound
+risk. `validation_density = unique_decision_targets / estimated_gpu_hours` may
+explain the order; do not invent a success probability.
 
-- `evidence_maturity`: `blue_sky`, `promising`, `evidence_backed`, or `plan_ready`.
-- `primary_method_source_role`: `near_neighbor`, `far_neighbor`, `cross_lane_recombination`, `proposal_graph_transfer`, or `external_domain_transfer` for top-tier main method ideas.
-- `target_domain_anchor`: the current-field problem, baseline/protocol, closest-prior pressure, and overlap-risk evidence the idea must beat.
-- `neighbor_transfer_mechanism`: the near/far-neighbor mechanism being transferred, not merely a related-paper citation.
-- `papernexus_hints`: known related papers, mechanisms, or idea fragment ids when available.
-- `missing_materials`: missing novelty, baseline, protocol, cost, or negative-evidence items.
-- `followup_evidence_plan`: PaperNexus/literature discovery/import steps needed before experiment planning.
+Choose a 3-5 idea shortlist in one batch for the current selection revision.
+Only shortlisted ideas require the expensive deep contract: full closest-prior
+comparison, baseline pressure, positive/negative/inconclusive/invalid routes,
+ablation path, claim boundary, and paper-contribution fields. Only the selected
+primary must have the complete 5-7 step paper storyline before experiment
+planning. Downstream heartbeats consume this committed shortlist; rerun broad
+generation only after an explicit lifecycle decision records exhaustion,
+invalidation, or strategic supersession.
 
-Use PaperNexus as the pre-idea evidence source and as a critic during scoring. Raw `idea_fragments` are not final ideas; rewrite them as academic paper theses. The pre-idea gate does not certify novelty or launch readiness. Strong selected-idea evidence closure still happens after selection, inside `autoreskill-experiment-plan`.
+A WorkflowGuard `replenish_experiment_portfolio` decision is such a trigger only
+when it records a positive portfolio deficit, no fillable committed candidate,
+fresh capability-known idle capacity, an unresolved program claim, remaining
+budgets, and a changed program/lifecycle/evidence/decision/resource fingerprint.
+Zero active tracks are eligible after the idempotent replenishment ledger event
+is committed. Reuse the current canonical evidence source, perform only targeted
+incremental discovery for missing roles, preserve the selected primary and its
+selection fingerprint, and advance only the shortlist supply revision. Raw idle
+GPU count alone is not a trigger.
 
-If `proposal_graph_session` is available and committed, treat the proposal bundle as the strongest single PaperNexus idea object, but do not collapse the ideation stage into one option by default. Expand it into a 12-15 idea pool by varying mechanism, intervention boundary, evaluation target, risk repair, and near/far-neighbor transfer route. Directly emitting only the committed proposal is allowed only when the user explicitly asks for a single full-paper idea rather than the AutoResearch experiment idea pool.
+The scorecard must name the shortlist through `shortlisted_idea_ids` or `top_track_recommendations`. Select one primary with `selected_primary_idea_id` and mirror it to the pool's `selected_idea_id` or `status=SELECTED`.
 
-## Post-Idea Novelty And Venue Scorecard
+## Emit Track Seeds
 
-After writing `ideation/EXPERIMENT_IDEA_POOL.json`, and before `idea_gate` selection, produce a scorecard that compares every idea against the local literature report, PaperNexus discovery metadata, graph/material hints, and known closest priors. This scorecard is mandatory for screening one idea into experiments.
+Generate `IDEA_TRACK_SEEDS.json` after selection:
 
-Required artifacts:
+- default portfolio: one primary plus two alternates;
+- hard maximum: exactly one primary plus at most three alternate/risk-repair
+  seeds when `active_track_limit=4` is explicitly recorded;
+- track candidates are not random seeds and do not change the three-random-seed stability cap;
+- every seed carries one stable `hypothesis_contract`, four outcome routes, belief state `untested`, and `max_scientific_revisions=2`;
+- child hypotheses must state parent, source run, and one causal delta;
+- `launch_approval=false` for every seed.
+- bind membership, roles, and causal contracts with canonical
+  `semantic_sha256`; changing any of them invalidates downstream per-track
+  packets and matrix rows.
+- keep `admitted_at` outside the per-track semantic hash so audit timestamps do
+  not invalidate unchanged science; preserve the prior timestamp/hash for an
+  unchanged admitted track.
+- when the portfolio has open slots, admit the exact causally distinct feasible
+  shortlist subset up to the deficit in one batch; do not serialize it to one
+  new track per heartbeat.
 
-- `ideation/IDEA_NOVELTY_VENUE_SCORECARD.json`: machine-readable scoring authority.
-- `ideation/IDEA_NOVELTY_VENUE_SCORECARD.md`: human-readable ranking and selection rationale.
+Experiment planning closes baseline, protocol, dataset, compute, and selected-evidence gaps. It may not rewrite the selected mechanism into a convenient target-domain tweak.
 
-The JSON scorecard must include:
+## Outputs
 
-- `stage="post_idea_generation_pre_idea_gate"`.
-- `evidence_boundary`: say whether the score uses metadata-only discovery, graph material, full-text imports, or manual report evidence.
-- `pre_idea_evidence_gate_path` and `innovation_slot_map_path`.
-- `proposal_graph_session_path` or `proposal_graph_session_manifest_path` when available; if unavailable or diagnosis-only, record the fallback reason.
-- `source_evidence_roles`: target-domain, near-neighbor, and far-neighbor evidence roles used by the scorecard.
-- `scoring_rubric` and `weights`.
-- One row for every idea in `EXPERIMENT_IDEA_POOL.json`.
-- Per-idea 1-5 scores for `significance`, `novelty_separation`, `experiment_defensibility`, `feasibility`, `evidence_maturity`, and `risk_control`.
-- `weighted_total`, rank, `closest_prior_pressure`, `novelty_separation_needed`, `venue_support_verdict`, `top_tier_support_judgment`, `evidence_debt`, `next_evidence_closure`, and `promotion_recommendation` (`advance`, `advance_with_constraints`, `park`, or `kill`).
-- Per-idea `paper_comparison` with `closest_prior_papers`, `innovation_comparison`, `overlap_risk`, and `differentiation_claim`; this is the front-loaded comparison against the local survey, PaperNexus discovery metadata, graph/material hints, and known closest priors.
-- Per-idea `paper_story_assessment` with `three_innovation_verdict`, `storyline_coherence`, `weakest_bundle_link`, and `required_story_repair`. A score row cannot advance an idea if the three innovation points do not form one defensible paper story.
-- Per-idea `innovation_slot_refs`, `near_neighbor_pressure`, and `far_neighbor_transfer_rationale`.
-- Per-idea `primary_method_source_role`, `target_domain_anchor`, `neighbor_transfer_mechanism`, and `target_domain_method_overlap_risk`; top-ranked method ideas should not be target-domain-only unless they carry explicit current-field absence evidence.
-- Per-idea `proposal_graph_basis` when the idea uses the committed proposal graph, including `run_id`, `committed_subgraph_id`, `proposal_artifact_path`, and which claim/method/risk/eval nodes were reused or changed.
-- `top_recommendations`: usually 3-4 ideas that are worth closest-prior closure before experiment planning.
+Required idea-stage outputs:
 
-The scorecard is the screening authority for choosing which idea enters experiment planning. It must rank the full 12-15 idea pool before any `idea_gate` selection, surface top-tier-paper support and reviewer risk, and identify the 3-4 candidates worth closest-prior closure. Scorecards are still ideation-stage judgments, not novelty certificates. Do not claim an idea can support a top-tier paper solely because it scores highly here. `autoreskill-experiment-plan` must still supplement/import relevant papers, build the closest-prior difference table, lock baselines/protocols, and upgrade the selected idea to `plan_ready` before launch.
-
-Each score row must also record `graph_path_status`, `evidence_closure_level`, `scientistone_fast_rank`, `paper_potential_rank`, and `recommended_track_action`. During `idea_gate`, generate `ideation/IDEA_TRACK_SEEDS.json` with one primary track and 2-3 alternate/risk-repair tracks. Track seeds keep `launch_approval=false`; they are handoff candidates for `experiment_plan`, not permission to run experiments.
-
-## Mandatory Pre-Idea Discovery And Screening
-
-Every ideation run must trigger broad PaperNexus literature discovery in all three lanes, regardless of whether the graph already has data. The first pass may be metadata-only, but it must use the widest recall-oriented search profile available rather than quick defaults. The pre-idea gate is not metadata-only: high-signal eligible papers must be imported, supplemented, or split-read through PaperNexus unless explicitly blocked.
-
-The first successful discovery pass is not automatically sufficient. If the scorecard has only token coverage, such as one or two papers per lane without enough eligible/selected candidates, continue PaperNexus discovery, manual source expansion, or split-reading repair before idea generation.
-
-Required MCP call when `papernexus-remote` is callable:
-
-- `literature_discovery(operation="submit", depth="deep", searchMode="deep", planningMode="llm_augmented", llmQueryPlanner=true, citationExpansion=true, openAlexRelatedExpansion=true, maxCandidates>=10000, maxQueries>=48, maxQueriesPerProvider>=8, maxResultsPerQuery>=150, maxLlmQueries>=16, maxCitationSeeds>=24, maxCitationsPerSeed>=50, maxRelatedPerSeed>=50, maxEntityQueries>=48, maxExtractedEntities>=160, maxSeedEntities>=100, maxSeedPapers>=50, maxSeedQueries>=40, papersCoolMaxQueries>=48, pasaMaxQueries>=20, providerConcurrency>=4, timeoutMs>=300000, searchBudgetMs>=300000, retryCount>=5, importResolved=false, processImports=false, allowDownloads=false, returnPartial=true, persist=true)`, followed by `progress` and `report`; synchronous `search` is reserved for small targeted follow-ups.
-
-Required artifacts:
-
-- `literature/LITERATURE_DISCOVERY_PACKET.json`: raw metadata-only discovery packet.
-- `papernexus/LITERATURE_DISCOVERY_TRIAGE.json`: candidate triage with `import_recommended`, `watchlist`, and `reject_irrelevant` decisions.
-- `papernexus/ABSTRACT_SCREENING_AUDIT.json`: one-row-per-merged-candidate audit proving abstract-level reading or explicit no-abstract metadata fallback.
-- `papernexus/PAPER_SELECTION_SCORECARD.json`: lane-aware active screening with `graph_import`, `split_read_only`, `watchlist`, and explicit `reject_*` decisions.
-- `ideation/PRE_IDEA_EVIDENCE_GATE.json`: hard authority for whether idea generation can start.
-- `papernexus/proposal_graph_session.json`: preferred PaperNexus idea-generation result when supported.
-- `pre_idea_discovery_config_lint.py`: must pass before idea generation; it rejects narrow quick/balanced discovery plans and enforces broad metadata discovery config.
-
-The triage must identify papers that should be supplemented/imported into the graph or split-read before idea generation, especially closest priors, baseline candidates, negative-evidence sources, datasets/benchmarks, mechanisms, limitations/future work, and transfer bridges that shape novelty.
-
-Do not continue to idea generation when discovery/material work fails. Record attempted-discovery and pre-idea gate blocker artifacts with the provider/transport failure and repair the evidence gap first. If `proposal_graph_session` is available but does not commit, repair its commit blockers before idea generation unless policy or user approval allows explicit fallback. Continue only with explicit degraded user approval and claim limits. Legacy projects that already have `EXPERIMENT_IDEA_POOL.json` but no canonical `ideation/PRE_IDEA_EVIDENCE_GATE.json` must first run `scripts/legacy_pre_idea_reconcile.py`; if a gate exists under `orchestrator/` or another non-canonical path, treat it as `pre_idea_gate_misplaced` and repair or rebuild the canonical ideation gate before marking ideation complete.
-
-Roles:
-
-- Professor: paradigm value and significance
-- Postdoc: feasibility and experiment path
-- PhDStudent: prior work and baseline pressure
-- Critic: adversarial novelty/reviewer attack
-
-Outputs:
-
-- `IDEA_TREE.md`
-- `NOVELTY_TREE.md`
-- `CHALLENGE_INSIGHT_TREE.md`
-- `WELL_ESTABLISHED_SOLUTION_CHECK.md`
-- `CANDIDATE_POOL.json`
 - `EXPERIMENT_IDEA_POOL.json`
-- `IDEA_NOVELTY_VENUE_SCORECARD.json`
-- `IDEA_NOVELTY_VENUE_SCORECARD.md`
+- `IDEA_NOVELTY_VENUE_SCORECARD.json` and `.md`
 - `EVIDENCE_GRAPH_PROJECTION.json`
-- `IDEA_BUILD_BRIEF.json`
-- `IDEA_BUILD_BRIEF.md`
+- `IDEA_BUILD_BRIEF.json` and `.md`
 - `GOE_IDEA_AUDIT.json`
 - `IDEA_TRACK_SEEDS.json`
 - `TOURNAMENT_SCOREBOARD.json`
-- `TOP3_DIRECTION_SUMMARY.md`
 - `RESEARCH_PROPOSAL.md`
-- `.autoreskill/user_view/innovation_story/00_STORYLINE_DESIGN.md`
+- `.autoreskill/user_view/innovation_story/00_STORYLINE_DESIGN.md` for the selected primary only
 
-`EXPERIMENT_IDEA_POOL.json` must contain 12-15 paper-oriented experiment ideas, not only high-level research directions and not engineering backlog items. Prefer method-paper `ALGO` ideas. `CODE` ideas are allowed when they are performance-bearing algorithmic/engineering-method contributions, or benchmark/evaluation/dataset/system paper contributions. Pure infrastructure chores with no measurable research claim go to `SUPPORTING_ARTIFACTS.json`. Target at least 8 `ALGO` ideas, keep `CODE` ideas to 4 or fewer, and keep `PARAM` ideas to 2 or fewer. At least some ideas should cite source papers, techniques, or PaperNexus evidence when available, but absence of complete PaperNexus evidence should become `missing_materials`, not a reason to shrink the pool. Include:
+Trees and direction summaries are optional projections. They never replace the JSON authorities.
 
-- `paper_contribution.paper_thesis`
-- `paper_contribution.contribution_type`
-- `paper_contribution.target_venue_fit`
-- `paper_contribution.novelty_claim`
-- `paper_contribution.baseline_pressure`
-- `paper_contribution.minimum_experiment_table`
-- `paper_contribution.ablation_plan`
-- `paper_contribution.falsifier`
-- `paper_contribution.innovation_bundle` with at least three mutually necessary innovation points covering problem/protocol/evaluation, method/mechanism, and training/integration/analysis/validation
-- `paper_contribution.storyline` with opening tension, hidden cause, method-as-resolution, proof ladder, reviewer risk/defense, and a 5-7 step narrative spine
-- `paper_contribution.performance_claim` for every `CODE` idea that claims a performance-bearing engineering contribution
-- red-line audit fields for metric/eval/dataset/data-leakage/prediction-cheating/training-budget drift
-- evidence maturity and follow-up evidence fields listed above
-- proposal graph provenance fields when applicable: `proposal_session_ref`, `proposal_graph_refs`, `proposal_manifest_path`, `proposal_committed_subgraph_id`, and `proposal_reuse_or_delta`
-
-Write operational engineering necessities that do not satisfy these fields to `SUPPORTING_ARTIFACTS.json`, not to the idea pool.
-
-During `idea_gate`, select one idea by setting `selected_idea_id` or marking one idea `status=SELECTED`. Selection may choose a `promising` idea with evidence debt, but `experiment_plan` must close the novelty, baseline, protocol, and PaperNexus support gaps before launch.
-
-## Deterministic Helpers
+## Deterministic Checks
 
 ```bash
-python scripts/panel_review.py --project <project-root> --force-ready
+python scripts/pre_idea_evidence_gate_lint.py --project <project-root>
 python scripts/idea_graph_projection.py --project <project-root>
 python scripts/idea_graph_lint.py --project <project-root> --write-audit
 python scripts/idea_build_brief.py --project <project-root>
-python scripts/ideation_lint.py --project <project-root>
-python scripts/pre_idea_evidence_gate_lint.py --project <project-root>
+python ../autoreskill-experiment-plan/scripts/idea_pool_lint.py --project <project-root>
 python scripts/idea_scorecard_lint.py --project <project-root>
 python scripts/idea_track_seeds.py --project <project-root>
+python scripts/idea_track_seeds.py --project <project-root> --capacity-target 4 --admit-idea-id <idea-a> --admit-idea-id <idea-b> --dry-run
 python scripts/idea_track_seeds.py --project <project-root> --check
-python ../autoreskill-papernexus-innovation/scripts/pre_idea_discovery_plan.py --project <project-root> --topic "<topic>" --target-domain "<domain>"
-python ../autoreskill-papernexus-innovation/scripts/discovery_metadata_triage.py --project <project-root> --input literature/LITERATURE_DISCOVERY_PACKET.json --stage ideation
-python ../autoreskill-papernexus-innovation/scripts/abstract_screening_audit_lint.py --project <project-root>
-python ../autoreskill-papernexus-innovation/scripts/paper_selection_scorecard_lint.py --project <project-root>
-python ../autoreskill-papernexus-innovation/scripts/pre_idea_breadth_lint.py --project <project-root>
-python ../autoreskill-papernexus-innovation/scripts/split_reading_evidence_pack_lint.py --project <project-root>
-# When proposal_graph_session is available:
-python ../autoreskill-papernexus-innovation/scripts/proposal_graph_session_lint.py --project <project-root>
-python ../autoreskill-experiment-plan/scripts/idea_pool_lint.py --project <project-root> --pool ideation/EXPERIMENT_IDEA_POOL.json
-python ../autoreskill-experiment-plan/scripts/idea_pool_lint.py --project <project-root> --pool ideation/EXPERIMENT_IDEA_POOL.json --require-selected
+python ../autoreskill-experiment-plan/scripts/idea_pool_lint.py --project <project-root> --require-selected
 python ../autoreskill-workflow/scripts/innovation_story_lint.py --project <project-root> --stage ideation
 ```
 
-Read references for panel protocol and novelty gate. For the idea pool schema, read `../autoreskill-experiment-plan/references/experiment_idea_pool.md`; despite its file location, the canonical owner is this ideation skill.
+Read `references/professor_postdoc_phd_critic_panel.md`, `references/tournament_schema.md`, and `references/novelty_gate.md`. Read `../autoreskill-experiment-plan/references/experiment_idea_pool.md` for the canonical tiered schema.

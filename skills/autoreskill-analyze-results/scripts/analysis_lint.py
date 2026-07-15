@@ -9,6 +9,14 @@ from pathlib import Path
 from typing import Any
 
 
+TERMINAL_NONPOSITIVE_STATUSES = {
+    "core_hypotheses_refuted",
+    "no_valid_gain",
+    "inconclusive_budget_exhausted",
+    "protocol_unresolvable",
+}
+
+
 def ar(project: str) -> Path:
     return Path(project).expanduser().resolve() / ".autoreskill"
 
@@ -27,6 +35,22 @@ def read_json(path: Path) -> dict[str, Any]:
     return data if isinstance(data, dict) else {}
 
 
+def terminal_nonpositive_program(base: Path, ledger: dict[str, Any]) -> dict[str, Any]:
+    decision_ledger = read_json(base / "ideation/IDEA_DECISION_LEDGER.json")
+    decision = decision_ledger.get("program_decision")
+    if not isinstance(decision, dict):
+        return {}
+    status = str(decision.get("status") or "").strip().lower()
+    if (
+        decision.get("terminal") is True
+        and status in TERMINAL_NONPOSITIVE_STATUSES
+        and str(decision.get("target_stage") or "").strip().lower() == "analysis"
+        and ledger.get("improvement_claim_allowed") is False
+    ):
+        return decision
+    return {}
+
+
 def lint(project: str, strict: bool) -> dict[str, object]:
     base = ar(project)
     missing: list[str] = []
@@ -39,20 +63,33 @@ def lint(project: str, strict: bool) -> dict[str, object]:
     if not (nonempty(base / "coder/EXPERIMENT_LEDGER.json") or nonempty(base / "coder/EXPERIMENT_INDEX.md")):
         missing.append("coder/EXPERIMENT_LEDGER.json or coder/EXPERIMENT_INDEX.md")
     ledger = read_json(base / "coder/EXPERIMENT_LEDGER.json")
+    terminal_program = terminal_nonpositive_program(base, ledger)
     if ledger and not ledger.get("best_run"):
-        warnings.append("coder/EXPERIMENT_LEDGER.json has no promoted best_run; analysis must stay pilot-only")
+        warnings.append(
+            "terminal program has no positive best run; preserve negative/inconclusive claim limits"
+            if terminal_program
+            else "coder/EXPERIMENT_LEDGER.json has no promoted best_run; analysis must stay pilot-only"
+        )
     if ledger and ledger.get("candidate_runs") and not ledger.get("track_best_runs"):
         warnings.append("candidate_supported runs require ablation/confirmation before strong improvement claims")
     if ledger and ledger.get("ready_for_analysis") is True:
         selection = read_json(base / "analyzer/BEST_RUN_SELECTION.json")
         score = read_json(base / "analyzer/SCORE_VERIFICATION.json")
         spec = read_json(base / "analyzer/SPEC_VIOLATION_AUDIT.json")
-        if selection.get("final_promotion_status") != "promoted" or not selection.get("selected_run_id"):
-            missing.append("analyzer/BEST_RUN_SELECTION.json final_promotion_status=promoted selected_run_id")
-        if score.get("status") != "passed":
-            missing.append("analyzer/SCORE_VERIFICATION.json status=passed")
-        if spec.get("status") != "passed":
-            missing.append("analyzer/SPEC_VIOLATION_AUDIT.json status=passed")
+        if terminal_program:
+            if selection.get("final_promotion_status") != "terminal_program_no_promoted_run" or selection.get("selected_run_id"):
+                missing.append("analyzer/BEST_RUN_SELECTION.json terminal_program_no_promoted_run with no selected_run_id")
+            if score.get("status") != "not_applicable_no_positive_claim":
+                missing.append("analyzer/SCORE_VERIFICATION.json status=not_applicable_no_positive_claim")
+            if spec.get("status") not in {"passed", "not_applicable_no_valid_result"}:
+                missing.append("analyzer/SPEC_VIOLATION_AUDIT.json passed or not_applicable_no_valid_result")
+        else:
+            if selection.get("final_promotion_status") != "promoted" or not selection.get("selected_run_id"):
+                missing.append("analyzer/BEST_RUN_SELECTION.json final_promotion_status=promoted selected_run_id")
+            if score.get("status") != "passed":
+                missing.append("analyzer/SCORE_VERIFICATION.json status=passed")
+            if spec.get("status") != "passed":
+                missing.append("analyzer/SPEC_VIOLATION_AUDIT.json status=passed")
     elif ledger:
         warnings.append("no promoted evidence; write pilot-only findings or return to experiment")
 

@@ -1,3 +1,3 @@
 display_name: "Experiment Plan"
-short_description: "Creates bounded experiment and DEHB plans."
-default_prompt: "Use $autoreskill-experiment-plan to convert a PaperNexus-backed idea into a bounded experiment plan with resource-constrained DEHB policy when needed."
+short_description: "Creates decision-bearing experiment portfolios."
+default_prompt: "Use $autoreskill-experiment-plan to convert selected causal tracks into locked, falsifiable, resource-bounded experiment rows with at most three total random seeds."

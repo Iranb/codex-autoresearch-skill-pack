@@ -117,12 +117,15 @@ def default_policy() -> dict[str, Any]:
         "allow_remote_experiment_launch": True,
         "allow_claim_downgrade": True,
         "allow_negative_result_route": True,
+        "allow_autonomous_candidate_replenishment": True,
         "max_literature_imports_per_round": 24,
         "max_provider_queries_per_round": 24,
         "max_live_discovery_questions": 6,
         "max_experiment_walltime_hours": 12,
         "max_experiment_gpu_hours": 24,
-        "max_repair_attempts_per_blocker": 5,
+        "max_repair_attempts_per_blocker": 2,
+        "max_operational_attempts_per_signature": 2,
+        "max_scientific_revisions_per_track": 2,
         "max_stage_iterations": 16,
         "async_poll_interval_minutes": 5,
         "experiment_monitor_default_interval_minutes": 30,
@@ -197,7 +200,16 @@ def initialize(args: argparse.Namespace) -> None:
     write_json(base / "goal_state.json", state)
     write_json(base / "autopilot_policy.json", default_policy())
     write_json(base / "capabilities.json", default_capabilities())
-    write_json(base / "retry_budget.json", {"schema_version": 1, "blockers": {}, "updated_at": now()})
+    write_json(
+        base / "retry_budget.json",
+        {
+            "schema_version": 2,
+            "blockers": {},
+            "operational_failures": {},
+            "scientific_revisions": {},
+            "updated_at": now(),
+        },
+    )
     write_json(base / "artifacts_index.json", {"schema_version": 1, "artifacts": [], "updated_at": now()})
     for rel in [
         "decision_log.jsonl",

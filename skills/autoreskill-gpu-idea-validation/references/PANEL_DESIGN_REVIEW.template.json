@@ -1,0 +1,15 @@
+{
+  "created_at": "replace-with-UTC-timestamp",
+  "external_campaign_ref": "ideation/NON_PAPERNEXUS_IDEA_CAMPAIGN.json",
+  "external_campaign_sha256": "replace-with-current-campaign-sha256",
+  "generation_context_id": "replace-with-generation-context-id",
+  "rationale": "Replace with an evidence-bound independent panel rationale.",
+  "reviewed_candidate_ids": [
+    "replace-with-admitted-candidate-id"
+  ],
+  "reviewer_context_id": "replace-with-independent-review-context-id",
+  "reviewer_role": "independent_panel",
+  "schema_version": 1,
+  "status": "draft",
+  "verdict": "revise"
+}

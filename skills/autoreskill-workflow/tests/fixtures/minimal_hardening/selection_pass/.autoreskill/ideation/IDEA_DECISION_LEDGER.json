@@ -1,0 +1,12 @@
+{
+  "selected_primary_idea_id": "idea-a",
+  "selected_track_id": "track-main",
+  "selection_fingerprint": "idea-a/track-main/v1",
+  "decisions": [
+    {
+      "idea_id": "idea-a",
+      "lifecycle_status": "selected_primary",
+      "selected_primary_ref": "idea-a/track-main/v1"
+    }
+  ]
+}

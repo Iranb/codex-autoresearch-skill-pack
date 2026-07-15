@@ -51,6 +51,10 @@ def present(value: Any) -> bool:
     return True
 
 
+def safe_component(value: str) -> bool:
+    return bool(value) and value not in {".", ".."} and Path(value).name == value
+
+
 def resolve_project_path(project: str, raw: Any) -> Path | None:
     if not present(raw):
         return None
@@ -255,18 +259,33 @@ def command_uses_baseline_or_adapter(
     return False, "launch command must call locked baseline entrypoint or a declared adapter that calls it"
 
 
-def lint(project: str) -> dict[str, Any]:
+def lint(project: str, track_id: str | None = None) -> dict[str, Any]:
     base = ar(project)
-    review = read_json(base / "planner/EXPERIMENT_REVIEW_PACKET.json", {}) or {}
+    if track_id and not safe_component(track_id.strip()):
+        return {
+            "complete": False,
+            "status": "incomplete",
+            "missing": ["--track-id must be one safe path component"],
+            "warnings": [],
+        }
+    track_id = track_id.strip() if track_id else None
+    review_ref = (
+        f"planner/tracks/{track_id}/EXPERIMENT_REVIEW_PACKET.json"
+        if track_id
+        else "planner/EXPERIMENT_REVIEW_PACKET.json"
+    )
+    review = read_json(base / review_ref, {}) or {}
     baseline_code = review.get("baseline_code") if isinstance(review.get("baseline_code"), dict) else {}
-    current_track_id = str(review.get("track_id") or "").strip()
+    current_track_id = str(review.get("track_id") or track_id or "").strip()
     current_idea_id = str(review.get("selected_idea_id") or review.get("selected_idea_fragment_id") or "").strip()
     missing: list[str] = []
     warnings: list[str] = []
 
     if not baseline_code:
-        missing.append("planner/EXPERIMENT_REVIEW_PACKET.json baseline_code")
+        missing.append(f"{review_ref} baseline_code")
         baseline_code = {}
+    if track_id and current_track_id != track_id:
+        missing.append(f"{review_ref} track_id must match --track-id={track_id}")
     validate_clone(project, baseline_code, missing, warnings)
 
     manifests = sorted(base.glob("coder/experiments/**/EXPERIMENT_MANIFEST.json"))
@@ -278,9 +297,13 @@ def lint(project: str) -> dict[str, Any]:
         manifest_track_id = str(manifest.get("track_id") or "").strip()
         manifest_idea_id = str(manifest.get("selected_idea_id") or "").strip()
         if current_track_id or current_idea_id:
+            # A v2 child track may share its idea id with historical parent tracks.
+            # Once a track is selected, scope by its exact identity; use the idea id
+            # only as a legacy fallback when the review packet has no track id.
             is_current = (
-                bool(current_track_id and manifest_track_id == current_track_id)
-                or bool(current_idea_id and manifest_idea_id == current_idea_id)
+                manifest_track_id == current_track_id
+                if current_track_id
+                else manifest_idea_id == current_idea_id
             )
             if not is_current:
                 warnings.append(f"{rel(base, manifest_path)} skipped: historical manifest not selected by current review packet")
@@ -294,6 +317,27 @@ def lint(project: str) -> dict[str, Any]:
             missing.append(f"{rel(base, manifest_path)} baseline_code.code_id must match review packet")
         if manifest_baseline.get("revision") != baseline_code.get("revision"):
             missing.append(f"{rel(base, manifest_path)} baseline_code.revision must match review packet")
+        for field in [
+            "track_role",
+            "evidence_tier_ceiling",
+            "selection_fingerprint",
+            "review_packet_sha256",
+            "project_execution_passport_ref",
+            "project_execution_passport_index_sha256",
+            "execution_profile_id",
+            "execution_profile_sha256",
+            "innovation_delta_sha256",
+            "resolved_execution_contract_projection_sha256",
+        ]:
+            expected = review.get("semantic_sha256") if field == "review_packet_sha256" else review.get(field)
+            if present(expected) and manifest.get(field) != expected:
+                missing.append(f"{rel(base, manifest_path)} {field} must match review packet")
+        role = str(review.get("track_role") or "").strip().lower()
+        if role in {"alternate", "risk_repair"} and (
+            manifest.get("evidence_tier") != "pilot_only"
+            or manifest.get("evidence_tier_ceiling") != "pilot_only"
+        ):
+            missing.append(f"{rel(base, manifest_path)} non-primary evidence must remain pilot_only")
 
         validate_patch_proof(project, base, exp_dir, manifest_path, manifest, audit, baseline_code, missing, warnings)
         ok, reason = command_uses_baseline_or_adapter(manifest, baseline_code)
@@ -317,8 +361,9 @@ def lint(project: str) -> dict[str, Any]:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--project", required=True)
+    parser.add_argument("--track-id")
     args = parser.parse_args()
-    out = lint(args.project)
+    out = lint(args.project, args.track_id)
     print(json.dumps(out, indent=2, ensure_ascii=False))
     raise SystemExit(0 if out["complete"] else 1)
 

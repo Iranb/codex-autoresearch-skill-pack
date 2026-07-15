@@ -1,0 +1,35 @@
+{
+  "status": "passed",
+  "disaggregated_effects": {
+    "claim_status": "passed",
+    "rows": [
+      {
+        "slice": "critical_target_domain",
+        "critical": true,
+        "direction": "regressed",
+        "evidence_ref": "coder/experiments/run-a/RESULT_SUMMARY.json",
+        "claim_disposition": "promoted"
+      }
+    ]
+  },
+  "mechanism_support": {
+    "mechanism_claim": "The intervention reduces target-domain drift.",
+    "status": "supported",
+    "evidence_ref": "analyzer/ablation_drift.md",
+    "allowed_wording": "we show"
+  },
+  "validation_to_test_transfer": {
+    "validation_selection_ref": "val-split",
+    "target_or_test_ref": "test-split",
+    "transfer_status": "passed",
+    "claim_status": "passed"
+  },
+  "numeric_measurement_registry": {
+    "metric_units": "accuracy percentage points",
+    "parser_source": "scripts/parse_metrics.py",
+    "baseline_source": "paper_reported_baseline",
+    "measurement_refs": [
+      "coder/experiments/run-a/metrics.json"
+    ]
+  }
+}

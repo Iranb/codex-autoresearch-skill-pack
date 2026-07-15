@@ -1,4 +1,4 @@
 interface:
   display_name: "AutoResearch Workflow"
-  short_description: "Runs AutoResearch workflows and gates."
-  default_prompt: "Use $autoreskill-workflow to run AutoResearch, plan resource-constrained DEHB experiments, audit writing, or run paper-integrity forensics."
+  short_description: "Runs evidence-bound scientific decision loops."
+  default_prompt: "Use $autoreskill-workflow to advance the next decision-changing research action, including bounded experiments, typed outcomes, recovery, analysis, and integrity gates."

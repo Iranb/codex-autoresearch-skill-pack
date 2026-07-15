@@ -1,3 +1,3 @@
 display_name: "Run Experiment"
-short_description: "Launches and reconciles bounded HPO runs."
-default_prompt: "Use $autoreskill-run-experiment to launch or reconcile a dry-run-passed experiment, including resource-constrained DEHB/HPO trials."
+short_description: "Claims, runs, reconciles, and types experiment outcomes."
+default_prompt: "Use $autoreskill-run-experiment to atomically claim eligible rows, use independent GPUs, reconcile canonical evidence, and record typed outcomes without turning valid negatives into code repairs."

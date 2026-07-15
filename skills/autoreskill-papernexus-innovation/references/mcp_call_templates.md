@@ -150,7 +150,7 @@ Build and capture the innovation slot map, then gate idea generation:
 
 ```bash
 python scripts/papernexus_artifact_capture.py --project <project-root> --kind innovation_slot_map --input <innovation-slot-map.json> --stage ideation --source papernexus-remote.agent_materials
-python ../autoreskill-ideation-panel/scripts/pre_idea_evidence_gate_lint.py --project <project-root> --write-gate
+python "${CODEX_HOME:-$HOME/.codex}/skills/autoreskill-ideation-panel/scripts/pre_idea_evidence_gate_lint.py" --project <project-root> --write-gate
 ```
 
 When `proposal_graph_session` is available, call it after the pre-idea gate passes and before writing `EXPERIMENT_IDEA_POOL.json`. Always supply an `outputDir` under the AutoResearch project so the proposal bundle is replayable:

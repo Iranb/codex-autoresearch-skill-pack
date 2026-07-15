@@ -1,0 +1,13 @@
+{
+  "selected_idea_id": "idea-a",
+  "selection_fingerprint": "idea-a/track-main/v1",
+  "tracks": [
+    {
+      "idea_id": "idea-a",
+      "track_id": "track-main",
+      "track_role": "primary",
+      "launch_status": "ready",
+      "selection_fingerprint": "idea-a/track-main/v1"
+    }
+  ]
+}

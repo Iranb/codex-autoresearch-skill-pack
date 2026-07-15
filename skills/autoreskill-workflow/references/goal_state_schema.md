@@ -63,8 +63,23 @@ matches, the entry/resume loop should avoid rewriting `AGENTS.md`.
 {
   "async_poll_interval_minutes": 5,
   "experiment_monitor_default_interval_minutes": 30,
-  "repair_retry_interval_minutes": 5
+  "repair_retry_interval_minutes": 5,
+  "max_operational_attempts_per_signature": 2,
+  "max_scientific_revisions_per_track": 2,
+  "allow_autonomous_candidate_replenishment": true
 }
 ```
+
+Operational attempts are keyed by a stable failure signature and do not change
+hypothesis belief. Scientific revisions are keyed by track and consume a separate
+budget only after valid evidence changes the hypothesis. A valid negative result
+is never counted as an operational repair.
+
+`allow_autonomous_candidate_replenishment` permits the bounded local recovery
+route; it does not choose or increase a transaction cap. The active program
+contract owns the allocation, and exceptional replacement allocations require a
+matching direct-user intervention. Legacy projects missing `goal_type` or
+`claim_mode` use the documented paper-producing defaults with a migration
+warning; an explicit invalid value still fails closed.
 
 For PaperNexus discovery waits, `async_poll_interval_minutes` is the default heartbeat interval the parent Codex agent should use after `goal_tick.py` returns a `wakeup` recommendation. Experiment runtime waits use `experiment_monitor_default_interval_minutes` only as a fallback when no stage-aware ETA artifact exists; live experiment monitor artifacts should still set the heartbeat from progress, ETA, or the next stage boundary and are not capped by this fallback. For PaperNexus graph import waits, `goal_tick.py` may override this default from `papernexus/IMPORT_WORKFLOW_STATUS.json` using queue depth, active fast-commit progress, authoritative-sync state, and terminal completion.

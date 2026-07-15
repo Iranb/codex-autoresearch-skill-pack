@@ -104,6 +104,38 @@ def lint(project: str) -> dict[str, Any]:
             continue
         if manifest.get("fixture") is True:
             missing.append(f"{label} fixture must be false for code readiness")
+        review_ref = str(manifest.get("review_packet_ref") or "").strip()
+        review = read_json(base / review_ref, {}) if review_ref else {}
+        passport_ref = str(
+            manifest.get("project_execution_passport_ref")
+            or (review.get("project_execution_passport_ref") if isinstance(review, dict) else "")
+            or ""
+        ).strip()
+        if passport_ref:
+            passport = read_json(base / passport_ref, {}) or {}
+            if not passport:
+                missing.append(f"{label} project execution passport missing")
+            elif str(manifest.get("project_execution_passport_index_sha256") or "") != str(
+                passport.get("index_semantic_sha256") or ""
+            ):
+                missing.append(f"{label} project execution passport index drift")
+            else:
+                profile = next(
+                    (
+                        item
+                        for item in passport.get("execution_profiles", [])
+                        if isinstance(item, dict)
+                        and str(item.get("profile_id") or "") == str(manifest.get("execution_profile_id") or "")
+                    ),
+                    None,
+                )
+                if profile is None or str(profile.get("execution_profile_sha256") or "") != str(
+                    manifest.get("execution_profile_sha256") or ""
+                ):
+                    missing.append(f"{label} execution profile drift")
+            for field in ["innovation_delta_sha256", "resolved_execution_contract_projection_sha256"]:
+                if isinstance(review, dict) and present(review.get(field)) and manifest.get(field) != review.get(field):
+                    missing.append(f"{label} {field} drift")
         kind = proof_kind(manifest, {})
         if kind in FIXTURE_MARKERS:
             missing.append(f"{label} dry_run_kind/proof_kind cannot be fixture-only")

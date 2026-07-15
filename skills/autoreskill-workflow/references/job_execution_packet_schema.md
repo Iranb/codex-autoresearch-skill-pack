@@ -171,12 +171,14 @@ python <skill-root>/scripts/goal_job_reconcile.py --project <project-root> --sta
 
 ## Special Packet Notes
 
-`repair_failed_experiment` is not permission to blindly rerun the last command.
-The role pass must read the experiment ledger and selected idea/track lineage,
-write a failure analysis, and choose one route: same-branch repair, track switch,
-idea or innovation rebuild, downgrade/negative-evidence path, or hard stop. After
-two same-idea repairs without promoted improvement, route back to planning,
-idea_gate, or ideation instead of launching another same-idea run.
+Legacy `repair_failed_experiment` packets are adjudication requests, not
+permission to rerun. Read the locked hypothesis, runtime record, canonical
+result, and validity evidence; write `SCIENTIFIC_OUTCOME.json` first. Only a
+typed infrastructure or implementation defect enters bounded operational
+repair. Protocol-invalid evidence is quarantined, while valid negative or
+inconclusive evidence updates the track through `research_decision.py` and its
+separate scientific-revision budget. A missing gain is never, by itself, a code
+failure.
 
 If a packet writes user-facing innovation story files, apply
 `innovation_story_contract.md`. Story files are derived views and do not replace

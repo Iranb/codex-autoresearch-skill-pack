@@ -7,7 +7,8 @@ metadata:
 
 # AutoResearch Autopilot Controller
 
-This skill turns hard gates into bounded automatic actions. It does not weaken evidence standards; it prevents silent stalls.
+This skill turns typed evidence into bounded next actions. It never treats agent
+activity, retries, or GPU use as scientific progress.
 
 ## Blocker Classes
 
@@ -20,11 +21,17 @@ This skill turns hard gates into bounded automatic actions. It does not weaken e
   waits.
 - `hard_stop`: no PaperNexus and no cached evidence, budget exceeded, license blocked, unsafe experiment, no viable claim.
 
+Scientific outcome classes are separate from these workflow blocker classes.
+Infrastructure and implementation failures use operational repair with
+`belief_effect=none`; protocol-invalid evidence is quarantined; valid negative,
+inconclusive, cross-dataset, and positive-candidate outcomes follow
+`autoreskill-workflow/references/scientific_decision_loop.md`.
+
 ## Scripts
 
 ```bash
-python scripts/blocker_triage.py --project <project-root> --stage ideation --reason negative_evidence_missing
-python scripts/retry_scheduler.py add --project <project-root> --kind repair --stage ideation --action run_negative_evidence_pack
+python scripts/blocker_triage.py --project <project-root> --stage experiment --reason "<reason>" --failure-class <class> --failure-signature <signature> --repair-kind operational
+python scripts/retry_scheduler.py add --project <project-root> --kind repair --stage experiment --action <typed-action> --failure-class <class> --failure-signature <signature> --repair-kind operational
 python scripts/retry_scheduler.py list --project <project-root>
 python scripts/policy_lint.py --project <project-root> --request remote_experiment --gpu-hours 4 --walltime-hours 2
 python scripts/blocker_simulation.py --project <project-root>
@@ -35,6 +42,12 @@ python scripts/blocker_simulation.py --project <project-root>
 - Every `/goal tick` must end with an artifact, repair job, async poll, stage transition, claim downgrade, rollback, track switch, negative-result route, or hard-stop report.
 - `full_auto_bounded` may run bounded read-only provider/live/literature discovery, open-access imports, and budgeted experiments.
 - It may not fabricate citations, invent results, bypass paywalls, ignore licenses, or exceed budget.
-- After `max_repair_attempts_per_blocker`, choose downgrade, rollback, switch track, negative-result route, or hard stop.
+- Retry the same operational failure signature at most twice by default. Scientific
+  revisions use a separate per-track budget of two; an inconclusive result gets
+  at most one discriminator unless a recorded policy explicitly lowers the claim
+  instead.
+- Do not enqueue implementation repair for `valid_negative` without separate
+  implementation-defect evidence. After budget exhaustion choose scope, pivot,
+  retire, conclude, downgrade, rollback, or hard stop.
 
 Read the references for policy, repair matrix, fallback recipes, and retry budget details.

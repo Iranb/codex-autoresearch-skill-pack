@@ -129,7 +129,7 @@ Write structured artifacts under `.autoreskill/` even when the user also asks fo
 ## Stage Integration
 
 - `literature_review`: use the candidate ledger to improve SOTA/source coverage. Do not let repository validity substitute for citation closure.
-- `ideation`: use `CODE_MECHANISM_MAP.json` and `INNOVATION_MIGRATION_MATRIX.json` as mechanism-transfer inputs. Ideas still need a three-or-more innovation bundle and PaperNexus/literature grounding.
+- `ideation`: use `CODE_MECHANISM_MAP.json` and `INNOVATION_MIGRATION_MATRIX.json` as mechanism-transfer inputs. Each idea still needs one defensible core scientific contribution, a falsifiable causal contract, and PaperNexus/literature grounding; code availability alone is not novelty.
 - `idea_gate`: select only migration rows with explicit target adaptation, novelty risk, evidence boundary, and validation route.
 - `experiment_plan`: carry source repo refs, active-code-path evidence, protocol deltas, and falsifiers into `INNOVATION_PACKET.json` and `TRACK_PLAN_MATRIX.json`.
 - `code`: implement the selected plan under the normal real-code readiness contract. The source repository does not satisfy target implementation readiness by itself.

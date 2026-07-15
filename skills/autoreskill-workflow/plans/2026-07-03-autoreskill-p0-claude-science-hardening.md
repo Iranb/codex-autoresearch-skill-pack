@@ -4,17 +4,17 @@ Created: 2026-07-03 Asia/Shanghai
 
 Updated: 2026-07-05 Asia/Shanghai, after second first-principles overdesign review
 
-Target repository or skill root: `/Users/iranb/.codex/skills/autoreskill-workflow`
+Target repository or skill root: `<runtime-skill-root>/autoreskill-workflow`
 
 Target branch/worktree: local Codex skill directory; no git branch assumption.
 
-Owner: Codex, following `/Users/iranb/.codex/skills/execplan-builder/SKILL.md`.
+Owner: Codex, following `<runtime-skill-root>/execplan-builder/SKILL.md`.
 
 ## Living Document Policy
 
 This ExecPlan is a living document. While implementing it, update `Progress`, `Surprises & Discoveries`, `Decision Log`, and `Outcomes & Retrospective` in place. Do not treat this file as a static proposal after the first edit. If implementation discovers that an optimization is too broad, record the finding here and narrow the plan before editing runtime code.
 
-No `PLANS.md`, `.agent/PLANS.md`, or existing plan directory was found in `/Users/iranb/.codex/skills/autoreskill-workflow` before this file was created. If a repository-level `PLANS.md` is added later, reconcile this plan with it before continuing.
+No `PLANS.md`, `.agent/PLANS.md`, or existing plan directory was found in `<runtime-skill-root>/autoreskill-workflow` before this file was created. If a repository-level `PLANS.md` is added later, reconcile this plan with it before continuing.
 
 ## Purpose / Big Picture
 
@@ -36,21 +36,21 @@ After this plan is complete, a user should be able to run the usual autoreskill 
 
 ## Related Docs And Evidence
 
-- `/Users/iranb/.codex/skills/execplan-builder/SKILL.md`: defines when to build an ExecPlan, requires a self-contained living plan, and requires a rubric-based review before finalizing.
-- `/Users/iranb/.codex/skills/execplan-builder/references/execplan-content-contract.md`: requires explicit current state, plan of work, concrete validation, recovery, risk, and self-audit sections.
-- `/Users/iranb/.codex/skills/autoreskill-workflow/SKILL.md`: current top-level conductor instructions; already defines kernel invariants, loop harness policy, and stage/evidence contracts.
-- `/Users/iranb/.codex/skills/autoreskill-workflow/references/stage_contracts.md`: current stage output contracts; `code` and `experiment` already require `EXPERIMENT_MANIFEST`, `REMOTE_RUN`, `EXPERIMENT_LEDGER`, summaries, and metric trajectories.
-- `/Users/iranb/.codex/skills/autoreskill-workflow/references/stage_skill_matrix.md`: maps stages to skill owners and write scopes; `code` and `experiment` already write under `.autoreskill/coder/`.
-- `/Users/iranb/.codex/skills/autoreskill-workflow/references/job_execution_packet_schema.md`: defines job packets, allowed writes, and experiment repair evidence; already references `REMOTE_RUN`, synced logs, and experiment ledgers.
-- `/Users/iranb/.codex/skills/autoreskill-workflow/references/role_roster.md`: current role roster is write-scope oriented; it is not a connector permission system and should not become one in this P0.
-- `/Users/iranb/.codex/skills/autoreskill-workflow/references/source_traceability.md`: maps stage artifacts to OpenClaw-style traceability; this plan extends traceability for runtime and artifact lineage without replacing it.
-- `/Users/iranb/.codex/skills/autoreskill-workflow/references/command_surface.md`: lists the command surface that must remain stable after changes.
-- `/Users/iranb/.codex/skills/autoreskill-workflow/scripts/contract_lint.py`: current stage gate authority; all new hard checks should live here or be called from here.
-- `/Users/iranb/.codex/skills/autoreskill-workflow/scripts/goal_tick.py`: renders job packets and stage execution specs; this is where new P0 expected outputs and constraints should be introduced.
-- `/Users/iranb/.codex/skills/autoreskill-workflow/scripts/goal_evidence.py`: exports `evidence_cart.jsonl` and `artifacts_index.json`; this is the lowest-risk place to surface lineage summaries.
-- `/Users/iranb/.codex/skills/autoreskill-workflow/scripts/goal_fixture.py`: creates testable fixture projects; it should be extended instead of hand-crafting opaque test projects.
-- `/Users/iranb/.codex/skills/autoreskill-workflow/tests/run_minimal_hardening_fixtures.py`: current minimal hardening regression suite.
-- `/Users/iranb/.codex/skills/autoreskill-workflow/tests/run_paper_forensics_fixtures.py`: current paper forensics regression suite.
+- `<runtime-skill-root>/execplan-builder/SKILL.md`: defines when to build an ExecPlan, requires a self-contained living plan, and requires a rubric-based review before finalizing.
+- `<runtime-skill-root>/execplan-builder/references/execplan-content-contract.md`: requires explicit current state, plan of work, concrete validation, recovery, risk, and self-audit sections.
+- `<runtime-skill-root>/autoreskill-workflow/SKILL.md`: current top-level conductor instructions; already defines kernel invariants, loop harness policy, and stage/evidence contracts.
+- `<runtime-skill-root>/autoreskill-workflow/references/stage_contracts.md`: current stage output contracts; `code` and `experiment` already require `EXPERIMENT_MANIFEST`, `REMOTE_RUN`, `EXPERIMENT_LEDGER`, summaries, and metric trajectories.
+- `<runtime-skill-root>/autoreskill-workflow/references/stage_skill_matrix.md`: maps stages to skill owners and write scopes; `code` and `experiment` already write under `.autoreskill/coder/`.
+- `<runtime-skill-root>/autoreskill-workflow/references/job_execution_packet_schema.md`: defines job packets, allowed writes, and experiment repair evidence; already references `REMOTE_RUN`, synced logs, and experiment ledgers.
+- `<runtime-skill-root>/autoreskill-workflow/references/role_roster.md`: current role roster is write-scope oriented; it is not a connector permission system and should not become one in this P0.
+- `<runtime-skill-root>/autoreskill-workflow/references/source_traceability.md`: maps stage artifacts to OpenClaw-style traceability; this plan extends traceability for runtime and artifact lineage without replacing it.
+- `<runtime-skill-root>/autoreskill-workflow/references/command_surface.md`: lists the command surface that must remain stable after changes.
+- `<runtime-skill-root>/autoreskill-workflow/scripts/contract_lint.py`: current stage gate authority; all new hard checks should live here or be called from here.
+- `<runtime-skill-root>/autoreskill-workflow/scripts/goal_tick.py`: renders job packets and stage execution specs; this is where new P0 expected outputs and constraints should be introduced.
+- `<runtime-skill-root>/autoreskill-workflow/scripts/goal_evidence.py`: exports `evidence_cart.jsonl` and `artifacts_index.json`; this is the lowest-risk place to surface lineage summaries.
+- `<runtime-skill-root>/autoreskill-workflow/scripts/goal_fixture.py`: creates testable fixture projects; it should be extended instead of hand-crafting opaque test projects.
+- `<runtime-skill-root>/autoreskill-workflow/tests/run_minimal_hardening_fixtures.py`: current minimal hardening regression suite.
+- `<runtime-skill-root>/autoreskill-workflow/tests/run_paper_forensics_fixtures.py`: current paper forensics regression suite.
 
 ## Progress
 
@@ -147,17 +147,17 @@ Implement P0 hardening for:
 
 The intended changed files are:
 
-- `/Users/iranb/.codex/skills/autoreskill-workflow/SKILL.md`
-- `/Users/iranb/.codex/skills/autoreskill-workflow/references/stage_contracts.md`
-- `/Users/iranb/.codex/skills/autoreskill-workflow/references/job_execution_packet_schema.md`
-- `/Users/iranb/.codex/skills/autoreskill-workflow/references/source_traceability.md`
-- `/Users/iranb/.codex/skills/autoreskill-workflow/references/command_surface.md` only if new commands are added; the preferred outcome is no new commands.
-- New reference file: `/Users/iranb/.codex/skills/autoreskill-workflow/references/runtime_lineage_contract.md`
-- `/Users/iranb/.codex/skills/autoreskill-workflow/scripts/contract_lint.py`
-- `/Users/iranb/.codex/skills/autoreskill-workflow/scripts/goal_tick.py`
-- `/Users/iranb/.codex/skills/autoreskill-workflow/scripts/goal_evidence.py`
-- `/Users/iranb/.codex/skills/autoreskill-workflow/scripts/goal_fixture.py`
-- Existing tests under `/Users/iranb/.codex/skills/autoreskill-workflow/tests/`, plus one optional new focused test if needed.
+- `<runtime-skill-root>/autoreskill-workflow/SKILL.md`
+- `<runtime-skill-root>/autoreskill-workflow/references/stage_contracts.md`
+- `<runtime-skill-root>/autoreskill-workflow/references/job_execution_packet_schema.md`
+- `<runtime-skill-root>/autoreskill-workflow/references/source_traceability.md`
+- `<runtime-skill-root>/autoreskill-workflow/references/command_surface.md` only if new commands are added; the preferred outcome is no new commands.
+- New reference file: `<runtime-skill-root>/autoreskill-workflow/references/runtime_lineage_contract.md`
+- `<runtime-skill-root>/autoreskill-workflow/scripts/contract_lint.py`
+- `<runtime-skill-root>/autoreskill-workflow/scripts/goal_tick.py`
+- `<runtime-skill-root>/autoreskill-workflow/scripts/goal_evidence.py`
+- `<runtime-skill-root>/autoreskill-workflow/scripts/goal_fixture.py`
+- Existing tests under `<runtime-skill-root>/autoreskill-workflow/tests/`, plus one optional new focused test if needed.
 
 ## Non-Goals
 
@@ -205,7 +205,7 @@ The following authority model prevents overdesign:
 
 Read the exact current files before editing:
 
-    cd /Users/iranb/.codex/skills/autoreskill-workflow
+    cd <runtime-skill-root>/autoreskill-workflow
     rg -n "ENV_SPEC|ENV_VALIDATION|COMPUTE_PROVIDER|harvest_spec|artifacts_index|REMOTE_RUN|EXPERIMENT_LEDGER|EXPERIMENT_MANIFEST" SKILL.md references scripts tests
 
 Expected result:
@@ -215,7 +215,7 @@ Expected result:
 
 ### Slice 1: Add Runtime Lineage Reference Contract
 
-Create `/Users/iranb/.codex/skills/autoreskill-workflow/references/runtime_lineage_contract.md`.
+Create `<runtime-skill-root>/autoreskill-workflow/references/runtime_lineage_contract.md`.
 
 It should define an inline-first contract:
 
@@ -389,7 +389,7 @@ Avoid updating `references/command_surface.md` unless a new command is unavoidab
 
 ### Slice 3: Extend Job Packet Output Specs
 
-Modify `/Users/iranb/.codex/skills/autoreskill-workflow/scripts/goal_tick.py`.
+Modify `<runtime-skill-root>/autoreskill-workflow/scripts/goal_tick.py`.
 
 For the `code` stage execution spec, add expected output language:
 
@@ -406,7 +406,7 @@ Do not change job packet routing or introduce a new queue.
 
 ### Slice 4: Add Focused Contract Lint
 
-Modify `/Users/iranb/.codex/skills/autoreskill-workflow/scripts/contract_lint.py`.
+Modify `<runtime-skill-root>/autoreskill-workflow/scripts/contract_lint.py`.
 
 Add one public helper with a name close to:
 
@@ -432,7 +432,7 @@ Do not make every artifact row lineage-complete. That would overfit the schema a
 
 ### Slice 5: Surface Lineage In Evidence Export
 
-Modify `/Users/iranb/.codex/skills/autoreskill-workflow/scripts/goal_evidence.py`.
+Modify `<runtime-skill-root>/autoreskill-workflow/scripts/goal_evidence.py`.
 
 Expected behavior:
 
@@ -443,7 +443,7 @@ Expected behavior:
 
 ### Slice 6: Extend Fixtures
 
-Modify `/Users/iranb/.codex/skills/autoreskill-workflow/scripts/goal_fixture.py`.
+Modify `<runtime-skill-root>/autoreskill-workflow/scripts/goal_fixture.py`.
 
 When creating a force-ready or experiment-ready fixture, write synthetic examples:
 
@@ -476,14 +476,14 @@ Required checks:
 
 Candidate commands:
 
-    cd /Users/iranb/.codex/skills/autoreskill-workflow
+    cd <runtime-skill-root>/autoreskill-workflow
     python -m py_compile scripts/*.py tests/*.py
     python tests/run_minimal_hardening_fixtures.py
     python tests/run_paper_forensics_fixtures.py
 
 For focused manual validation:
 
-    cd /Users/iranb/.codex/skills/autoreskill-workflow
+    cd <runtime-skill-root>/autoreskill-workflow
     tmpdir=$(mktemp -d)
     python scripts/goal_fixture.py --project "$tmpdir/project" --force-ready
     python scripts/contract_lint.py --project "$tmpdir/project" --stage code --json
@@ -580,8 +580,8 @@ Rollback: Remove sidecar fixture expectations and keep only inline runtime evide
 
 ## Artifacts and Notes
 
-- `/Users/iranb/.codex/skills/autoreskill-workflow/plans/2026-07-03-autoreskill-p0-claude-science-hardening.md`: this living plan; it records P0 scope, overdesign review, implementation slices, validation, and rollback.
-- Planned `/Users/iranb/.codex/skills/autoreskill-workflow/references/runtime_lineage_contract.md`: compact runtime-lineage contract. It should prove schema shape and compatibility rules, not become a second workflow manual.
+- `<runtime-skill-root>/autoreskill-workflow/plans/2026-07-03-autoreskill-p0-claude-science-hardening.md`: this living plan; it records P0 scope, overdesign review, implementation slices, validation, and rollback.
+- Planned `<runtime-skill-root>/autoreskill-workflow/references/runtime_lineage_contract.md`: compact runtime-lineage contract. It should prove schema shape and compatibility rules, not become a second workflow manual.
 - Planned inline `runtime_env`: per-track or per-run runtime environment evidence, usually embedded in `EXPERIMENT_MANIFEST.json` or `REMOTE_RUN.json`.
 - Planned inline `runtime_validation`: validation evidence proving the environment is usable for launch-ready or promoted experiment claims.
 - Optional planned `.autoreskill/coder/ENV_SPEC.json` and `.autoreskill/coder/ENV_VALIDATION.json`: sidecar representations for shared or long runtime evidence.

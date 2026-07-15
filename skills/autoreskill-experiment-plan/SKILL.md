@@ -1,20 +1,55 @@
 ---
 name: autoreskill-experiment-plan
-description: OpenClaw-aligned experiment planning skill for portable AutoResearch. Use to convert PaperNexus-backed ideas and proposal_graph_session full-paper idea bundles into INNOVATION_PACKET.json, EXPERIMENT_REVIEW_PACKET.json, baseline-code-first one-variable experiment plans, resource-constrained DEHB/HPO policies for PARAM mechanisms, local-vs-AutoDL GPU backend decisions, dataset/code path mappings, compute budgets, falsifiers, and prelaunch gates.
+description: OpenClaw-aligned experiment planning skill for portable AutoResearch. Use to convert PaperNexus-backed or committed external-material ideas into INNOVATION_PACKET.json, EXPERIMENT_REVIEW_PACKET.json, baseline-code-first one-variable experiment plans, resource-constrained DEHB/HPO policies for PARAM mechanisms, compute-backend and execution-route decisions, dataset/code path mappings, compute budgets, falsifiers, and prelaunch gates.
 metadata:
   short-description: Plan baseline-first experiments
 ---
 
 # Experiment Plan
 
-This skill turns a selected ideation idea into an executable experiment plan. Ideation may select a promising brainstormed idea with evidence debt; this skill is where novelty, baseline, protocol, PaperNexus support, and falsifier gaps must be closed before launch.
+This skill turns the one selected paper primary and any explicitly admitted
+alternate/risk-repair tracks into separate executable experiment plans. Exactly
+one track remains the paper primary; at most three non-primary tracks may receive
+bounded `pilot_only` plans. This stage closes novelty, baseline, protocol, source
+support, and falsifier gaps per track before launch. A missing
+`evidence_source_mode` remains the legacy PaperNexus route. `external_material`
+consumes the committed non-PaperNexus campaign/lint hashes and a passed
+`ideation/PANEL_DESIGN_REVIEW.json`; it never fabricates PaperNexus provenance.
 
 When the selected idea was generated from a committed PaperNexus `proposal_graph_session`, consume that bundle as the strongest upstream idea artifact. It can supply the hypothesis, mechanism, method sketch, novelty contrast, evaluation protocol, risk map, falsification route, must-cite evidence, controller trace, and proposal markdown, but it does not replace baseline-code-first planning or the launch gates below.
 
 ## Direct Authority
 
-`orchestrator/INNOVATION_PACKET.json` is the stage authority. `planner/EXPERIMENT_REVIEW_PACKET.json` is the prelaunch gate.
-`orchestrator/TRACK_PLAN_MATRIX.json` is the bounded explore/exploit handoff from `idea_gate`; it converts one primary plus alternate `IDEA_TRACK_SEEDS.json` rows into `ready`, `blocked`, `diagnostic_only`, or `parked` experiment tracks. A seed row or matrix row is not launch approval.
+`orchestrator/tracks/<track-id>/INNOVATION_PACKET.json` and
+`planner/tracks/<track-id>/EXPERIMENT_REVIEW_PACKET.json` are the per-track plan
+and prelaunch authorities. The top-level packet pair remains a primary-only
+compatibility projection. `orchestrator/TRACK_PLAN_MATRIX.json` indexes current
+track readiness; it does not replace the packets. A seed, packet, or matrix row
+is not launch approval: the project queue still owns launch readiness and row
+leases.
+
+Shared baseline/code/dataset/metric/runtime/path invariants belong in
+`.autoreskill/resources/PROJECT_EXECUTION_PASSPORT.json`, not copied as mutable
+track authority. Each packet binds the passport index, one
+`execution_profile_sha256`, an `innovation_delta_sha256`, and a resolved
+compatibility projection. Changing an unrelated passport component must not
+invalidate a track whose profile does not require it.
+
+For an enforced `cross_dataset_method`, each real `method_candidate` also binds
+the live `PROGRAM_CLAIM_CONTRACT.json`, one dataset-group plan, and one
+load-bearing `parameter_transfer_contract`. Materialization derives one stable
+`method_formula`/`method_formula_sha256` and a `parameter_role_inventory` that
+marks baseline protocol fields as dataset-adaptable and identifies exactly one
+innovation-load-bearing field. The latter must be the parameter named by the
+transfer contract. Classify the transfer as
+`shared_absolute`, `shared_normalized`, or `dataset_calibrated`; shared modes
+freeze one common human-selected setting, while only a declared normalized
+formula may realize different raw values. Normally preregister 2-3 values per
+required dataset under one fixed scout seed. Materialize those probes first,
+commit the deterministic selection through `research_decision.py`, then project
+`FROZEN_PARAMETER_PROFILE.json`. That profile owns exact downstream config only;
+the idea ledger remains the scientific-decision authority. Stage-2 method
+screens and Stages 3-6 must bind the frozen profile hash.
 
 This stage must also produce the full user-facing innovation story directory:
 
@@ -27,23 +62,44 @@ This stage must also produce the full user-facing innovation story directory:
 
 These files are derived explanatory artifacts for the user, not launch authorities. They must translate the selected idea into a coherent paper story and method-formation narrative: the current field supplies the problem, baseline/protocol, and reviewer-risk anchor; the main method mechanism should remain grounded in near-neighbor, far-neighbor, proposal-graph, external-domain, or cross-lane transfer evidence. Do not reduce them to contribution bullets or module inventories.
 
-The selected idea must remain a paper-level bundle, not collapse into one module. `INNOVATION_PACKET.json` must preserve `paper_innovation_bundle` with at least three mutually necessary innovation points: problem/protocol/evaluation, method/mechanism, and training/integration/analysis/validation. It must also preserve `paper_storyline` with the thesis, opening tension, hidden cause, method-as-resolution, proof ladder, reviewer defense, and 5-7 step narrative spine. If planning cannot preserve this bundle, return to `idea_gate` for innovation repair instead of launching a weak single-point experiment.
+The selected idea must retain one defensible `core_scientific_contribution`, not
+collapse into a metric target or module rename. `supporting_contributions` are
+optional and count only when each records the counterfactual central claim that
+fails without it; validation, analysis, and engineering remain evidence roles.
+The selected primary must also preserve a complete `paper_storyline`. If the
+core contribution, causal hypothesis, or story cannot survive planning scrutiny,
+return to `idea_gate` instead of inflating the contribution count.
+
+An alternate pilot does not need a second full manuscript storyline. It still
+needs evidence ids, causal mechanism, prediction, falsifier, locked baseline and
+protocol, dataset/split/metric/evaluator, budget, seed policy, stop rules, and all
+outcome routes. Its packet must set `track_role`, current lifecycle and selection
+refs, `source_track_seed_sha256`, and `evidence_tier_ceiling=pilot_only`.
 
 Required authority fields:
 
 - selected idea fragment id
 - selected experiment idea id from `ideation/EXPERIMENT_IDEA_POOL.json`
 - pre-idea evidence gate path from `ideation/PRE_IDEA_EVIDENCE_GATE.json`
-- innovation slot map path from `ideation/INNOVATION_SLOT_MAP.json`
+- innovation slot map: for legacy PaperNexus mode use
+  `ideation/INNOVATION_SLOT_MAP.json`; for `external_material`, resolve the
+  content-addressed `innovation_slot_map_path`/`slot_map_ref` from the passed
+  pre-idea gate and verify its filename/hash/campaign binding
 - consumed innovation slot ids that explain which challenge/insight/transfer evidence drove the selected idea
 - proposal graph session path, manifest path, committed subgraph id, proposal artifact paths, and controller trace paths when the selected idea cites `proposal_session_ref`
 - innovation search contract: idea-bound mechanism, mechanism type, track id, expected effect, falsifier, ablation/confirmation requirements, and initial promotion stage
 - HPO search policy: when `mechanism_type="PARAM"` or a target sweep is planned,
   record `hpo_search_policy` in both packets using the resource-constrained DEHB
-  contract from `references/resource_constrained_dehb_policy.md`; linear/grid
-  tuning and seed-as-search-axis plans are launch blockers
+  contract from `references/resource_constrained_dehb_policy.md`; name
+  `tuning_target=baseline_calibration|mechanism_parameterization`, use bounded
+  `elastic_async` execution, and treat linear/grid tuning or seed-as-search-axis
+  plans as launch blockers
+- validation contract: `validation_stage` 0-7, prerequisite evidence refs,
+  `claim_ceiling`, project passport/index hash, execution profile id/hash,
+  innovation-delta hash, and resolved execution projection hash
 - primary method source role, neighbor transfer mechanism, target-domain anchor, and target-domain method overlap risk for the selected idea
-- paper innovation bundle with at least three mutually necessary innovation points and their source roles, evidence refs, closest-prior deltas, story roles, and validation plans
+- core scientific contribution, optional supporting contributions with
+  counterfactual necessity, and explicit validation/analysis/engineering roles
 - paper storyline with thesis, opening tension, hidden cause, method-as-resolution, proof ladder, reviewer risk/defense, and narrative spine
 - supporting idea fragment ids
 - baseline
@@ -54,6 +110,12 @@ Required authority fields:
 - dataset/code path mapping for the selected backend, including data roots, code root, output directory, checkpoint directory, and persistent artifact location
 - locked metric suite / `metric_policy`: primary metric, every protocol metric component, predeclared composite or stress metric when applicable, material-regression tolerance, candidate-support rule, and promotion rule. For protocols such as GCD with `All/Old/New`, record all components and matched deltas; `New` alone is not sufficient for candidate or promoted evidence when `All`, `Old`, composite, calibration, tail, unknown-K, or other required metrics regress or are missing.
 - stability seed policy: `stability_seed_policy.max_random_seeds <= 3`, planned seed count, planned random seeds when known, and a claim rule explaining that single-seed evidence is pilot-only unless supported by ablation/confirmation. This caps experiment random seeds and does not apply to `IDEA_TRACK_SEEDS` track candidates.
+- cross-dataset parameter policy for real method candidates: `claim_role`, live
+  program-contract ref/hash/revision, required dataset ids/roles,
+  immutable method formula/hash, parameter-role inventory,
+  `parameter_transfer_contract`, `parameter_profile_status`, and, after
+  calibration, frozen-profile ref/hash. Varying seeds at one parameter value
+  never closes parameter coverage.
 - fixed budget
 - one-variable change
 - dataset or benchmark
@@ -86,22 +148,80 @@ stability is the explicit validation question. Do not plan a fourth random seed
 for stability validation. `IDEA_TRACK_SEEDS` remain idea/track candidates and
 do not increase the random-seed budget.
 
-For `PARAM` mechanisms, also record `hpo_search_policy` at the packet top level
-or inside `innovation_search_contract`. Use
+For eligible `PARAM` mechanisms, also record `hpo_search_policy` at the packet
+top level or inside `innovation_search_contract`. Use
 `search_method="dehb_resource_constrained"` by default: a small differential
 evolution population proposes mixed continuous/discrete candidates, Hyperband
 rungs allocate low fidelity to most trials, and only the top 1-2 full-resource
 survivors may enter ablation/confirmation. The resource axis must be epochs,
 steps, or data fraction, never seed count. Read
 `references/resource_constrained_dehb_policy.md` before designing PARAM search.
+Innovation DEHB is Stage 5 and requires initial support or explicit ambiguity,
+a named sensitivity question, locked protocol, and remaining budget. A valid
+negative is ineligible. `baseline_calibration` is separate `pilot_only` work,
+may overlap Stage-2 innovation scouts, and never uses innovation Stage 5.
+
+## Track Hypothesis And Acquisition
+
+`experiment_materialize.py --track-id <id>` is an identity selector, not a label
+override: it must resolve exactly one current seed, idea, and lifecycle decision.
+Use `--all-admitted` only to materialize the current bounded portfolio. Missing,
+duplicate, parked, killed, role/lifecycle-mismatched, or relabeled identities fail
+closed. Every active `TRACK_PLAN_MATRIX.tracks[]` row must carry one falsifiable
+`hypothesis_contract`: causal signature, causal question, intervention,
+one-variable delta, mechanism, predicted pattern, falsifier, alternative
+explanation, minimum discriminating experiment, dataset-transfer assumption,
+positive/negative/inconclusive/invalid routes, belief state, and bounded scientific
+revision index. An evolved child also records `parent_track_id`,
+`derived_from_run_id`, and one `hypothesis_delta`; renaming or parameter-only
+variation does not create a new causal track.
+
+All complete admitted tracks may be planning-ready concurrently. Primary rows
+may use `claim_eligible_after_gates`; alternate and risk-repair rows are capped at
+`pilot_only`. Positive non-primary evidence routes to explicit reselection and a
+frozen matched-baseline rerun, never directly to claim promotion.
+
+Build queue proposals in this order: restore invalid evidence, resolve competing
+hypotheses, falsify the core mechanism, close a required claim, confirm
+generalization, optimize an already supported mechanism, then optional
+resource-fill diagnostics. Within one class prefer the experiment that changes
+the most current decisions, then lower cost, then an otherwise idle independent
+resource. HPO and combinations cannot outrank missing mechanism or cross-dataset
+evidence. Detailed readiness and lease fields are owned by
+`autoreskill-workflow/references/experiment_next_actions.md`.
+
+## Validation Ladder
+
+Plan the cheapest decision-changing row first and encode its stage in both
+packet and queue proposal:
+
+| Stage | Required experiment | Evidence ceiling |
+| ---: | --- | --- |
+| 0 | Static path/parser/config validation | diagnostic |
+| 1 | Active-path smoke or small-batch overfit | implementation only |
+| 2 | Minimum-dataset, one-seed, low-fidelity falsifier | `pilot_only` |
+| 3 | One-seed full-budget matched control | initial support/rejection |
+| 4 | Second target dataset | generalization/scope |
+| 5 | Sensitivity-justified DEHB | search/full-resource candidate |
+| 6 | At most three paired baseline/proposed seeds | stability/promotion |
+| 7 | Small greedy/beam combo of independently supported components | combination |
+
+Baseline calibration can run beside Stage 2, but innovation evidence remains
+screening-only until the baseline is frozen and the survivor is rerun matched.
+After initial support, Stage 4 outranks Stage 5. A valid negative follows its
+predeclared lifecycle route instead of adding seeds or parameter trials.
 
 ## Default Planning Order
 
-Run these steps before continuing the remaining experiment-plan workflow:
+Run these steps for each named admitted track before continuing the remaining
+experiment-plan workflow. Do not copy a primary packet into an alternate; shared
+baseline/protocol fields may be reused only when the alternate is genuinely
+protocol-aligned.
 
 1. Resolve the selected idea evidence import/material gate.
-   - First confirm `ideation/PRE_IDEA_EVIDENCE_GATE.json` exists with `status="passed"` and that `ideation/INNOVATION_SLOT_MAP.json` contains the slots consumed by the selected idea.
+   - First confirm `ideation/PRE_IDEA_EVIDENCE_GATE.json` exists with `status="passed"`. In legacy PaperNexus mode, verify `ideation/INNOVATION_SLOT_MAP.json`; in `external_material` mode, resolve and hash-check the gate's content-addressed `innovation_slot_map_path`/`slot_map_ref` before consuming the selected idea's slots.
    - If the gate is `status="degraded_requires_user_approval"` with valid user approval, treat the selected idea as speculative. Copy `claim_limits` and `evidence_boundary` into both planning packets, set selected-idea evidence closure as a launch blocker, and do not make novelty, SOTA, closest-prior, or formal performance claims until PaperNexus material closure succeeds.
+   - If `evidence_source_mode="external_material"`, require `external_campaign_ref`, `external_campaign_sha256`, and `external_candidate_id` throughout pool/scorecard/ledger/seeds/track/packets, and copy the selected campaign candidate's exact `protected_commitment_sha256` into both planning packets. Keep `selected_idea_fragment_id`, `track_id`, and `external_candidate_id` separate. Use `evidence_import_gate.status="not_required"`, `source_mode="external_material"`, the campaign/lint refs, an explicit reason, and `launch_blocked=false`; require `external_evidence_norms` (or `evidence_norms`) instead of `paperNexus_norms`.
    - If the idea pool was generated without the pre-idea gate, return to pre-idea evidence expansion or mark the project `legacy_requires_evidence_reconciliation`; do not silently accept metadata-only idea provenance.
    - If the selected idea has `evidence_maturity` below `plan_ready`, or `papernexus/LITERATURE_DISCOVERY_TRIAGE.json` marks selected-idea papers as `import_recommended`, use the screened `PAPER_SELECTION_SCORECARD.json` and `GRAPH_IMPORT_PLAN.json` first, then use `papernexus-remote` to import/supplement closest priors and request material or split-reading packs.
    - If the selected idea has `proposal_session_ref`, run `proposal_graph_session_lint.py`. A committed proposal graph can satisfy selected-idea source support and controller-trace evidence, but any unresolved proposal risk, missing baseline/protocol detail, or launch-blocking evidence boundary must remain in `evidence_import_gate` or prelaunch blockers.
@@ -116,7 +236,7 @@ Run these steps before continuing the remaining experiment-plan workflow:
    - Do not let later agents search for or substitute a different baseline after this field is locked. If the baseline code cannot be determined, stop and return to evidence/ideation/user input rather than filling in a convenient baseline.
 3. Decide whether the experiment should use AutoDL GPU or a locally connectable GPU.
    - Check whether the current machine or a user-provided SSH target has a usable GPU with the required CUDA/framework stack.
-   - If local/connectable GPU is adequate, set `compute_backend.backend` to `local_gpu` and record the probe evidence.
+   - If local/connectable GPU is adequate, set `compute_backend.backend` to `local_gpu` and record the probe evidence. Record the orthogonal `execution_route` in both packets and `path_mapping`: `local_gpu` permits `local`, `ssh`, or `bjtu_hpc`; `autodl_gpu` requires `autodl`. An execution route observes where a reviewed plan may run; it does not authorize launch.
    - If AutoDL is required, use `autodl-pro-gpu-api` for the lifecycle plan: check reusable instances first, default to Beijing, respect paid `--execute --allow-paid` guards, and do not fallback outside Beijing when `/root/autodl-fs` is required.
    - Planning may create a dry-run/provision handoff, but paid AutoDL creation must stay gated by the AutoDL skill and automation budget policy.
 4. Map dataset and code paths for the selected backend.
@@ -146,11 +266,28 @@ Run these steps before continuing the remaining experiment-plan workflow:
   packets and use the resource-constrained DEHB policy. Search over at most 3-6
   important dimensions, protect seed/dataset/split/baseline/metric from search,
   set rungs such as 10% -> 30% -> 100%, cap full-resource survivors at 1-2 by
-  default, and treat scout results as non-promotable pilot evidence.
+  default, and treat scout results as non-promotable pilot evidence. Materialize
+  independent scouts into the bounded next-action frontier so fitting trials can
+  execute asynchronously; concurrency reduces wall-clock time and never enlarges
+  `max_scout_trials`, `max_full_budget_trials`, or total GPU-hours.
+- For baseline calibration, search validation evidence only, record an equal or
+  shared tuning budget, and freeze the matched reproduced baseline before claim
+  promotion. Innovation scouts may overlap only as `pilot_only`; rerun any
+  survivor against the frozen baseline and matched seed set. Keep
+  `paper-report comparison not established` when reproduction remains below or
+  mismatched with the paper report.
+- Before handing off to execution, materialize a bounded ready frontier of
+  already justified baseline trials, active-track discriminators, cross-dataset
+  single-mechanism rows, controls, ablations, HPO scouts, and confirmations.
+  Do not size the scientific plan from the number of idle GPUs, exceed four
+  active track seeds, or exceed three unique random seeds per experiment family.
 - Consume the selected optimization idea from `autoreskill-ideation-panel` at `ideation/EXPERIMENT_IDEA_POOL.json`. Do not generate the pool in experiment planning.
 - Consume the selected idea's `pre_idea_evidence_gate_path`, `innovation_slot_map_path`, and `innovation_slot_refs` into both `INNOVATION_PACKET.json` and `EXPERIMENT_REVIEW_PACKET.json`.
 - Preserve the selected idea's `primary_method_source_role`, `neighbor_transfer_mechanism`, `target_domain_anchor`, and `target_domain_method_overlap_risk`. Do not rewrite a near/far-neighbor transfer idea into a target-domain-only tweak during planning.
-- Preserve the selected idea's `paper_contribution.innovation_bundle` as `paper_innovation_bundle` and its `paper_contribution.storyline` as `paper_storyline`. Do not simplify a three-innovation paper thesis into a single metric, module, or heuristic.
+- Preserve `core_scientific_contribution`, optional
+  `supporting_contributions`, and the selected primary's `paper_storyline`. Do not
+  turn a causal thesis into a metric, module, or heuristic, and do not relabel
+  validation or engineering as extra innovation.
 - Consume the selected idea's proposal graph provenance into both packets when present: `proposal_graph_session_path`, `proposal_graph_session_manifest_path`, `proposal_committed_subgraph_id`, `proposal_artifact_paths`, `proposal_controller_trace_paths`, and `proposal_evidence_export_path`.
 - If the pool is missing, malformed, or has no selected idea, return to `ideation` or `idea_gate`; do not patch around it by inventing a planning-stage pool.
 - If selected-idea evidence debt exists, PaperNexus import/material work is a hard gate, not a default downgrade path. Use `papernexus-remote` first; downgrade or launch-precondition constraints are allowed only after an MCP attempt, async queue handoff, feature-detection failure, import failure, full-text/license/budget block, or exhausted bounded retry is recorded in `evidence_import_gate`.
@@ -167,27 +304,45 @@ Run these steps before continuing the remaining experiment-plan workflow:
 - Record `idea_pool_path` as `ideation/EXPERIMENT_IDEA_POOL.json` and record the selected `selected_idea_id` in `EXPERIMENT_REVIEW_PACKET.json`.
 - Record `proposal_session_ref` from the idea pool in the innovation packet when present; do not flatten the proposal bundle into unsupported prose without artifact paths and committed subgraph id.
 - Record the innovation mechanism and promotion gate before implementation starts; no experiment may launch from a metric-only or parameter-only search unless it is tied to an idea-bound mechanism and explicitly marked `PARAM`.
-- Update all three `user_view/innovation_story/` files after the packets are internally consistent. `00_STORYLINE_DESIGN.md` should state the belief shift, three-innovation bundle, and proof ladder; `01_METHOD_INNOVATION_STORY.md` should explain where the method came from, why the transfer is legitimate, and how the innovation points depend on each other; `02_CLAIM_EVIDENCE_MAP.md` should map each innovation point to planned evidence, ablations, failure modes, and current claim limits.
-- Convert `ideation/IDEA_TRACK_SEEDS.json` into `orchestrator/TRACK_PLAN_MATRIX.json` before prelaunch lint. Keep alternates parked or blocked until their own baseline/protocol/evidence closure is explicit; do not inherit readiness from the primary track.
+- Update all three `user_view/innovation_story/` files after the packets are internally consistent. They should explain the belief shift, core contribution, method origin, optional necessary supports, proof ladder, planned evidence, falsifiers, and claim limits.
+- Convert `ideation/IDEA_TRACK_SEEDS.json` into matrix schema v3 before prelaunch
+  lint. Keep an alternate parked until it is explicitly materialized; after its
+  own baseline/protocol/evidence closure passes, allow it to become
+  planning-ready without inheriting any primary field. Legacy schema-v2 projects
+  remain primary-only until explicit materialization.
 
 ## Validation
 
 Before `autoreskill-run-experiment`, run:
 
 ```bash
-python scripts/experiment_materialize.py --project <project-root>
+python scripts/experiment_materialize.py --project <project-root> --all-admitted --dry-run
+python scripts/experiment_materialize.py --project <project-root> --all-admitted
 python scripts/track_plan_matrix.py --project <project-root>
 python scripts/track_plan_matrix.py --project <project-root> --check
+python ../autoreskill-workflow/scripts/resource_passport.py lint-project --project <project-root>
 # When the selected idea cites proposal_session_ref:
 python ../autoreskill-papernexus-innovation/scripts/proposal_graph_session_lint.py --project <project-root>
-python scripts/prelaunch_lint.py --project <project-root>
+python scripts/prelaunch_lint.py --project <project-root> --track-id <track-id>
 python scripts/innovation_lint.py --project <project-root>
 python ../autoreskill-workflow/scripts/innovation_story_lint.py --project <project-root> --stage experiment_plan
 ```
 
-`experiment_materialize.py` refuses to overwrite existing `INNOVATION_PACKET.json` or `EXPERIMENT_REVIEW_PACKET.json` unless `--force` is passed. Use `--force` only when intentionally regenerating after backing up or replacing stale plan authority; do not use it to simplify a detailed packet into a generic scaffold.
+Materialization uses canonical semantic hashes, does not rewrite unchanged
+packets, and writes top-level compatibility artifacts only for the current
+primary. A dry run reports admitted tracks, missing packet refs, rows that would
+become eligible, stale rows, and files that would be written. It never activates
+queue rows or launches work. Explicitly materializing a legacy alternate is the
+migration action; migration never changes primary selection, seeds, budgets, or
+existing queue status.
 
-The linters block launch when the reviewed packet lacks a passed/not-required evidence import gate, source-backed selected idea support, evidence boundaries, one-variable change, baseline code decision, compute backend decision, path mapping, dataset runtime plan, baseline protocol, locked dataset/eval/metric, falsifiers, stop rules, compute budget, PaperNexus norms, controller/fallback design review, or expected artifacts. They also block when the first feasibility dataset is the largest/full-scale dataset without an explicit smaller-proxy-unavailable or user-approved exception, or when a `PARAM` mechanism lacks a resource-constrained DEHB `hpo_search_policy`.
+The linters block launch when the reviewed packet lacks a defensible core
+contribution, causal identity/outcome routes, passed/not-required evidence import
+gate, source-backed selected idea support, one-variable change, locked baseline
+code/protocol/dataset/eval/metric, backend/path/runtime plan, falsifiers, stop
+rules, compute budget, or expected artifacts. They also block a large first
+dataset without an explicit exception and a `PARAM` mechanism without a
+resource-constrained DEHB policy.
 
 Read `references/experiment_review_packet_schema.md`,
 `references/resource_constrained_dehb_policy.md`, and

@@ -147,9 +147,10 @@ def build(project: str) -> dict[str, Any]:
         "reviewer_risks": reviewer_risks(projection),
         "falsifier_candidates": falsifier_candidates(base, projection),
         "idea_generation_instruction": (
-            "Generate 12-15 paper-oriented ideas from current-field pressure plus near/far-neighbor or "
-            "cross-lane transfer mechanisms. Treat target-domain-only mechanisms as baselines or ablations "
-            "unless current-field absence evidence is explicit."
+            "Generate 8-12 lightweight falsifiable causal hypotheses from current-field pressure plus "
+            "near/far-neighbor or cross-lane transfer mechanisms. Deepen only a 3-5 idea shortlist, detect "
+            "semantic duplicates by intervention-mechanism-prediction signature, and treat target-domain-only "
+            "mechanisms as baselines or ablations unless current-field absence evidence is explicit."
         ),
     }
 
